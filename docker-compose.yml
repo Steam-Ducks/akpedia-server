@@ -1,0 +1,34 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: akpedia-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-akpedia}
+      POSTGRES_USER: ${POSTGRES_USER:-akpedia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-akpedia}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-akpedia} -d ${POSTGRES_DB:-akpedia}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: akpedia-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-akpedia}
+      DB_USER: ${POSTGRES_USER:-akpedia}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-akpedia}
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
