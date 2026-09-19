@@ -16,6 +16,13 @@ spring:
         format_sql: true
     open-in-view: false
 
+  servlet:
+    multipart:
+      # Acompanha o limite do serviço de embeddings (25 MiB): recusar antes aqui evita
+      # subir o arquivo inteiro para ele devolver 413.
+      max-file-size: 25MB
+      max-request-size: 25MB
+
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -23,6 +30,20 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+
+akpedia:
+  embedding:
+    base-url: ${EMBEDDING_BASE_URL:http://localhost:8000}
+    connect-timeout: ${EMBEDDING_CONNECT_TIMEOUT:2s}
+    read-timeout: ${EMBEDDING_READ_TIMEOUT:30s}
+
+springdoc:
+  swagger-ui:
+    # /swagger-ui.html redireciona para cá; deixar explícito evita surpresa se o default mudar.
+    path: /swagger-ui.html
+    operations-sorter: method
+  api-docs:
+    path: /v3/api-docs
 
 management:
   endpoints:
