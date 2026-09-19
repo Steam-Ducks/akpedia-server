@@ -27,9 +27,9 @@ services:
       DB_USER: ${POSTGRES_USER:-akpedia}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-akpedia}
       SERVER_PORT: 8080
-      # Serviço de embeddings (akpedia-ml). Ele sobe pelo compose do próprio
-      # repositório, em outra rede: host-gateway alcança a porta que ele publica
-      # na máquina do desenvolvedor.
+      # Embedding service (akpedia-ml). It comes up through its own repository's
+      # compose, on a separate network: host-gateway reaches the port it publishes
+      # on the developer's machine.
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:8000}
       EMBEDDING_CONNECT_TIMEOUT: ${EMBEDDING_CONNECT_TIMEOUT:-2s}
       EMBEDDING_READ_TIMEOUT: ${EMBEDDING_READ_TIMEOUT:-30s}

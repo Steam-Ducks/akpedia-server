@@ -18,8 +18,8 @@ spring:
 
   servlet:
     multipart:
-      # Acompanha o limite do serviço de embeddings (25 MiB): recusar antes aqui evita
-      # subir o arquivo inteiro para ele devolver 413.
+      # Matches the embedding service's own limit (25 MiB): refusing here first
+      # avoids uploading the whole file only for it to answer 413.
       max-file-size: 25MB
       max-request-size: 25MB
 
@@ -39,7 +39,7 @@ akpedia:
 
 springdoc:
   swagger-ui:
-    # /swagger-ui.html redireciona para cá; deixar explícito evita surpresa se o default mudar.
+    # /swagger-ui.html redirects here; explicit so a changed default cannot surprise us.
     path: /swagger-ui.html
     operations-sorter: method
   api-docs:
