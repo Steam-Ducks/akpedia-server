@@ -17,7 +17,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 /**
- * Categoria de documentos. As permissoes de um usuario sao sempre relativas a uma categoria.
+ * Document category. A user's permissions are always relative to a category.
  */
 @Entity
 @Table(name = "categories")

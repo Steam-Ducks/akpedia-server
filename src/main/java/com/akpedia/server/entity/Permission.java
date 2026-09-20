@@ -8,7 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * Permissao do catalogo estatico, concedida sempre no contexto de uma categoria.
+ * Permission from the static catalog, always granted in the context of a category.
  */
 @Entity
 @Table(name = "permissions")

@@ -17,7 +17,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 /**
- * Setor da organizacao. Define quais categorias os usuarios do setor alcancam.
+ * Organizational sector. Defines which categories its users can reach.
  */
 @Entity
 @Table(name = "sectors")

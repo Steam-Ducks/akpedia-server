@@ -11,7 +11,7 @@ import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 
 /**
- * Conteudo binario do documento, isolado dos metadados em uma relacao 1:1.
+ * Binary content of a document, kept apart from its metadata in a 1:1 relation.
  */
 @Entity
 @Table(name = "document_files")

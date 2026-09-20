@@ -14,7 +14,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 /**
- * Usuario do sistema. O setor determina, indiretamente, suas permissoes por categoria.
+ * System user. The sector indirectly determines their permissions per category.
  */
 @Entity
 @Table(name = "users")

@@ -57,7 +57,7 @@
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
 
-        <!-- Suporte ao tipo vector do pgvector no Hibernate (SqlTypes.VECTOR) -->
+        <!-- pgvector type support in Hibernate (SqlTypes.VECTOR) -->
         <dependency>
             <groupId>org.hibernate.orm</groupId>
             <artifactId>hibernate-vector</artifactId>

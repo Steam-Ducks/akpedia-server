@@ -23,7 +23,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * Persistencia do documento e das entidades que dependem dele.
+ * Persistence of a document and of the entities that depend on it.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -56,7 +56,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("documento nasce com processing_status PENDING e created_at preenchido")
+    @DisplayName("a document starts with processing_status PENDING and created_at set")
     void documentDefaultsAreApplied() {
         entityManager.clear();
 
@@ -69,7 +69,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("o binario fica em document_files e volta intacto")
+    @DisplayName("the binary lives in document_files and comes back intact")
     void fileDataRoundTrips() {
         byte[] content = "conteudo binario".getBytes(StandardCharsets.UTF_8);
         entityManager.persist(new DocumentFile(document, content));
@@ -82,7 +82,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("o vetor de 1536 dimensoes volta integro do pgvector")
+    @DisplayName("the 1536-dimension vector round-trips through pgvector")
     void embeddingVectorRoundTrips() {
         float[] vector = TestFixtures.vector(0.5f);
         entityManager.persist(new Embedding(document, 0, "primeiro chunk", vector, "text-embedding-3-small", 1536));
@@ -97,7 +97,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("chunks do mesmo documento saem ordenados pelo indice")
+    @DisplayName("chunks of the same document come back ordered by index")
     void embeddingsAreOrderedByChunkIndex() {
         entityManager.persist(new Embedding(document, 2, "terceiro", TestFixtures.vector(3f), "modelo", 1536));
         entityManager.persist(new Embedding(document, 0, "primeiro", TestFixtures.vector(1f), "modelo", 1536));
@@ -111,7 +111,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("o mesmo chunk_index nao pode repetir no documento")
+    @DisplayName("the same chunk_index cannot repeat within a document")
     void duplicatedChunkIndexIsRejected() {
         embeddingRepository.saveAndFlush(new Embedding(document, 0, "a", TestFixtures.vector(1f), "modelo", 1536));
         Embedding duplicated = new Embedding(document, 0, "b", TestFixtures.vector(2f), "modelo", 1536);
@@ -121,7 +121,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("chunk_index negativo viola o CHECK do banco")
+    @DisplayName("a negative chunk_index violates the database CHECK")
     void negativeChunkIndexIsRejected() {
         Embedding invalid = new Embedding(document, -1, "invalido", TestFixtures.vector(1f), "modelo", 1536);
 
@@ -130,7 +130,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("file_size zerado viola o CHECK do banco")
+    @DisplayName("a zero file_size violates the database CHECK")
     void nonPositiveFileSizeIsRejected() {
         document.setFileSize(0L);
 
@@ -139,7 +139,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("audit_logs grava details como JSONB")
+    @DisplayName("audit_logs stores details as JSONB")
     void auditLogStoresJsonDetails() {
         AuditLog log = new AuditLog(document.getCreator(), "DOCUMENT_CREATED", "Document", document.getId());
         log.setDetails("{\"origem\":\"teste\",\"campos\":[\"name\"]}");
@@ -155,7 +155,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("audit_logs aceita acao sem usuario associado")
+    @DisplayName("audit_logs accepts an action with no associated user")
     void auditLogAllowsNullUser() {
         AuditLog log = new AuditLog(null, "SYSTEM_STARTUP", null, null);
         entityManager.persist(log);
@@ -166,7 +166,7 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("busca de documentos por status e por status de processamento")
+    @DisplayName("finds documents by status and by processing status")
     void findsByStatusAndProcessingStatus() {
         entityManager.flush();
         entityManager.clear();

@@ -11,8 +11,8 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 /**
- * Garante que a migration V2 entregou o schema que as entidades assumem.
- * Complementa o ddl-auto: validate, que so verifica colunas e tipos.
+ * Asserts that migration V2 delivered the schema the entities assume.
+ * Complements ddl-auto: validate, which only checks columns and types.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -25,7 +25,7 @@ class SchemaMigrationTest {
     private PermissionRepository permissionRepository;
 
     @Test
-    @DisplayName("a extensao pgvector esta habilitada")
+    @DisplayName("the pgvector extension is enabled")
     void vectorExtensionIsInstalled() {
         Object count = entityManager
                 .createNativeQuery("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")
@@ -35,7 +35,7 @@ class SchemaMigrationTest {
     }
 
     @Test
-    @DisplayName("o catalogo de permissoes foi populado pela migration")
+    @DisplayName("the permission catalog was seeded by the migration")
     void permissionCatalogIsSeeded() {
         List<String> names = permissionRepository.findAll().stream()
                 .map(permission -> permission.getName())
@@ -50,7 +50,7 @@ class SchemaMigrationTest {
     }
 
     @Test
-    @DisplayName("embeddings.vector tem dimensao fixa e indice HNSW")
+    @DisplayName("embeddings.vector has a fixed dimension and an HNSW index")
     void embeddingVectorColumnIsIndexed() {
         Object columnType = entityManager.createNativeQuery(
                         "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
@@ -67,7 +67,7 @@ class SchemaMigrationTest {
     }
 
     @Test
-    @DisplayName("o CHECK de status cobre exatamente os valores do enum DocumentStatus")
+    @DisplayName("the status CHECK covers exactly the DocumentStatus enum values")
     void documentStatusCheckMatchesEnum() {
         Object definition = entityManager.createNativeQuery(
                         "SELECT pg_get_constraintdef(oid) FROM pg_constraint "

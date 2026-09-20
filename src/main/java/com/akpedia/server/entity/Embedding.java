@@ -16,14 +16,14 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * Chunk de texto de um documento com seu vetor de embedding.
- * A dimensao e fixa em 1536 para permitir o indice HNSW criado na migration V2.
+ * Text chunk of a document along with its embedding vector.
+ * The dimension is pinned to 1536 so the HNSW index created in migration V2 can be used.
  */
 @Entity
 @Table(name = "embeddings")
 public class Embedding {
 
-    /** Dimensao do vetor, espelhando VECTOR(1536) na migration V2. */
+    /** Vector dimension, mirroring VECTOR(1536) in migration V2. */
     public static final int VECTOR_DIMENSIONS = 1536;
 
     @Id

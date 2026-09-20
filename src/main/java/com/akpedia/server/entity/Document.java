@@ -18,8 +18,8 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 /**
- * Metadados do documento. O conteudo binario fica em {@link DocumentFile},
- * para que listagens nao carreguem o blob.
+ * Document metadata. The binary content lives in {@link DocumentFile},
+ * so listing queries never load the blob.
  */
 @Entity
 @Table(name = "documents")

@@ -17,7 +17,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * Cadeia de autorizacao do modelo: usuario -> setor -> categorias -> permissoes.
+ * Authorization chain of the model: user -> sector -> categories -> permissions.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -36,7 +36,7 @@ class AccessModelTest {
     private PermissionRepository permissionRepository;
 
     @Test
-    @DisplayName("o setor de um usuario chega ate as permissoes das suas categorias")
+    @DisplayName("a user's sector reaches the permissions of its categories")
     void permissionsAreReachableFromTheUserSector() {
         Permission approve = permissionRepository.findByName("DOCUMENT_APPROVE").orElseThrow();
         Permission view = permissionRepository.findByName("DOCUMENT_VIEW").orElseThrow();
@@ -61,7 +61,7 @@ class AccessModelTest {
     }
 
     @Test
-    @DisplayName("busca de usuario por email")
+    @DisplayName("finds a user by email")
     void findsUserByEmail() {
         Sector sector = entityManager.persist(TestFixtures.sector());
         User user = entityManager.persist(TestFixtures.user(sector));
@@ -74,7 +74,7 @@ class AccessModelTest {
     }
 
     @Test
-    @DisplayName("email duplicado viola a restricao UNIQUE")
+    @DisplayName("a duplicate email violates the UNIQUE constraint")
     void duplicatedEmailIsRejected() {
         Sector sector = entityManager.persist(TestFixtures.sector());
         User first = entityManager.persist(TestFixtures.user(sector));
@@ -88,7 +88,7 @@ class AccessModelTest {
     }
 
     @Test
-    @DisplayName("usuario nasce ativo")
+    @DisplayName("a user starts out active")
     void userIsActiveByDefault() {
         Sector sector = entityManager.persist(TestFixtures.sector());
         User user = entityManager.persist(TestFixtures.user(sector));
@@ -99,7 +99,7 @@ class AccessModelTest {
     }
 
     @Test
-    @DisplayName("setor duplicado viola a restricao UNIQUE do nome")
+    @DisplayName("a duplicate sector name violates the UNIQUE constraint")
     void duplicatedSectorNameIsRejected() {
         Sector first = entityManager.persist(TestFixtures.sector());
         entityManager.flush();
@@ -111,7 +111,7 @@ class AccessModelTest {
     }
 
     @Test
-    @DisplayName("busca de setor por nome")
+    @DisplayName("finds a sector by name")
     void findsSectorByName() {
         Sector sector = entityManager.persist(TestFixtures.sector());
         entityManager.flush();

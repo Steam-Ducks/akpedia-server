@@ -1,12 +1,12 @@
--- Schema core do Akpedia: setores, categorias, permissões, usuários,
--- documentos, chunks/embeddings e auditoria.
--- A imagem usada em dev e CI é pgvector/pgvector:pg16, mas a extensão
--- precisa ser habilitada explicitamente em cada banco.
+-- Akpedia core schema: sectors, categories, permissions, users,
+-- documents, chunks/embeddings and audit trail.
+-- Dev and CI run the pgvector/pgvector:pg16 image, but the extension
+-- still has to be enabled explicitly on each database.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
 ----------------------------------------------------------------------
--- SETORES
+-- SECTORS
 ----------------------------------------------------------------------
 
 CREATE TABLE sectors (
@@ -18,7 +18,7 @@ CREATE TABLE sectors (
 );
 
 ----------------------------------------------------------------------
--- CATEGORIAS
+-- CATEGORIES
 ----------------------------------------------------------------------
 
 CREATE TABLE categories (
@@ -30,7 +30,7 @@ CREATE TABLE categories (
 );
 
 ----------------------------------------------------------------------
--- PERMISSÕES (catálogo estático)
+-- PERMISSIONS (static catalog)
 ----------------------------------------------------------------------
 
 CREATE TABLE permissions (
@@ -40,7 +40,7 @@ CREATE TABLE permissions (
 );
 
 ----------------------------------------------------------------------
--- PERMISSÕES DAS CATEGORIAS
+-- CATEGORY PERMISSIONS
 ----------------------------------------------------------------------
 
 CREATE TABLE category_permissions (
@@ -58,7 +58,7 @@ CREATE INDEX ix_category_permissions_permission_id
     ON category_permissions (permission_id);
 
 ----------------------------------------------------------------------
--- CATEGORIAS DISPONÍVEIS POR SETOR
+-- CATEGORIES AVAILABLE PER SECTOR
 ----------------------------------------------------------------------
 
 CREATE TABLE sector_categories (
@@ -76,7 +76,7 @@ CREATE INDEX ix_sector_categories_category_id
     ON sector_categories (category_id);
 
 ----------------------------------------------------------------------
--- USUÁRIOS
+-- USERS
 ----------------------------------------------------------------------
 
 CREATE TABLE users (
@@ -95,7 +95,7 @@ CREATE TABLE users (
 CREATE INDEX ix_users_sector_id ON users (sector_id);
 
 ----------------------------------------------------------------------
--- DOCUMENTOS (metadados; o binário fica em document_files)
+-- DOCUMENTS (metadata; the binary lives in document_files)
 ----------------------------------------------------------------------
 
 CREATE TABLE documents (
@@ -135,7 +135,7 @@ CREATE INDEX ix_documents_status ON documents (status);
 CREATE INDEX ix_documents_processing_status ON documents (processing_status);
 
 ----------------------------------------------------------------------
--- BINÁRIO DO DOCUMENTO (1:1)
+-- DOCUMENT BINARY (1:1)
 ----------------------------------------------------------------------
 
 CREATE TABLE document_files (
@@ -167,12 +167,12 @@ CREATE TABLE embeddings (
         CHECK (chunk_index >= 0)
 );
 
--- Similaridade de cosseno é o padrão para embeddings de texto normalizados.
+-- Cosine similarity is the default for normalized text embeddings.
 CREATE INDEX ix_embeddings_vector
     ON embeddings USING hnsw (vector vector_cosine_ops);
 
 ----------------------------------------------------------------------
--- AUDITORIA
+-- AUDIT TRAIL
 ----------------------------------------------------------------------
 
 CREATE TABLE audit_logs (
@@ -183,7 +183,7 @@ CREATE TABLE audit_logs (
     entity_id   BIGINT,
     details     JSONB,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    -- SET NULL preserva a trilha de auditoria quando o usuário é removido.
+    -- SET NULL preserves the audit trail when the user is removed.
     CONSTRAINT fk_audit_logs_user_id
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
 );
@@ -192,7 +192,7 @@ CREATE INDEX ix_audit_logs_user_id ON audit_logs (user_id);
 CREATE INDEX ix_audit_logs_created_at ON audit_logs (created_at);
 
 ----------------------------------------------------------------------
--- CATÁLOGO DE PERMISSÕES
+-- PERMISSION CATALOG
 ----------------------------------------------------------------------
 
 INSERT INTO permissions (name, description) VALUES

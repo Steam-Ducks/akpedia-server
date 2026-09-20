@@ -15,8 +15,8 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * Registro de auditoria. O usuario e opcional: a FK usa ON DELETE SET NULL
- * para preservar a trilha mesmo apos a remocao do usuario.
+ * Audit trail entry. The user is optional: the FK uses ON DELETE SET NULL
+ * so the trail survives the removal of the user.
  */
 @Entity
 @Table(name = "audit_logs")
@@ -39,7 +39,7 @@ public class AuditLog {
     @Column(name = "entity_id")
     private Long entityId;
 
-    /** JSON serializado pela camada de servico. */
+    /** JSON serialized by the service layer. */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "details")
     private String details;

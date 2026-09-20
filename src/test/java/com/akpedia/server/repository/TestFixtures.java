@@ -8,8 +8,8 @@ import com.akpedia.server.entity.enums.DocumentStatus;
 import java.util.UUID;
 
 /**
- * Fabricas de dados para os testes de persistencia.
- * Os nomes recebem sufixo aleatorio porque name e email sao UNIQUE no schema.
+ * Data factories for the persistence tests.
+ * Names get a random suffix because name and email are UNIQUE in the schema.
  */
 final class TestFixtures {
 
@@ -36,7 +36,7 @@ final class TestFixtures {
         return new Document(unique("documento") + ".pdf", "application/pdf", 1024L, category, creator, DocumentStatus.DRAFT);
     }
 
-    /** Vetor com a dimensao exata exigida pela coluna vector(1536). */
+    /** Vector with the exact dimension required by the vector(1536) column. */
     static float[] vector(float seed) {
         float[] values = new float[com.akpedia.server.entity.Embedding.VECTOR_DIMENSIONS];
         for (int i = 0; i < values.length; i++) {
