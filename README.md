@@ -69,6 +69,10 @@ akpedia-server/
     ├── main/
     │   ├── java/com/akpedia/server/
     │   │   ├── AkpediaServerApplication.java # classe main @SpringBootApplication
+    │   │   ├── controller/HealthController.java # endpoint /health simples
+    │   │   ├── entity/ # entidades JPA do schema core
+    │   │   │   └── enums/ # DocumentStatus, ProcessingStatus
+    │   │   └── repository/ # interfaces Spring Data JPA
     │   │   ├── client/ # clientes HTTP de serviços externos
     │   │   │   └── EmbeddingClient.java
     │   │   ├── config/ # beans de configuração e @ConfigurationProperties
@@ -93,7 +97,9 @@ akpedia-server/
     │   │       └── EmbeddingRejectedException.java
     │   └── resources/
     │       ├── application.yml
-    │       └── db/migration/V1__init.sql # migração inicial Flyway
+    │       └── db/migration/
+    │           ├── V1__init.sql # migração inicial Flyway
+    │           └── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
@@ -298,6 +304,11 @@ simples é subir só o banco via Docker:
 docker compose up -d db # sobe apenas o Postgres
 ./mvnw test # roda os testes
 ```
+
+> O schema usa a extensão **pgvector** (tabela `embeddings`, coluna `vector(1536)`). A imagem
+> `pgvector/pgvector:pg16` do `docker-compose.yml` já a disponibiliza, e a migration `V2` roda
+> `CREATE EXTENSION IF NOT EXISTS vector`. Se o banco local for anterior à `V2`, recrie-o com
+> `docker compose down -v && docker compose up -d db`.
 
 ### Lint (Checkstyle)
 
