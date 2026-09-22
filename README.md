@@ -74,40 +74,58 @@ akpedia-server/
     │   │   │   └── enums/ # DocumentStatus, ProcessingStatus
     │   │   └── repository/ # interfaces Spring Data JPA
     │   │   ├── client/ # clientes HTTP de serviços externos
-    │   │   │   └── EmbeddingClient.java
+    │   │   │   ├── EmbeddingClient.java
+    │   │   │   └── GotenbergClient.java # conversão de documentos para PDF
     │   │   ├── config/ # beans de configuração e @ConfigurationProperties
     │   │   │   ├── EmbeddingClientConfig.java
     │   │   │   ├── EmbeddingProperties.java
+    │   │   │   ├── GotenbergClientConfig.java
+    │   │   │   ├── GotenbergProperties.java
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
+    │   │   │   ├── DocumentController.java # upload de documentos
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
     │   │   ├── dto/ # objetos de transporte
     │   │   │   ├── DocumentEmbeddingResponse.java
     │   │   │   ├── DocumentChunk.java
+    │   │   │   ├── DocumentUploadResponse.java
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
     │   │   │   ├── EmbeddingErrorResponse.java
     │   │   │   └── ApiErrorResponse.java
-    │   │   └── exception/
-    │   │       ├── ApiExceptionHandler.java # traduz falhas em status HTTP
-    │   │       ├── EmbeddingException.java
-    │   │       ├── EmbeddingUnavailableException.java
-    │   │       └── EmbeddingRejectedException.java
+    │   │   ├── exception/
+    │   │   │   ├── ApiExceptionHandler.java # traduz falhas em status HTTP
+    │   │   │   ├── EmbeddingException.java
+    │   │   │   ├── EmbeddingUnavailableException.java
+    │   │   │   ├── EmbeddingRejectedException.java
+    │   │   │   ├── CategoryNotFoundException.java
+    │   │   │   ├── UserNotFoundException.java
+    │   │   │   ├── InvalidDocumentUploadException.java
+    │   │   │   ├── PdfConversionException.java
+    │   │   │   ├── PdfConversionUnavailableException.java
+    │   │   │   └── PdfConversionRejectedException.java
+    │   │   └── service/
+    │   │       └── DocumentUploadService.java # orquestra conversão + persistência + indexação
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
     │           ├── V1__init.sql # migração inicial Flyway
-    │           └── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
+    │           ├── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
+    │           └── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
-        │   └── EmbeddingControllerTest.java # tradução de falhas em status HTTP
+        │   ├── EmbeddingControllerTest.java # tradução de falhas em status HTTP
+        │   └── DocumentControllerTest.java # idem, para o upload de documentos
+        ├── service/
+        │   └── DocumentUploadServiceTest.java # regras de upload com os colaboradores mockados
         └── client/
             ├── EmbeddingClientTest.java # serviço mockado: contrato e erros
             ├── EmbeddingClientTimeoutTest.java # timeouts reais, sem mock de transporte
-            └── EmbeddingClientManualIT.java # teste manual contra um ml de verdade
+            ├── EmbeddingClientManualIT.java # teste manual contra um ml de verdade
+            └── GotenbergClientTest.java # serviço mockado: contrato e erros
 ```
 
 ---
@@ -137,6 +155,23 @@ em outra rede Docker.
 
 > Se o akpedia-ml estiver rodando direto na máquina (`uvicorn`) e escutando só em `127.0.0.1`,
 > o container não o alcança. Suba-o pelo Docker ou publique-o em `0.0.0.0`.
+
+### Conversão de documentos (Gotenberg)
+
+| Variável                     | Default                  | Para que serve                       |
+|-------------------------------|--------------------------|--------------------------------------|
+| `GOTENBERG_BASE_URL`         | `http://localhost:3000`  | URL base do Gotenberg                |
+| `GOTENBERG_CONNECT_TIMEOUT`  | `5s`                     | Tempo máximo para abrir a conexão    |
+| `GOTENBERG_READ_TIMEOUT`     | `90s`                    | Tempo máximo para a conversão voltar |
+
+O `POST /api/v1/documents` converte o arquivo enviado para PDF através do
+[Gotenberg](https://gotenberg.dev/) (que usa um LibreOffice headless por baixo) antes de
+salvar. No `docker-compose.yml` ele sobe como serviço `gotenberg` (imagem `gotenberg/gotenberg:8`)
+e o default já aponta para `http://gotenberg:3000`. Rodando fora do Docker, suba-o à parte:
+
+```bash
+docker run --rm -p 3000:3000 gotenberg/gotenberg:8
+```
 
 ---
 
@@ -205,29 +240,12 @@ porta de saída para o serviço de embeddings:
 | `embedDocument(byte[] content, String filename, String contentType)` | extrai, divide em chunks e gera um vetor por chunk |
 | `embedQuery(String text)`                                           | gera o vetor do texto buscado                      |
 
-```java
-@Service
-public class IndexingService {
-
-    private final EmbeddingClient embeddings;
-
-    public IndexingService(EmbeddingClient embeddings) {
-        this.embeddings = embeddings;
-    }
-
-    public void index(byte[] pdf) {
-        try {
-            DocumentEmbeddingResponse processed = embeddings.embedDocument(pdf, "manual.pdf", "application/pdf");
-            // processed.chunks() traz index, text e embedding de cada trecho
-        } catch (EmbeddingUnavailableException e) {
-            // não houve resposta: fora do ar ou além do timeout — vale repetir depois
-        } catch (EmbeddingRejectedException e) {
-            // houve recusa: e.getCode() é estável ("unsupported_format", ...)
-        }
-    }
-
-}
-```
+Quem usa o `EmbeddingClient` hoje é o
+[`DocumentUploadService`](src/main/java/com/akpedia/server/service/DocumentUploadService.java),
+logo depois de salvar o documento e o PDF: para cada `DocumentChunk` da resposta, salva um
+`Embedding`; se o cliente lançar `EmbeddingException` (fora do ar, recusado, ou algo ilegível),
+o `catch` marca o documento como `processing_status: FAILED` com o motivo em `processing_error`
+em vez de desfazer o upload — ver [Documentos](#documentos) para a rota completa.
 
 Toda falha sai como `EmbeddingException`, com mensagem que nomeia a rota e o que estava sendo feito:
 
@@ -279,6 +297,73 @@ ar, e não precisa de nada rodando. Para ver o **timeout** em vez da conexão re
 
 ---
 
+## Documentos
+
+### Endpoint
+
+`POST /api/v1/documents` recebe um arquivo em qualquer formato que o Gotenberg saiba abrir
+(docx, xlsx, pptx, odt, rtf, imagens, texto puro...), converte para PDF e salva. Um PDF
+enviado passa direto, sem reconversão — o binário salvo é sempre o PDF resultante, o formato
+original não é retido.
+
+Depois de salvo, o PDF é enviado ao **akpedia-ml** (mesma rota que `POST /api/v1/documents/embed`
+chama) para virar chunks com vetores, que ficam em `embeddings`. Essa etapa não é obrigatória
+para a resposta ser 201: uma falha nela (akpedia-ml fora do ar, por exemplo) só deixa o
+documento com `processing_status: FAILED` e o motivo em `processing_error` — o documento e o
+PDF já estavam salvos antes dela rodar, então nada se perde e dá para reindexar depois. Só a
+conversão para PDF é obrigatória; se ela falhar, nada é salvo (ver status de erro abaixo).
+
+| Campo (multipart) | Obrigatório | Descrição                                             |
+|--------------------|:-----------:|--------------------------------------------------------|
+| `file`             | sim         | arquivo a enviar                                        |
+| `categoryId`       | sim         | id de uma categoria existente                            |
+| `creatorId`        | sim         | id de um usuário existente                               |
+| `name`             | não         | nome do documento; default é o nome do arquivo com `.pdf` |
+| `description`      | não         | descrição livre                                          |
+
+```bash
+curl -X POST localhost:8080/api/v1/documents \
+  -F "file=@relatorio.docx" \
+  -F "categoryId=1" \
+  -F "creatorId=1"
+```
+
+A resposta traz só metadados — o PDF em si não volta no corpo:
+
+```json
+{
+  "id": 1,
+  "name": "relatorio.pdf",
+  "description": null,
+  "mime_type": "application/pdf",
+  "file_size": 48213,
+  "category_id": 1,
+  "creator_id": 1,
+  "status": "DRAFT",
+  "processing_status": "COMPLETED",
+  "processing_error": null,
+  "created_at": "2026-09-21T20:24:00Z"
+}
+```
+
+`processing_status` vem `COMPLETED` quando a indexação no akpedia-ml deu certo, ou `FAILED`
+(com o motivo em `processing_error`) quando não deu — nos dois casos a resposta é 201, porque
+o documento e o PDF já foram salvos antes dessa etapa rodar.
+
+#### Status de erro
+
+| Situação                                  | Status | `code`                        |
+|--------------------------------------------|--------|-------------------------------|
+| arquivo vazio, ou parâmetro ausente/inválido | 400    | `invalid_request`             |
+| categoria informada não existe              | 404    | `category_not_found`          |
+| usuário informado não existe                | 404    | `user_not_found`               |
+| arquivo acima de 25 MB                      | 413    | `file_too_large`              |
+| Gotenberg recebeu mas recusou o arquivo     | 422    | `pdf_conversion_rejected`     |
+| Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
+| **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
+
+---
+
 ## Comandos úteis
 
 ```bash
@@ -305,7 +390,8 @@ docker compose up -d db # sobe apenas o Postgres
 ./mvnw test # roda os testes
 ```
 
-> O schema usa a extensão **pgvector** (tabela `embeddings`, coluna `vector(1536)`). A imagem
+> O schema usa a extensão **pgvector** (tabela `embeddings`, coluna `vector(384)`, dimensão do
+> modelo `intfloat/multilingual-e5-small` do akpedia-ml). A imagem
 > `pgvector/pgvector:pg16` do `docker-compose.yml` já a disponibiliza, e a migration `V2` roda
 > `CREATE EXTENSION IF NOT EXISTS vector`. Se o banco local for anterior à `V2`, recrie-o com
 > `docker compose down -v && docker compose up -d db`.

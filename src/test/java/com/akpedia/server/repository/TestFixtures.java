@@ -36,7 +36,7 @@ final class TestFixtures {
         return new Document(unique("documento") + ".pdf", "application/pdf", 1024L, category, creator, DocumentStatus.DRAFT);
     }
 
-    /** Vector with the exact dimension required by the vector(1536) column. */
+    /** Vector with the exact dimension required by the embeddings.vector column. */
     static float[] vector(float seed) {
         float[] values = new float[com.akpedia.server.entity.Embedding.VECTOR_DIMENSIONS];
         for (int i = 0; i < values.length; i++) {

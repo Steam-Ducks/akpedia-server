@@ -17,14 +17,15 @@ import org.hibernate.type.SqlTypes;
 
 /**
  * Text chunk of a document along with its embedding vector.
- * The dimension is pinned to 1536 so the HNSW index created in migration V2 can be used.
+ * The dimension is pinned to 384, matching akpedia-ml's model, so the HNSW index created
+ * in migration V3 can be used.
  */
 @Entity
 @Table(name = "embeddings")
 public class Embedding {
 
-    /** Vector dimension, mirroring VECTOR(1536) in migration V2. */
-    public static final int VECTOR_DIMENSIONS = 1536;
+    /** Vector dimension, mirroring VECTOR(384) in migration V3 (intfloat/multilingual-e5-small). */
+    public static final int VECTOR_DIMENSIONS = 384;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

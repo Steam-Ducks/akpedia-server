@@ -11,7 +11,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 /**
- * Asserts that migration V2 delivered the schema the entities assume.
+ * Asserts that migrations V2/V3 delivered the schema the entities assume.
  * Complements ddl-auto: validate, which only checks columns and types.
  */
 @DataJpaTest
@@ -62,7 +62,7 @@ class SchemaMigrationTest {
                                 + "AND indexname = 'ix_embeddings_vector'")
                 .getSingleResult();
 
-        assertThat(columnType.toString()).isEqualTo("vector(1536)");
+        assertThat(columnType.toString()).isEqualTo("vector(384)");
         assertThat(indexDefinition.toString()).contains("hnsw").contains("vector_cosine_ops");
     }
 

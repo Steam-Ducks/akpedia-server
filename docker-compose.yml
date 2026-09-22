@@ -16,12 +16,20 @@ services:
       timeout: 5s
       retries: 5
 
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: akpedia-gotenberg
+    ports:
+      - "3000:3000"
+
   app:
     build: .
     container_name: akpedia-app
     depends_on:
       db:
         condition: service_healthy
+      gotenberg:
+        condition: service_started
     environment:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-akpedia}
       DB_USER: ${POSTGRES_USER:-akpedia}
@@ -33,6 +41,11 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:8000}
       EMBEDDING_CONNECT_TIMEOUT: ${EMBEDDING_CONNECT_TIMEOUT:-2s}
       EMBEDDING_READ_TIMEOUT: ${EMBEDDING_READ_TIMEOUT:-30s}
+      # Gotenberg (document to PDF conversion). Comes up as the sibling service above,
+      # reached by its service name on the compose network.
+      GOTENBERG_BASE_URL: ${GOTENBERG_BASE_URL:-http://gotenberg:3000}
+      GOTENBERG_CONNECT_TIMEOUT: ${GOTENBERG_CONNECT_TIMEOUT:-5s}
+      GOTENBERG_READ_TIMEOUT: ${GOTENBERG_READ_TIMEOUT:-90s}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
