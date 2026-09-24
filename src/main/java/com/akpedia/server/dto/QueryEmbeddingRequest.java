@@ -11,6 +11,6 @@ import jakarta.validation.constraints.NotBlank;
  */
 public record QueryEmbeddingRequest(
         @NotBlank
-        @Schema(description = "Texto buscado.", example = "qual e o prazo de garantia do equipamento?")
+        @Schema(description = "Search text.", example = "what is the equipment warranty period?")
         String text) {
 }

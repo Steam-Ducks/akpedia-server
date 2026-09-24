@@ -24,9 +24,8 @@ public class OpenApiConfig {
                 .description("""
                         Backend do Akpedia.
 
-                        As rotas de embedding repassam a chamada ao serviço de embeddings (akpedia-ml)
-                        e devolvem a resposta inteira -- nada é persistido ainda. Se elas responderem
-                        503, é esse serviço que está fora do ar."""));
+                        The embedding routes forward requests to the akpedia-ml embedding service
+                        and return its complete response. A 503 means that service is unavailable."""));
     }
 
 }

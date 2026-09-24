@@ -34,7 +34,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1")
-@Tag(name = "Embeddings", description = "Transforma documentos e buscas em vetores comparáveis entre si.")
+@Tag(name = "Embeddings", description = "Transforms documents and searches into comparable vectors.")
 public class EmbeddingController {
 
     private static final String ERROR_SCHEMA = "application/json";
@@ -47,21 +47,21 @@ public class EmbeddingController {
 
     /** Extracts, chunks and embeds an uploaded document. */
     @Operation(
-            summary = "Transforma um documento em chunks com vetores",
+            summary = "Transform a document into chunks with vectors",
             description = """
-                    Envia o arquivo ao serviço de embeddings, que extrai o texto, divide em trechos
-                    e devolve um vetor por trecho. Hoje só PDF é aceito; o limite é 25 MB.""")
+                    Sends the file to the embedding service, which extracts the text, splits it into chunks,
+                    and returns one vector per chunk. Only PDF is currently accepted; the limit is 25 MB.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Documento processado."),
-        @ApiResponse(responseCode = "413", description = "Arquivo maior que o limite aceito.",
+        @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "415", description = "Formato não suportado.",
+        @ApiResponse(responseCode = "415", description = "Unsupported format.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "422", description = "Arquivo ilegível ou sem texto extraível.",
+        @ApiResponse(responseCode = "422", description = "Unreadable file or no extractable text.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "502", description = "O serviço de embeddings respondeu algo inesperado.",
+        @ApiResponse(responseCode = "502", description = "The embedding service returned an unexpected response.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "503", description = "O serviço de embeddings está fora do ar.",
+        @ApiResponse(responseCode = "503", description = "The embedding service is unavailable.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @PostMapping(path = "/documents/embed", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -74,19 +74,19 @@ public class EmbeddingController {
 
     /** Embeds a search text into a vector comparable to the document chunks'. */
     @Operation(
-            summary = "Transforma um texto de busca em vetor",
+            summary = "Transform search text into a vector",
             description = """
-                    Devolve o vetor do texto buscado, na mesma largura e produzido pelo mesmo modelo
-                    dos chunks -- é o que permite comparar os dois por similaridade de cosseno.""")
+                    Returns the search text vector with the same dimensions and model as the chunks,
+                    which makes cosine similarity comparisons possible.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Texto vetorizado."),
-        @ApiResponse(responseCode = "400", description = "Texto em branco; recusado antes de chamar o serviço.",
+        @ApiResponse(responseCode = "200", description = "Text converted into a vector."),
+        @ApiResponse(responseCode = "400", description = "Blank text; rejected before calling the service.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "422", description = "Texto recusado pelo serviço (vazio ou longo demais).",
+        @ApiResponse(responseCode = "422", description = "Text rejected by the service (empty or too long).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "502", description = "O serviço de embeddings respondeu algo inesperado.",
+        @ApiResponse(responseCode = "502", description = "The embedding service returned an unexpected response.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "503", description = "O serviço de embeddings está fora do ar.",
+        @ApiResponse(responseCode = "503", description = "The embedding service is unavailable.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @PostMapping(path = "/embeddings/query", consumes = MediaType.APPLICATION_JSON_VALUE)

@@ -97,6 +97,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
     }
 
+    /** 400: the search text or result limit is invalid. */
+    @ExceptionHandler(InvalidSearchRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidSearch(InvalidSearchRequestException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
     /** 404: the category named in a document upload does not exist. */
     @ExceptionHandler(CategoryNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleCategoryNotFound(CategoryNotFoundException e) {

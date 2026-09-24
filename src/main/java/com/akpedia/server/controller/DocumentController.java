@@ -34,7 +34,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  */
 @RestController
 @RequestMapping("/api/v1")
-@Tag(name = "Documents", description = "Upload de documentos: converte para PDF, salva e indexa no akpedia-ml.")
+@Tag(name = "Documents", description = "Document upload: convert to PDF, store, and index with akpedia-ml.")
 public class DocumentController {
 
     private static final String ERROR_SCHEMA = "application/json";
@@ -46,36 +46,36 @@ public class DocumentController {
     }
 
     @Operation(
-            summary = "Envia um documento, convertendo-o para PDF e indexando no akpedia-ml",
+            summary = "Upload a document, convert it to PDF, and index it with akpedia-ml",
             description = """
-                    Aceita qualquer formato que o Gotenberg saiba converter via LibreOffice (docx, xlsx,
-                    pptx, odt, rtf, imagens, texto puro...). Um PDF enviado passa direto, sem reconversão.
-                    O binário salvo é sempre o PDF resultante -- o formato original não é retido.
+                    Accepts any format Gotenberg can convert through LibreOffice (docx, xlsx, pptx, odt, rtf,
+                    images, plain text...). Uploaded PDFs are stored directly without reconversion.
+                    The stored binary is always the resulting PDF; the original format is not retained.
 
-                    Depois de salvo, o PDF é enviado ao akpedia-ml para gerar os embeddings, que ficam em
-                    `embeddings`. Uma falha nessa etapa não desfaz o upload: o documento já salvo fica
-                    com `processing_status: FAILED` e o motivo em `processing_error`, para tentar de novo
-                    mais tarde -- só a conversão para PDF é obrigatória para a resposta ser 201.""")
+                    After storage, the PDF is sent to akpedia-ml to generate embeddings, which are stored in
+                    `embeddings`. A failure at this stage does not undo the upload: the stored document keeps
+                    `processing_status: FAILED` and the reason in `processing_error` for a later retry.
+                    Only PDF conversion is required for a 201 response.""")
     @ApiResponses({
         @ApiResponse(responseCode = "201",
-                description = "Documento convertido e salvo; processing_status indica se a indexação no akpedia-ml deu certo."),
-        @ApiResponse(responseCode = "400", description = "Requisição inválida (arquivo vazio, parâmetro ausente ou inválido).",
+                description = "Document converted and stored; processing_status indicates whether akpedia-ml indexing succeeded."),
+        @ApiResponse(responseCode = "400", description = "Invalid request (empty file, missing parameter, or invalid parameter).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "Categoria ou usuário informado não existe.",
+        @ApiResponse(responseCode = "404", description = "The specified category or user does not exist.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "413", description = "Arquivo maior que o limite aceito.",
+        @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "422", description = "O Gotenberg recebeu o arquivo, mas recusou a conversão.",
+        @ApiResponse(responseCode = "422", description = "Gotenberg received the file but rejected the conversion.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "502", description = "O Gotenberg respondeu algo inesperado.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "503", description = "O Gotenberg está fora do ar.",
+        @ApiResponse(responseCode = "503", description = "Gotenberg is unavailable.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @PostMapping(path = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<DocumentUploadResponse> upload(
             @RequestPart("file")
-            @Schema(type = "string", format = "binary", description = "Arquivo a enviar, em qualquer formato suportado.")
+            @Schema(type = "string", format = "binary", description = "File to upload in any supported format.")
             MultipartFile file,
             @RequestParam("categoryId") Long categoryId,
             @RequestParam("creatorId") Long creatorId,
