@@ -92,7 +92,7 @@ public class DocumentUploadService {
     public Document upload(byte[] content, String filename, String contentType,
             Long categoryId, Long creatorId, String name, String description) {
         if (content == null || content.length == 0) {
-            throw new InvalidDocumentUploadException("O arquivo enviado esta vazio.");
+            throw new InvalidDocumentUploadException("The uploaded file is empty.");
         }
 
         Category category = categories.findById(categoryId)
