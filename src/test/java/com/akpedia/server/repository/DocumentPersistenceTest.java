@@ -82,10 +82,11 @@ class DocumentPersistenceTest {
     }
 
     @Test
-    @DisplayName("the 1536-dimension vector round-trips through pgvector")
+    @DisplayName("the configured-dimension vector round-trips through pgvector")
     void embeddingVectorRoundTrips() {
         float[] vector = TestFixtures.vector(0.5f);
-        entityManager.persist(new Embedding(document, 0, "primeiro chunk", vector, "text-embedding-3-small", 1536));
+        entityManager.persist(new Embedding(
+                document, 0, "primeiro chunk", vector, "text-embedding-3-small", Embedding.VECTOR_DIMENSIONS));
         entityManager.flush();
         entityManager.clear();
 
@@ -99,9 +100,9 @@ class DocumentPersistenceTest {
     @Test
     @DisplayName("chunks of the same document come back ordered by index")
     void embeddingsAreOrderedByChunkIndex() {
-        entityManager.persist(new Embedding(document, 2, "terceiro", TestFixtures.vector(3f), "modelo", 1536));
-        entityManager.persist(new Embedding(document, 0, "primeiro", TestFixtures.vector(1f), "modelo", 1536));
-        entityManager.persist(new Embedding(document, 1, "segundo", TestFixtures.vector(2f), "modelo", 1536));
+        entityManager.persist(new Embedding(document, 2, "terceiro", TestFixtures.vector(3f), "modelo", Embedding.VECTOR_DIMENSIONS));
+        entityManager.persist(new Embedding(document, 0, "primeiro", TestFixtures.vector(1f), "modelo", Embedding.VECTOR_DIMENSIONS));
+        entityManager.persist(new Embedding(document, 1, "segundo", TestFixtures.vector(2f), "modelo", Embedding.VECTOR_DIMENSIONS));
         entityManager.flush();
         entityManager.clear();
 
@@ -113,8 +114,9 @@ class DocumentPersistenceTest {
     @Test
     @DisplayName("the same chunk_index cannot repeat within a document")
     void duplicatedChunkIndexIsRejected() {
-        embeddingRepository.saveAndFlush(new Embedding(document, 0, "a", TestFixtures.vector(1f), "modelo", 1536));
-        Embedding duplicated = new Embedding(document, 0, "b", TestFixtures.vector(2f), "modelo", 1536);
+        embeddingRepository.saveAndFlush(
+                new Embedding(document, 0, "a", TestFixtures.vector(1f), "modelo", Embedding.VECTOR_DIMENSIONS));
+        Embedding duplicated = new Embedding(document, 0, "b", TestFixtures.vector(2f), "modelo", Embedding.VECTOR_DIMENSIONS);
 
         assertThatThrownBy(() -> embeddingRepository.saveAndFlush(duplicated))
                 .isInstanceOf(DataIntegrityViolationException.class);
@@ -123,7 +125,7 @@ class DocumentPersistenceTest {
     @Test
     @DisplayName("a negative chunk_index violates the database CHECK")
     void negativeChunkIndexIsRejected() {
-        Embedding invalid = new Embedding(document, -1, "invalido", TestFixtures.vector(1f), "modelo", 1536);
+        Embedding invalid = new Embedding(document, -1, "invalido", TestFixtures.vector(1f), "modelo", Embedding.VECTOR_DIMENSIONS);
 
         assertThatThrownBy(() -> embeddingRepository.saveAndFlush(invalid))
                 .isInstanceOf(DataIntegrityViolationException.class);

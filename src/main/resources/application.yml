@@ -36,6 +36,10 @@ akpedia:
     base-url: ${EMBEDDING_BASE_URL:http://localhost:8000}
     connect-timeout: ${EMBEDDING_CONNECT_TIMEOUT:2s}
     read-timeout: ${EMBEDDING_READ_TIMEOUT:30s}
+  gotenberg:
+    base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
+    connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}
+    read-timeout: ${GOTENBERG_READ_TIMEOUT:90s}
 
 springdoc:
   swagger-ui:
