@@ -196,4 +196,31 @@ class DocumentFileHttpTest {
         assertThat(new String(response.body(), StandardCharsets.UTF_8)).contains("document_archived");
     }
 
+    @Test
+    @DisplayName("a caller that accepts only PDF, as Swagger UI does, still gets the JSON error instead of a 500")
+    void refusesAsJsonEvenWhenOnlyPdfIsAccepted() throws Exception {
+        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(1L);
+
+        HttpResponse<byte[]> response = get(HttpHeaders.ACCEPT, MediaType.APPLICATION_PDF_VALUE);
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(header(response, HttpHeaders.CONTENT_TYPE)).startsWith(MediaType.APPLICATION_JSON_VALUE);
+        assertThat(new String(response.body(), StandardCharsets.UTF_8)).contains("document_archived");
+    }
+
+    @Test
+    @DisplayName("a non-numeric id asked for as PDF still gets the JSON 400, not an empty body")
+    void rejectsANonNumericIdAsJsonEvenWhenOnlyPdfIsAccepted() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:%d/api/v1/documents/abc/file".formatted(port)))
+                .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_PDF_VALUE)
+                .build();
+
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(header(response, HttpHeaders.CONTENT_TYPE)).startsWith(MediaType.APPLICATION_JSON_VALUE);
+        assertThat(response.body()).contains("invalid_request");
+    }
+
 }

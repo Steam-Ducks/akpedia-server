@@ -2,6 +2,7 @@ package com.akpedia.server.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -84,10 +85,15 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
     }
 
-    /** 400: a request parameter could not be converted to the type the handler expects. */
+    /**
+     * 400: a request parameter could not be converted to the type the handler expects.
+     *
+     * <p>Sets the JSON content type itself for the same reason as {@link #handleDocumentNotFound}:
+     * a non-numeric id on the file route arrives with {@code Accept: application/pdf}.
+     */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
-        return ResponseEntity.badRequest().body(new ApiErrorResponse(
+        return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_JSON).body(new ApiErrorResponse(
                 "invalid_request", "%s deve ser um valor valido.".formatted(e.getName())));
     }
 
@@ -110,10 +116,18 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("category_not_found", e.getMessage()));
     }
 
-    /** 404: the requested document does not exist. */
+    /**
+     * 404: the requested document does not exist.
+     *
+     * <p>This and the other document handlers below set the JSON content type themselves. They
+     * answer {@code GET /documents/{id}/file}, whose callers ask for {@code Accept: application/pdf}
+     * (Swagger UI does, from the route's own description): left to negotiate, the error body would
+     * be refused as not acceptable and the caller would get a bare 500 instead of the error.
+     */
     @ExceptionHandler(DocumentNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleDocumentNotFound(DocumentNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiErrorResponse("document_not_found", e.getMessage()));
     }
 
@@ -126,6 +140,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DocumentFileNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleDocumentFileNotFound(DocumentFileNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiErrorResponse("document_file_not_found", e.getMessage()));
     }
 
@@ -133,6 +148,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DocumentArchivedException.class)
     public ResponseEntity<ApiErrorResponse> handleDocumentArchived(DocumentArchivedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiErrorResponse("document_archived", e.getMessage()));
     }
 
@@ -146,6 +162,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DocumentNotProcessedException.class)
     public ResponseEntity<ApiErrorResponse> handleDocumentNotProcessed(DocumentNotProcessedException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiErrorResponse("document_not_processed", e.getMessage()));
     }
 
