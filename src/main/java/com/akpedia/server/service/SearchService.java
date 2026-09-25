@@ -1,6 +1,7 @@
 package com.akpedia.server.service;
 
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -17,6 +18,20 @@ import com.akpedia.server.repository.EmbeddingRepository;
 /** Coordinates query embedding and document similarity search. */
 @Service
 public class SearchService {
+
+    /** Column positions of the similarity query, in the order it selects them. */
+    private static final int DOCUMENT_ID = 0;
+    private static final int NAME = 1;
+    private static final int DESCRIPTION = 2;
+    private static final int MIME_TYPE = 3;
+    private static final int MATCHED_CHUNK = 4;
+    private static final int CHUNK_INDEX = 5;
+    private static final int SCORE = 6;
+
+    /** What marks a snippet as cut short. One character, so it barely eats into the budget. */
+    private static final String ELLIPSIS = "…";
+
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
 
     private final EmbeddingClient embeddingClient;
     private final EmbeddingRepository embeddings;
@@ -45,7 +60,7 @@ public class SearchService {
                         properties.minimumScore(),
                         limit)
                 .stream()
-                .map(SearchService::toResult)
+                .map(this::toResult)
                 .toList();
     }
 
@@ -84,12 +99,52 @@ public class SearchService {
                 .collect(Collectors.joining(",", "[", "]"));
     }
 
-    private static SearchResult toResult(Object[] row) {
+    /**
+     * Builds a result out of one row of the similarity query.
+     *
+     * <p>The columns are read by position, in the order the query selects them -- named here
+     * instead of inlined, because a native query hands back an untyped array and a shifted index
+     * would quietly put the score where the chunk belongs.
+     */
+    private SearchResult toResult(Object[] row) {
         return new SearchResult(
-                ((Number) row[0]).longValue(),
-                (String) row[1],
-                (String) row[2],
-                ((Number) row[4]).doubleValue(),
-                (String) row[3]);
+                ((Number) row[DOCUMENT_ID]).longValue(),
+                (String) row[NAME],
+                (String) row[DESCRIPTION],
+                (String) row[MIME_TYPE],
+                ((Number) row[SCORE]).doubleValue(),
+                snippetOf((String) row[MATCHED_CHUNK]),
+                ((Number) row[CHUNK_INDEX]).intValue());
+    }
+
+    /**
+     * Cuts the matched chunk down to a snippet worth putting in a list of results.
+     *
+     * <p>A chunk is however long akpedia-ml decided to make it, and it comes out of a PDF, so it
+     * arrives with the line breaks of the page it was taken from. Runs of whitespace collapse into
+     * single spaces to spend the budget on words instead of layout, and the cut lands on the last
+     * whole word that fits, with an ellipsis marking that the text goes on.
+     *
+     * <p>The returned snippet never exceeds {@code akpedia.search.snippet-length}, ellipsis
+     * included, so a caller can size a result card from the configured value alone. A single word
+     * longer than half the budget is cut mid-word rather than turning the snippet into just an
+     * ellipsis.
+     */
+    private String snippetOf(String chunk) {
+        if (chunk == null) {
+            return null;
+        }
+        String text = WHITESPACE_RUN.matcher(chunk).replaceAll(" ").strip();
+        int limit = properties.snippetLength();
+        if (text.length() <= limit) {
+            return text;
+        }
+
+        int room = limit - ELLIPSIS.length();
+        int cut = text.lastIndexOf(' ', room);
+        if (cut < room / 2) {
+            cut = room;
+        }
+        return text.substring(0, cut).stripTrailing() + ELLIPSIS;
     }
 }

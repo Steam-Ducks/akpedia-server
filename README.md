@@ -156,6 +156,15 @@ em outra rede Docker.
 > Se o akpedia-ml estiver rodando direto na máquina (`uvicorn`) e escutando só em `127.0.0.1`,
 > o container não o alcança. Suba-o pelo Docker ou publique-o em `0.0.0.0`.
 
+### Limites e trecho da busca
+
+| Variável                  | Default | Para que serve                                                  |
+|---------------------------|---------|-----------------------------------------------------------------|
+| `SEARCH_DEFAULT_LIMIT`    | `10`    | Quantos resultados voltam quando o `limit` não é informado       |
+| `SEARCH_MAX_LIMIT`        | `50`    | Maior `limit` que a rota aceita (acima disso, 400)               |
+| `SEARCH_MINIMUM_SCORE`    | `0.85`  | Similaridade mínima para um trecho valer um resultado            |
+| `SEARCH_SNIPPET_LENGTH`   | `300`   | Tamanho máximo do trecho devolvido, em caracteres (ver [Busca](#busca)) |
+
 ### Conversão de documentos (Gotenberg)
 
 | Variável                     | Default                  | Para que serve                       |
@@ -361,6 +370,97 @@ o documento e o PDF já foram salvos antes dessa etapa rodar.
 | Gotenberg recebeu mas recusou o arquivo     | 422    | `pdf_conversion_rejected`     |
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
+
+---
+
+## Busca
+
+### Endpoint
+
+`GET /api/v1/search?q=<texto>&limit=<n>` faz busca semântica nos documentos indexados. O texto da
+consulta é vetorizado pelo akpedia-ml e comparado por similaridade de cosseno com os `embeddings`
+salvos.
+
+| Parâmetro | Obrigatório | Descrição                                                                 |
+|-----------|:-----------:|---------------------------------------------------------------------------|
+| `q`       | sim         | palavra, frase ou pergunta                                                 |
+| `limit`   | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
+
+Só entram documentos com `processing_status: COMPLETED` — sem vetores não há o que comparar. Cada
+documento aparece **uma vez só**, representado pelo trecho que mais se aproximou da consulta, e os
+resultados vêm ordenados por relevância. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam, então
+uma busca sem nada parecido responde `200` com lista vazia — não 404.
+
+### Formato do resultado
+
+Cada item da lista tem estes sete campos, sempre presentes (`description` vem `null` quando o
+documento foi enviado sem uma):
+
+| Campo           | Tipo    | O que é                                                                    |
+|-----------------|---------|----------------------------------------------------------------------------|
+| `document_id`   | número  | identificador do documento, usado nas outras rotas de documento             |
+| `name`          | texto   | título do documento                                                        |
+| `description`   | texto   | descrição informada no upload, ou `null`                                   |
+| `mime_type`     | texto   | formato do arquivo armazenado; hoje sempre `application/pdf`                |
+| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico)         |
+| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo)                       |
+| `chunk_index`   | número  | posição desse trecho no documento, contando de 0                           |
+
+```bash
+curl "localhost:8080/api/v1/search?q=politica%20de%20ferias&limit=2"
+```
+
+```json
+[
+  {
+    "document_id": 7,
+    "name": "manual-de-integracao.pdf",
+    "description": "manual tecnico do time",
+    "mime_type": "application/pdf",
+    "score": 0.913,
+    "matched_chunk": "As ferias sao solicitadas pelo portal com trinta dias de antecedencia…",
+    "chunk_index": 3
+  },
+  {
+    "document_id": 12,
+    "name": "politica-de-rh.pdf",
+    "description": null,
+    "mime_type": "application/pdf",
+    "score": 0.874,
+    "matched_chunk": "O periodo aquisitivo comeca na data de admissao…",
+    "chunk_index": 0
+  }
+]
+```
+
+O `chunk_index` é a posição do trecho na sequência de pedaços em que o akpedia-ml dividiu o
+documento, contando de 0 — `0` significa que o casamento foi no começo do documento, um índice alto
+que foi mais para o fim. É o que permite mostrar *onde* o documento responde a pergunta em vez de só
+*que* ele responde.
+
+### Como o trecho é aparado
+
+O trecho que volta em `matched_chunk` tem no máximo **300 caracteres** (`SEARCH_SNIPPET_LENGTH`),
+contando o `…` que marca o corte. As regras:
+
+- **Espaços em sequência e quebras de linha viram um espaço só.** O trecho vem de um PDF e chega com
+  as quebras da página; numa lista de resultados isso só gastaria o limite com diagramação.
+- **O corte cai na última palavra inteira que cabe**, e o `…` sinaliza que o texto continua. Nenhuma
+  palavra é partida no meio.
+- **Uma palavra sozinha maior que metade do limite é cortada no meio mesmo**, senão o trecho viraria
+  só um `…`.
+- Trecho que já cabe volta inteiro, sem `…`.
+
+Como o limite conta o `…`, a interface pode dimensionar o card pelo valor configurado, sem precisar
+de folga.
+
+#### Status de erro
+
+| Situação                                          | Status | `code`                          |
+|----------------------------------------------------|--------|---------------------------------|
+| `q` ausente ou em branco, ou `limit` fora do teto  | 400    | `invalid_request`               |
+| akpedia-ml respondeu algo que não dá para usar     | 502    | `embedding_service_error`       |
+| akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
 
 ---
 
