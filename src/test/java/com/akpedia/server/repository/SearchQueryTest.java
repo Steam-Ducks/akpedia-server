@@ -63,14 +63,25 @@ class SearchQueryTest {
                 .collect(Collectors.joining(",", "[", "]"));
     }
 
+    /**
+     * Finds the row of the document this test created. The database may already hold other
+     * documents (the local dev database usually does), and with any score accepted they all come
+     * back, so the row is picked by id instead of assuming it is the only one.
+     */
+    private Object[] rowOfTestDocument() {
+        List<Object[]> rows = embeddingRepository.search(
+                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, 100);
+
+        return rows.stream()
+                .filter(row -> ((Number) row[0]).longValue() == document.getId())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the test document did not come back from the search"));
+    }
+
     @Test
     @DisplayName("a row carries id, name, description, mime type, chunk, chunk index and score, in that order")
     void rowCarriesEveryColumnInOrder() {
-        List<Object[]> rows = embeddingRepository.search(
-                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, 10);
-
-        assertThat(rows).hasSize(1);
-        Object[] row = rows.get(0);
+        Object[] row = rowOfTestDocument();
 
         assertThat(row).hasSize(7);
         assertThat(((Number) row[0]).longValue()).isEqualTo(document.getId());
@@ -85,9 +96,6 @@ class SearchQueryTest {
     @Test
     @DisplayName("the score of an exact match is 1, so the column really is the similarity")
     void scoreOfAnIdenticalVectorIsOne() {
-        List<Object[]> rows = embeddingRepository.search(
-                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, 10);
-
-        assertThat(((Number) rows.get(0)[6]).doubleValue()).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-6));
+        assertThat(((Number) rowOfTestDocument()[6]).doubleValue()).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-6));
     }
 }
