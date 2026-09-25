@@ -40,6 +40,8 @@ akpedia:
     default-limit: ${SEARCH_DEFAULT_LIMIT:10}
     max-limit: ${SEARCH_MAX_LIMIT:50}
     minimum-score: ${SEARCH_MINIMUM_SCORE:0.85}
+    # Length agreed for the excerpt a result carries, ellipsis included.
+    snippet-length: ${SEARCH_SNIPPET_LENGTH:300}
   gotenberg:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}

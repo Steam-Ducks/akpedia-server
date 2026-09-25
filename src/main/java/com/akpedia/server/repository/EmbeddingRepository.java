@@ -12,12 +12,14 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
 
         /** Returns the closest eligible chunk once per document, already ordered by relevance. */
         @Query(value = """
-                        SELECT document_id, name, description, matched_chunk, score
+                        SELECT document_id, name, description, mime_type, matched_chunk, chunk_index, score
                         FROM (
                                 SELECT d.id AS document_id,
                                              d.name,
                                              d.description,
+                                             d.mime_type,
                                              e.content AS matched_chunk,
+                                             e.chunk_index,
                                              1 - (e.vector <=> CAST(:queryVector AS vector)) AS score,
                                              ROW_NUMBER() OVER (
                                                      PARTITION BY d.id

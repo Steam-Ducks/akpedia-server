@@ -28,7 +28,16 @@ public class SearchController {
 
     @Operation(
             summary = "Search documents by semantic proximity",
-            description = "Accepts a word, phrase, or question and returns at most one result per document.")
+            description = """
+                    Accepts a word, phrase, or question and returns at most one result per document, ordered by
+                    relevance. Only documents akpedia-ml has indexed take part, and a chunk below the configured
+                    minimum score is left out, so a search with nothing close answers 200 with an empty list.
+
+                    Each result identifies the document, names it, gives its format, and carries the chunk that
+                    matched together with that chunk's position in the document, counted from 0. The chunk comes
+                    trimmed to `akpedia.search.snippet-length` characters (300 by default, ellipsis included):
+                    runs of whitespace collapse into single spaces and the cut lands on the last whole word that
+                    fits.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Results ordered by relevance; the list may be empty."),
         @ApiResponse(responseCode = "400", description = "The query or limit is invalid."),
