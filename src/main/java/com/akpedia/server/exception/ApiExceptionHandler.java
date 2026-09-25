@@ -110,6 +110,45 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("category_not_found", e.getMessage()));
     }
 
+    /** 404: the requested document does not exist. */
+    @ExceptionHandler(DocumentNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotFound(DocumentNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("document_not_found", e.getMessage()));
+    }
+
+    /**
+     * 404: the document exists, but there is no file stored for it.
+     *
+     * <p>Kept apart from {@code document_not_found} so the caller can tell a wrong id from a
+     * document whose binary went missing -- the first is their mistake, the second is ours.
+     */
+    @ExceptionHandler(DocumentFileNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentFileNotFound(DocumentFileNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("document_file_not_found", e.getMessage()));
+    }
+
+    /** 403: the document is archived, so its file is out of circulation for good. */
+    @ExceptionHandler(DocumentArchivedException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentArchived(DocumentArchivedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiErrorResponse("document_archived", e.getMessage()));
+    }
+
+    /**
+     * 409: the document exists but akpedia-ml is still to index it.
+     *
+     * <p>A conflict with the document's current state, not a refusal of the request: unlike the
+     * 403 above, this one stops being an error as soon as the indexing completes, so the caller
+     * can retry the exact same request.
+     */
+    @ExceptionHandler(DocumentNotProcessedException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotProcessed(DocumentNotProcessedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("document_not_processed", e.getMessage()));
+    }
+
     /** 404: the creator named in a document upload does not exist. */
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleUserNotFound(UserNotFoundException e) {
