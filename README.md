@@ -371,6 +371,96 @@ o documento e o PDF já foram salvos antes dessa etapa rodar.
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
 
+### Abrir o arquivo
+
+`GET /api/v1/documents/{id}/file` devolve o binário armazenado do documento. A resposta vem com
+o `Content-Type` registrado no documento (sempre `application/pdf`, já que o upload converte
+tudo) e `Content-Disposition: inline`, então apontar o navegador para a URL **abre** o documento
+em vez de baixá-lo.
+
+O nome oferecido é o `name` do documento, sempre com a extensão `.pdf` — um documento salvo com
+nome sem extensão ainda desce como `.pdf`, senão o arquivo baixado chega ao disco como algo que
+o sistema não sabe mais abrir. Barras e caracteres de controle no nome são trocados por `_`.
+
+A resposta leva `X-Content-Type-Options: nosniff`, para o navegador ficar no tipo declarado em vez
+de adivinhar outro olhando os bytes. `inline` só vale para PDF: qualquer outro tipo desce como
+`attachment`, para a origem da API nunca renderizar conteúdo que não foi ela que escreveu.
+
+#### Cache e `Range`
+
+A resposta é `Cache-Control: private, no-cache` com `ETag` e `Last-Modified`. `no-cache` não é
+"não guarde": é "guarde, mas confirme antes de usar". Então abrir o mesmo documento de novo manda
+um `If-None-Match`, e a resposta é **304 sem corpo** — o PDF não desce duas vezes, e o binário nem
+é lido do banco. A confirmação passa pelas restrições antes de qualquer coisa, então um documento
+que foi arquivado nesse meio-tempo recebe 403 em vez de ter a cópia do navegador liberada.
+
+A rota anuncia `Accept-Ranges: bytes` e responde `Range` com **206** e só aquele trecho, que é como
+o visualizador de PDF do navegador carrega um arquivo grande por partes em vez de esperar o todo.
+Um range fora do arquivo responde **416** com o tamanho real. Vários ranges numa requisição viram
+`multipart/byteranges`, montado pelo próprio Spring.
+
+#### Restrições
+
+Não há checagem de usuário — a rota é aberta, como o resto da API, até a autenticação entrar.
+O que restringe é o estado do próprio documento:
+
+| Estado                                          | Resposta | Por quê                                                        |
+|--------------------------------------------------|----------|----------------------------------------------------------------|
+| `status: ARCHIVED`                               | 403      | documento fora de circulação; arquivar é definitivo             |
+| `processing_status: PENDING` ou `PROCESSING`     | 409      | a indexação no akpedia-ml ainda não terminou                    |
+
+Os outros `status` (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`) abrem normalmente.
+
+O 409 é conflito de estado, não recusa: os dois viram `COMPLETED` sozinhos, então a mesma
+requisição passa a funcionar — é o que separa esse caso do 403, que não muda.
+
+**`processing_status: FAILED` abre.** O PDF é convertido e salvo *antes* da etapa de embeddings,
+que é justamente por isso que uma falha nela não desfaz o upload — então o binário está íntegro e
+só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
+para sempre por causa de uma etapa que nem tocou no arquivo.
+
+A busca (`GET /api/v1/search`) usa o mesmo critério: a query já filtrava `processing_status =
+'COMPLETED'` e agora também deixa `ARCHIVED` de fora, senão um resultado da pesquisa levaria a um
+403 ao ser aberto.
+
+```bash
+# no navegador, basta abrir a URL
+curl -i localhost:8080/api/v1/documents/1/file
+```
+
+```
+HTTP/1.1 200
+Content-Type: application/pdf
+Content-Disposition: inline; filename*=UTF-8''relatorio.pdf
+Content-Length: 48213
+Accept-Ranges: bytes
+Cache-Control: private, no-cache
+ETag: "1-48213-1790634665000"
+Last-Modified: Thu, 24 Sep 2026 22:31:05 GMT
+X-Content-Type-Options: nosniff
+```
+
+```bash
+# segunda abertura: o navegador manda o validador e não baixa de novo
+curl -i localhost:8080/api/v1/documents/1/file \
+  -H 'If-None-Match: "1-48213-1790634665000"'   # -> HTTP/1.1 304, sem corpo
+
+# um trecho, como o visualizador de PDF pede
+curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
+# -> HTTP/1.1 206, Content-Range: bytes 0-1023/48213
+```
+
+#### Status de erro
+
+| Situação                                          | Status | `code`                     |
+|----------------------------------------------------|--------|----------------------------|
+| `id` não numérico                                  | 400    | `invalid_request`          |
+| documento arquivado                                | 403    | `document_archived`        |
+| documento não existe                               | 404    | `document_not_found`       |
+| documento existe, mas não há arquivo armazenado    | 404    | `document_file_not_found`  |
+| indexação do akpedia-ml ainda não terminou         | 409    | `document_not_processed`   |
+| `Range` pedido não cabe no arquivo                 | 416    | — (sem corpo)              |
+
 ---
 
 ## Busca

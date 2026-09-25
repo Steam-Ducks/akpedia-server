@@ -10,7 +10,14 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
 
     List<Embedding> findByDocumentIdOrderByChunkIndex(Long documentId);
 
-        /** Returns the closest eligible chunk once per document, already ordered by relevance. */
+        /**
+         * Returns the closest eligible chunk once per document, already ordered by relevance.
+         *
+         * <p>Eligible leaves out what cannot be opened afterwards: a document still being indexed
+         * has no usable vectors yet, and an archived one is refused by
+         * {@code GET /documents/{id}/file}, so listing it here would offer a result that leads to a
+         * 403.
+         */
         @Query(value = """
                         SELECT document_id, name, description, mime_type, matched_chunk, chunk_index, score
                         FROM (
@@ -28,6 +35,7 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                                 FROM embeddings e
                                 JOIN documents d ON d.id = e.document_id
                                 WHERE d.processing_status = 'COMPLETED'
+                                    AND d.status <> 'ARCHIVED'
                                     AND e.model_name = :modelName
                                     AND e.dimensions = :dimensions
                         ) matches
