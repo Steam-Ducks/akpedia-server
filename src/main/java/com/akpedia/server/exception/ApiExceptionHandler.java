@@ -166,6 +166,27 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("document_not_processed", e.getMessage()));
     }
 
+    /**
+     * 404: the viewer asked for a page past the end of the document.
+     *
+     * <p>JSON set explicitly for the same reason as {@link #handleDocumentNotFound}: the page route
+     * is asked for with {@code Accept: image/png}.
+     */
+    @ExceptionHandler(DocumentPageNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentPageNotFound(DocumentPageNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new ApiErrorResponse("document_page_not_found", e.getMessage()));
+    }
+
+    /** 500: the stored file could not be read as a PDF, so the bytes in the database are damaged. */
+    @ExceptionHandler(DocumentRenderException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentRender(DocumentRenderException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new ApiErrorResponse("document_unreadable", e.getMessage()));
+    }
+
     /** 404: the creator named in a document upload does not exist. */
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleUserNotFound(UserNotFoundException e) {
