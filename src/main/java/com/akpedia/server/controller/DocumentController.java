@@ -28,9 +28,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
+import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.service.DocumentFileService;
+import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentUploadService;
 
 import io.swagger.v3.oas.annotations.Hidden;
@@ -61,10 +63,33 @@ public class DocumentController {
 
     private final DocumentUploadService uploadService;
     private final DocumentFileService fileService;
+    private final DocumentListService listService;
 
-    public DocumentController(DocumentUploadService uploadService, DocumentFileService fileService) {
+    public DocumentController(
+            DocumentUploadService uploadService,
+            DocumentFileService fileService,
+            DocumentListService listService) {
         this.uploadService = uploadService;
         this.fileService = fileService;
+        this.listService = listService;
+    }
+
+    @Operation(
+            summary = "List the most recently changed documents",
+            description = """
+                    Answers up to `limit` documents (5 by default, at most 50), the most recently changed first;
+                    a document never edited counts from its creation. Lists the same documents search can
+                    return -- indexed and not archived -- each with the fields a search result carries about
+                    the document: `category`, the `responsible_name` of the user who uploaded it, and
+                    `updated_at`.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Documents, most recently changed first; the list may be empty."),
+        @ApiResponse(responseCode = "400", description = "The limit is invalid.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents")
+    public List<DocumentSummary> recent(@RequestParam(required = false) Integer limit) {
+        return listService.recent(limit);
     }
 
     @Operation(

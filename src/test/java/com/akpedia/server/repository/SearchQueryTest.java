@@ -40,12 +40,14 @@ class SearchQueryTest {
     private EmbeddingRepository embeddingRepository;
 
     private Document document;
+    private Category category;
+    private User creator;
 
     @BeforeEach
     void setUp() {
         Sector sector = entityManager.persist(TestFixtures.sector());
-        Category category = entityManager.persist(TestFixtures.category());
-        User creator = entityManager.persist(TestFixtures.user(sector));
+        category = entityManager.persist(TestFixtures.category());
+        creator = entityManager.persist(TestFixtures.user(sector));
 
         document = TestFixtures.document(category, creator);
         document.setDescription("manual tecnico do time");
@@ -79,11 +81,12 @@ class SearchQueryTest {
     }
 
     @Test
-    @DisplayName("a row carries id, name, description, mime type, chunk, chunk index and score, in that order")
+    @DisplayName("a row carries id, name, description, mime type, chunk, chunk index, score, category, "
+            + "responsible and last update, in that order")
     void rowCarriesEveryColumnInOrder() {
         Object[] row = rowOfTestDocument();
 
-        assertThat(row).hasSize(7);
+        assertThat(row).hasSize(10);
         assertThat(((Number) row[0]).longValue()).isEqualTo(document.getId());
         assertThat(row[1]).isEqualTo(document.getName());
         assertThat(row[2]).isEqualTo("manual tecnico do time");
@@ -91,6 +94,9 @@ class SearchQueryTest {
         assertThat(row[4]).isEqualTo("trecho que casou");
         assertThat(((Number) row[5]).intValue()).isEqualTo(4);
         assertThat(((Number) row[6]).doubleValue()).isBetween(-1.0, 1.0);
+        assertThat(row[7]).isEqualTo(category.getName());
+        assertThat(row[8]).isEqualTo(creator.getName());
+        assertThat(row[9]).isNotNull();
     }
 
     @Test

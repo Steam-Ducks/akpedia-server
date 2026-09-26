@@ -1,5 +1,7 @@
 package com.akpedia.server.dto;
 
+import java.time.OffsetDateTime;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -17,6 +19,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param matchedChunk excerpt of the chunk that matched, trimmed to the configured length
  * @param chunkIndex   position of that chunk in the document, counted from 0, which is what tells
  *                     the reader whether the match is at the start of the document or deep into it
+ * @param category        name of the category the document is filed under
+ * @param responsibleName name of the user who uploaded the document
+ * @param updatedAt       when the document last changed; its creation time if it never has
  */
 public record SearchResult(
         @JsonProperty("document_id") Long documentId,
@@ -25,5 +30,8 @@ public record SearchResult(
         @JsonProperty("mime_type") String mimeType,
         double score,
         @JsonProperty("matched_chunk") String matchedChunk,
-        @JsonProperty("chunk_index") Integer chunkIndex) {
+        @JsonProperty("chunk_index") Integer chunkIndex,
+        String category,
+        @JsonProperty("responsible_name") String responsibleName,
+        @JsonProperty("updated_at") OffsetDateTime updatedAt) {
 }
