@@ -1,7 +1,10 @@
 package com.akpedia.server.service;
 
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -27,11 +30,9 @@ public class SearchService {
     private static final int MATCHED_CHUNK = 4;
     private static final int CHUNK_INDEX = 5;
     private static final int SCORE = 6;
-
-    /** What marks a snippet as cut short. One character, so it barely eats into the budget. */
-    private static final String ELLIPSIS = "…";
-
-    private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
+    private static final int CATEGORY = 7;
+    private static final int RESPONSIBLE_NAME = 8;
+    private static final int UPDATED_AT = 9;
 
     private final EmbeddingClient embeddingClient;
     private final EmbeddingRepository embeddings;
@@ -113,38 +114,31 @@ public class SearchService {
                 (String) row[DESCRIPTION],
                 (String) row[MIME_TYPE],
                 ((Number) row[SCORE]).doubleValue(),
-                snippetOf((String) row[MATCHED_CHUNK]),
-                ((Number) row[CHUNK_INDEX]).intValue());
+                Snippets.of((String) row[MATCHED_CHUNK], properties.snippetLength()),
+                ((Number) row[CHUNK_INDEX]).intValue(),
+                (String) row[CATEGORY],
+                (String) row[RESPONSIBLE_NAME],
+                toOffsetDateTime(row[UPDATED_AT]));
     }
 
     /**
-     * Cuts the matched chunk down to a snippet worth putting in a list of results.
-     *
-     * <p>A chunk is however long akpedia-ml decided to make it, and it comes out of a PDF, so it
-     * arrives with the line breaks of the page it was taken from. Runs of whitespace collapse into
-     * single spaces to spend the budget on words instead of layout, and the cut lands on the last
-     * whole word that fits, with an ellipsis marking that the text goes on.
-     *
-     * <p>The returned snippet never exceeds {@code akpedia.search.snippet-length}, ellipsis
-     * included, so a caller can size a result card from the configured value alone. A single word
-     * longer than half the budget is cut mid-word rather than turning the snippet into just an
-     * ellipsis.
+     * Reads a {@code timestamptz} column of a native query. Depending on the driver and Hibernate
+     * version it arrives as a {@link Timestamp}, an {@link Instant} or already as an
+     * {@link OffsetDateTime}; all of them name the same instant, answered here in UTC.
      */
-    private String snippetOf(String chunk) {
-        if (chunk == null) {
+    private static OffsetDateTime toOffsetDateTime(Object value) {
+        if (value == null) {
             return null;
         }
-        String text = WHITESPACE_RUN.matcher(chunk).replaceAll(" ").strip();
-        int limit = properties.snippetLength();
-        if (text.length() <= limit) {
-            return text;
+        if (value instanceof OffsetDateTime dateTime) {
+            return dateTime;
         }
-
-        int room = limit - ELLIPSIS.length();
-        int cut = text.lastIndexOf(' ', room);
-        if (cut < room / 2) {
-            cut = room;
+        if (value instanceof Instant instant) {
+            return instant.atOffset(ZoneOffset.UTC);
         }
-        return text.substring(0, cut).stripTrailing() + ELLIPSIS;
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant().atOffset(ZoneOffset.UTC);
+        }
+        throw new IllegalStateException("Unexpected type for updated_at: " + value.getClass().getName());
     }
 }

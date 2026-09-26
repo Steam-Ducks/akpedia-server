@@ -8,6 +8,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 
+import java.sql.Timestamp;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -30,6 +33,7 @@ import com.akpedia.server.repository.EmbeddingRepository;
 class SearchServiceTest {
 
     private static final int SNIPPET_LENGTH = 300;
+    private static final OffsetDateTime UPDATED_AT = OffsetDateTime.of(2026, 9, 20, 14, 30, 0, 0, ZoneOffset.UTC);
 
     @Mock
     private EmbeddingClient embeddingClient;
@@ -49,7 +53,10 @@ class SearchServiceTest {
 
     /** One row of the similarity query, in the order it selects the columns. */
     private static Object[] row(String matchedChunk, int chunkIndex) {
-        return new Object[] {1L, "manual.pdf", "manual tecnico", "application/pdf", matchedChunk, chunkIndex, 0.91};
+        return new Object[] {
+            1L, "manual.pdf", "manual tecnico", "application/pdf", matchedChunk, chunkIndex, 0.91,
+            "Técnica", "Mariana Costa", Timestamp.from(UPDATED_AT.toInstant())
+        };
     }
 
     /** Arranges the query embedding and the rows the repository answers with. */
@@ -73,12 +80,14 @@ class SearchServiceTest {
     }
 
     @Test
-    @DisplayName("a result carries the document, its format, the matched snippet and where it was found")
+    @DisplayName("a result carries the document, its format, the matched snippet, where it was found, "
+            + "its category, who is responsible and when it last changed")
     void mapsEveryFieldOfAResult() {
         searchAnswers(row("trecho encontrado", 3));
 
         assertThat(firstResult()).isEqualTo(new SearchResult(
-                1L, "manual.pdf", "manual tecnico", "application/pdf", 0.91, "trecho encontrado", 3));
+                1L, "manual.pdf", "manual tecnico", "application/pdf", 0.91, "trecho encontrado", 3,
+                "Técnica", "Mariana Costa", UPDATED_AT));
     }
 
     @Test
@@ -142,7 +151,10 @@ class SearchServiceTest {
     @Test
     @DisplayName("results keep the order the query returned them in")
     void resultsKeepTheirOrder() {
-        Object[] second = new Object[] {2L, "outro.pdf", null, "application/pdf", "outro trecho", 7, 0.88};
+        Object[] second = new Object[] {
+            2L, "outro.pdf", null, "application/pdf", "outro trecho", 7, 0.88,
+            "Normativa", "Rafael Mendes", Timestamp.from(UPDATED_AT.toInstant())
+        };
         searchAnswers(List.<Object[]>of(row("trecho", 1), second));
 
         assertThat(service.search("technical manual", null))

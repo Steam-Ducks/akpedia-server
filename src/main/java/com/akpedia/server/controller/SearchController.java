@@ -37,7 +37,11 @@ public class SearchController {
                     matched together with that chunk's position in the document, counted from 0. The chunk comes
                     trimmed to `akpedia.search.snippet-length` characters (300 by default, ellipsis included):
                     runs of whitespace collapse into single spaces and the cut lands on the last whole word that
-                    fits.""")
+                    fits.
+
+                    A result also carries what a result card shows about the document: its `category`, the
+                    `responsible_name` of the user who uploaded it, and `updated_at`, when it last changed --
+                    its creation time if it never has.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Results ordered by relevance; the list may be empty."),
         @ApiResponse(responseCode = "400", description = "The query or limit is invalid."),
