@@ -21,6 +21,7 @@
         <java.version>17</java.version>
         <!-- 2.6.x is the line that tracks Spring Boot 3.3 -->
         <springdoc.version>2.6.0</springdoc.version>
+        <pdfbox.version>3.0.5</pdfbox.version>
     </properties>
 
     <dependencies>
@@ -55,6 +56,13 @@
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- Rasterizes stored PDFs so the viewer shows pages without handing out the file -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
         </dependency>
 
         <!-- pgvector type support in Hibernate (SqlTypes.VECTOR) -->
