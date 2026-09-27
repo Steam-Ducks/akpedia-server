@@ -16,6 +16,13 @@ spring:
         format_sql: true
     open-in-view: false
 
+  servlet:
+    multipart:
+      # Matches the embedding service's own limit (25 MiB): refusing here first
+      # avoids uploading the whole file only for it to answer 413.
+      max-file-size: 25MB
+      max-request-size: 25MB
+
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -23,6 +30,30 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+
+akpedia:
+  embedding:
+    base-url: ${EMBEDDING_BASE_URL:http://localhost:8000}
+    connect-timeout: ${EMBEDDING_CONNECT_TIMEOUT:2s}
+    read-timeout: ${EMBEDDING_READ_TIMEOUT:30s}
+  search:
+    default-limit: ${SEARCH_DEFAULT_LIMIT:10}
+    max-limit: ${SEARCH_MAX_LIMIT:50}
+    minimum-score: ${SEARCH_MINIMUM_SCORE:0.85}
+    # Length agreed for the excerpt a result carries, ellipsis included.
+    snippet-length: ${SEARCH_SNIPPET_LENGTH:300}
+  gotenberg:
+    base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
+    connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}
+    read-timeout: ${GOTENBERG_READ_TIMEOUT:90s}
+
+springdoc:
+  swagger-ui:
+    # /swagger-ui.html redirects here; explicit so a changed default cannot surprise us.
+    path: /swagger-ui.html
+    operations-sorter: method
+  api-docs:
+    path: /v3/api-docs
 
 management:
   endpoints:
