@@ -47,6 +47,7 @@ import com.akpedia.server.exception.PdfConversionRejectedException;
 import com.akpedia.server.exception.PdfConversionUnavailableException;
 import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.service.DocumentFileService;
+import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentUploadService;
 
 /**
@@ -66,6 +67,9 @@ class DocumentControllerTest {
 
     @MockBean
     private DocumentFileService fileService;
+
+    @MockBean
+    private DocumentListService listService;
 
     /** Fixed validators, so the conditional-request cases can send the exact values back. */
     private static final Instant LAST_MODIFIED = Instant.parse("2026-09-24T22:31:05Z");

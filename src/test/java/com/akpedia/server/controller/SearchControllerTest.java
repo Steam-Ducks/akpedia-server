@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -42,17 +44,20 @@ class SearchControllerTest {
     @Autowired
     private MockMvc mvc;
 
+    private static final OffsetDateTime UPDATED_AT = OffsetDateTime.of(2026, 9, 20, 14, 30, 0, 0, ZoneOffset.UTC);
+
     @MockBean
     private SearchService searchService;
 
     private static SearchResult result() {
         return new SearchResult(
                 7L, "manual-de-integracao.pdf", "manual tecnico do time", "application/pdf",
-                0.913, "trecho que casou com a busca…", 3);
+                0.913, "trecho que casou com a busca…", 3,
+                "Técnica", "Mariana Costa", UPDATED_AT);
     }
 
     @Test
-    @DisplayName("GET /api/v1/search answers each result with the seven agreed fields")
+    @DisplayName("GET /api/v1/search answers each result with the ten agreed fields")
     void searchResultCarriesTheAgreedFormat() throws Exception {
         given(searchService.search("integracao", null)).willReturn(List.of(result()));
 
@@ -65,7 +70,10 @@ class SearchControllerTest {
                 .andExpect(jsonPath("$[0].mime_type").value("application/pdf"))
                 .andExpect(jsonPath("$[0].score").value(0.913))
                 .andExpect(jsonPath("$[0].matched_chunk").value("trecho que casou com a busca…"))
-                .andExpect(jsonPath("$[0].chunk_index").value(3));
+                .andExpect(jsonPath("$[0].chunk_index").value(3))
+                .andExpect(jsonPath("$[0].category").value("Técnica"))
+                .andExpect(jsonPath("$[0].responsible_name").value("Mariana Costa"))
+                .andExpect(jsonPath("$[0].updated_at").value("2026-09-20T14:30:00Z"));
     }
 
     @Test
@@ -75,24 +83,27 @@ class SearchControllerTest {
 
         mvc.perform(get("/api/v1/search").param("q", "integracao"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].*", hasSize(7)))
+                .andExpect(jsonPath("$[0].*", hasSize(10)))
                 // The snake_case spelling is the contract: a camelCase key means an annotation was lost.
                 .andExpect(jsonPath("$", everyItem(hasKey("document_id"))))
                 .andExpect(jsonPath("$", everyItem(hasKey("mime_type"))))
                 .andExpect(jsonPath("$", everyItem(hasKey("matched_chunk"))))
-                .andExpect(jsonPath("$", everyItem(hasKey("chunk_index"))));
+                .andExpect(jsonPath("$", everyItem(hasKey("chunk_index"))))
+                .andExpect(jsonPath("$", everyItem(hasKey("responsible_name"))))
+                .andExpect(jsonPath("$", everyItem(hasKey("updated_at"))));
     }
 
     @Test
     @DisplayName("a document uploaded without a description keeps the field, as null")
     void descriptionIsNullRatherThanAbsent() throws Exception {
         given(searchService.search("integracao", null)).willReturn(List.of(new SearchResult(
-                7L, "manual.pdf", null, "application/pdf", 0.9, "trecho", 0)));
+                7L, "manual.pdf", null, "application/pdf", 0.9, "trecho", 0,
+                "Técnica", "Mariana Costa", UPDATED_AT)));
 
         mvc.perform(get("/api/v1/search").param("q", "integracao"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].description").value(nullValue()))
-                .andExpect(jsonPath("$[0].*", hasSize(7)));
+                .andExpect(jsonPath("$[0].*", hasSize(10)));
     }
 
     @Test
