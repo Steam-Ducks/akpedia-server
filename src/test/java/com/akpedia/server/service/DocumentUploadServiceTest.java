@@ -23,6 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.akpedia.server.client.EmbeddingClient;
 import com.akpedia.server.client.GotenbergClient;
+import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.DocumentChunk;
 import com.akpedia.server.dto.DocumentEmbeddingResponse;
 import com.akpedia.server.dto.EmbeddingModelInfo;
@@ -66,6 +67,8 @@ class DocumentUploadServiceTest {
     private EmbeddingClient embeddingClient;
     @Mock
     private EmbeddingRepository embeddingRepository;
+    @Mock
+    private DefaultUserProvider defaultUser;
 
     private DocumentUploadService service;
     private Category category;
@@ -74,7 +77,8 @@ class DocumentUploadServiceTest {
     @BeforeEach
     void setUp() {
         service = new DocumentUploadService(
-                documents, documentFiles, categories, users, gotenberg, embeddingClient, embeddingRepository);
+                documents, documentFiles, categories, users, gotenberg, embeddingClient, embeddingRepository,
+                defaultUser);
         category = new Category("Manuais", "manuais tecnicos");
         creator = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", "setor de TI"));
     }
@@ -202,6 +206,37 @@ class DocumentUploadServiceTest {
                 .isInstanceOf(InvalidDocumentUploadException.class);
 
         verifyNoInteractions(categories, users, gotenberg, embeddingClient, embeddingRepository);
+    }
+
+    @Test
+    @DisplayName("an upload with no creator is attributed to the configured default user")
+    void noCreatorFallsBackToTheDefaultUser() {
+        given(categories.findById(10L)).willReturn(Optional.of(category));
+        given(defaultUser.userId()).willReturn(99L);
+        given(users.findById(99L)).willReturn(Optional.of(creator));
+        byte[] pdf = "%PDF-1.4 conteudo".getBytes();
+        given(embeddingClient.embedDocument(pdf, "manual.pdf", "application/pdf")).willReturn(embeddingResponse());
+        given(documents.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+
+        Document result = service.upload(pdf, "manual.pdf", "application/pdf", 10L, null, null, null);
+
+        assertThat(result.getCreator()).isSameAs(creator);
+        verify(users).findById(99L);
+    }
+
+    @Test
+    @DisplayName("an explicit creator is used as given, without consulting the default user")
+    void explicitCreatorIgnoresTheDefaultUser() {
+        given(categories.findById(10L)).willReturn(Optional.of(category));
+        given(users.findById(20L)).willReturn(Optional.of(creator));
+        byte[] pdf = "%PDF-1.4 conteudo".getBytes();
+        given(embeddingClient.embedDocument(pdf, "manual.pdf", "application/pdf")).willReturn(embeddingResponse());
+        given(documents.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+
+        service.upload(pdf, "manual.pdf", "application/pdf", 10L, 20L, null, null);
+
+        // The fallback must not leak into uploads that name their author.
+        verifyNoInteractions(defaultUser);
     }
 
 }

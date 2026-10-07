@@ -32,6 +32,10 @@ server:
   port: ${SERVER_PORT:8080}
 
 akpedia:
+  # TEMPORARY: with no registration or login, every upload and approval is attributed to the
+  # user seeded by V5__seed_default_approver.sql. Resolved to an id at startup, and the
+  # application refuses to start when no user has this email.
+  default-user-email: ${DEFAULT_USER_EMAIL:aprovador@akpedia.local}
   embedding:
     base-url: ${EMBEDDING_BASE_URL:http://localhost:8000}
     connect-timeout: ${EMBEDDING_CONNECT_TIMEOUT:2s}
