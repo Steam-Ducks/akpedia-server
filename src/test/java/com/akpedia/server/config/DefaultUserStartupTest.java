@@ -44,10 +44,12 @@ class DefaultUserStartupTest {
     void startupFailsWhenConfiguredUserDoesNotExist() {
         // A separate context on purpose: the point is the failure during startup, which the
         // surrounding @SpringBootTest cannot show because it has to start successfully.
+        // The email goes in as a command-line argument, not through properties(): that method
+        // registers default properties, the lowest-precedence source, which application.yml
+        // would override -- and the boot would then succeed on the real seeded user.
         assertThatThrownBy(() -> new SpringApplicationBuilder(AkpediaServerApplication.class)
                 .web(WebApplicationType.NONE)
-                .properties("akpedia.default-user-email=nao-existe@akpedia.local")
-                .run()
+                .run("--akpedia.default-user-email=nao-existe@akpedia.local")
                 .close())
                 .rootCause()
                 .isInstanceOf(IllegalStateException.class)
