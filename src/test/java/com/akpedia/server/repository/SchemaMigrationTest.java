@@ -11,7 +11,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 /**
- * Asserts that migrations V2/V3 delivered the schema the entities assume.
+ * Asserts that migrations V2 to V4 delivered the schema the entities assume.
  * Complements ddl-auto: validate, which only checks columns and types.
  */
 @DataJpaTest
@@ -80,5 +80,73 @@ class SchemaMigrationTest {
                 .contains("APPROVED")
                 .contains("REJECTED")
                 .contains("ARCHIVED");
+    }
+
+    @Test
+    @DisplayName("documents has the review columns with the expected types")
+    void documentReviewColumnsExist() {
+        List<?> rows = entityManager.createNativeQuery(
+                        "SELECT a.attname || ' ' || format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                                + "WHERE a.attrelid = 'documents'::regclass AND a.attname IN ("
+                                + "'review_comment', 'reviewed_at', 'suggested_category_id', 'category_confidence')")
+                .getResultList();
+
+        assertThat(rows).extracting(Object::toString).containsExactlyInAnyOrder(
+                "review_comment text",
+                "reviewed_at timestamp with time zone",
+                "suggested_category_id bigint",
+                "category_confidence numeric(4,3)");
+    }
+
+    @Test
+    @DisplayName("suggested_category_id references categories with ON DELETE SET NULL")
+    void suggestedCategoryForeignKeySetsNullOnDelete() {
+        Object definition = entityManager.createNativeQuery(
+                        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                                + "WHERE conname = 'fk_documents_suggested_category_id'")
+                .getSingleResult();
+
+        assertThat(definition.toString())
+                .contains("REFERENCES categories(id)")
+                .contains("ON DELETE SET NULL");
+    }
+
+    @Test
+    @DisplayName("category_confidence only accepts values between 0 and 1")
+    void categoryConfidenceIsBoundedByCheck() {
+        Object outOfRange = entityManager.createNativeQuery(
+                        "SELECT count(*) FROM (VALUES (-0.001), (1.001)) AS v(category_confidence) "
+                                + "WHERE " + categoryConfidenceCheck())
+                .getSingleResult();
+        Object inRange = entityManager.createNativeQuery(
+                        "SELECT count(*) FROM (VALUES (0), (0.5), (1)) AS v(category_confidence) "
+                                + "WHERE " + categoryConfidenceCheck())
+                .getSingleResult();
+
+        assertThat(((Number) outOfRange).intValue()).isZero();
+        assertThat(((Number) inRange).intValue()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("the category catalog was seeded by the migration")
+    void categoryCatalogIsSeeded() {
+        List<?> names = entityManager
+                .createNativeQuery("SELECT name FROM categories")
+                .getResultList();
+
+        // Unlike permissions, categories are also created at runtime, so the seed is a subset.
+        assertThat(names).extracting(Object::toString)
+                .contains("Tecnico", "Regulatorio", "Juridico", "Qualidade");
+    }
+
+    /** The CHECK expression as the database stores it, evaluated instead of string-matched. */
+    private String categoryConfidenceCheck() {
+        String definition = entityManager.createNativeQuery(
+                        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                                + "WHERE conname = 'ck_documents_category_confidence'")
+                .getSingleResult()
+                .toString();
+
+        return definition.substring("CHECK ".length());
     }
 }
