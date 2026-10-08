@@ -81,6 +81,9 @@ akpedia-server/
     │   │   │   ├── EmbeddingProperties.java
     │   │   │   ├── GotenbergClientConfig.java
     │   │   │   ├── GotenbergProperties.java
+    │   │   │   ├── DefaultUserProperties.java # akpedia.default-user-email
+    │   │   │   ├── DefaultUserConfig.java
+    │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
     │   │   │   ├── DocumentController.java # upload de documentos
@@ -113,7 +116,9 @@ akpedia-server/
     │       └── db/migration/
     │           ├── V1__init.sql # migração inicial Flyway
     │           ├── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
-    │           └── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
+    │           ├── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
+    │           ├── V4__document_review_fields.sql # campos de revisão + catálogo de categorias
+    │           └── V5__seed_default_approver.sql # usuário padrão temporário (ver Configuração)
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
@@ -140,6 +145,57 @@ A aplicação lê as configurações de conexão a partir de variáveis de ambie
 | `DB_USER`      | `akpedia`                                        |
 | `DB_PASSWORD`  | `akpedia`                                        |
 | `SERVER_PORT`  | `8080`                                           |
+
+### Usuário padrão (temporário)
+
+> **Temporário.** Esta seção existe enquanto não houver CRUD de usuários nem autenticação.
+> Quando o cadastro e o login entrarem, o usuário abaixo e a migration que o cria devem sair,
+> junto com o `akpedia.default-user-email` e o `VITE_DEFAULT_USER_ID` do front.
+
+Todo documento precisa de um autor e toda aprovação precisa registrar quem aprovou. Como ainda
+não existe cadastro nem login, a migration `V5__seed_default_approver.sql` cria direto no banco
+um setor padrão (`Engenharia`) e um único usuário, que é ao mesmo tempo o autor dos uploads e o
+aprovador:
+
+| Campo           | Valor                                            |
+|-----------------|--------------------------------------------------|
+| `name`          | `Aprovador Padrao`                               |
+| `email`         | `aprovador@akpedia.local`                        |
+| `sector`        | `Engenharia`                                     |
+| `is_active`     | `true`                                           |
+| `password_hash` | placeholder — **não é uma credencial utilizável** |
+
+A migration é idempotente (`ON CONFLICT DO NOTHING` no nome do setor e no email do usuário),
+então rodar as migrations de novo não duplica nem sobrescreve nada.
+
+| Variável              | Default                   | Para que serve                        |
+|-----------------------|---------------------------|---------------------------------------|
+| `DEFAULT_USER_EMAIL`  | `aprovador@akpedia.local` | Email do usuário padrão (`akpedia.default-user-email`) |
+
+O servidor **resolve esse email para o id no startup**, uma vez, e guarda o id. Se nenhum usuário
+tiver o email configurado, a aplicação **não sobe** e o log aponta o problema:
+
+```
+Usuario padrao nao encontrado pelo email 'aprovador@akpedia.local'. A configuracao
+akpedia.default-user-email (variavel DEFAULT_USER_EMAIL) tem que apontar para um usuario que
+exista no banco. Confira se a migration V5__seed_default_approver.sql rodou e se o email
+configurado e o mesmo que ela insere.
+```
+
+Falhar no startup é proposital: é melhor do que descobrir o problema num 404 sem explicação no
+primeiro upload.
+
+É esse id que o `POST /api/v1/documents` usa quando o `creatorId` não vem na requisição (ver
+[Documentos](#documentos)), então o upload tem autor mesmo sem ninguém logado.
+
+**No front**, o id correspondente vai em `VITE_DEFAULT_USER_ID`, no `.env.example` do repositório
+do cliente — aqui não há código de cliente, e o `.env.example` deste repo serve só ao
+`docker-compose`. O id é valor de sequência e muda de banco para banco, então pegue o do seu:
+
+```bash
+docker compose exec db psql -U akpedia -d akpedia \
+  -c "SELECT id FROM users WHERE email = 'aprovador@akpedia.local'"
+```
 
 ### Serviço de embeddings
 
@@ -326,7 +382,7 @@ conversão para PDF é obrigatória; se ela falhar, nada é salvo (ver status de
 |--------------------|:-----------:|--------------------------------------------------------|
 | `file`             | sim         | arquivo a enviar                                        |
 | `categoryId`       | sim         | id de uma categoria existente                            |
-| `creatorId`        | sim         | id de um usuário existente                               |
+| `creatorId`        | não         | id de um usuário existente; omitido, cai no [usuário padrão](#usuário-padrão-temporário) |
 | `name`             | não         | nome do documento; default é o nome do arquivo com `.pdf` |
 | `description`      | não         | descrição livre                                          |
 
@@ -335,6 +391,15 @@ curl -X POST localhost:8080/api/v1/documents \
   -F "file=@relatorio.docx" \
   -F "categoryId=1" \
   -F "creatorId=1"
+```
+
+Enquanto não houver cadastro nem login, `creatorId` pode ser omitido: o documento fica atribuído
+ao [usuário padrão](#usuário-padrão-temporário) que o servidor resolveu no startup.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents \
+  -F "file=@relatorio.docx" \
+  -F "categoryId=1"
 ```
 
 A resposta traz só metadados — o PDF em si não volta no corpo:

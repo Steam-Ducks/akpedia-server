@@ -37,6 +37,7 @@ import com.akpedia.server.service.DocumentUploadService;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -125,7 +126,10 @@ public class DocumentController {
             @Schema(type = "string", format = "binary", description = "File to upload in any supported format.")
             MultipartFile file,
             @RequestParam("categoryId") Long categoryId,
-            @RequestParam("creatorId") Long creatorId,
+            @RequestParam(value = "creatorId", required = false)
+            @Parameter(description = "Author of the document. Optional while there is no registration "
+                    + "or login: omitting it attributes the document to the configured default user.")
+            Long creatorId,
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "description", required = false) String description) throws IOException {
 

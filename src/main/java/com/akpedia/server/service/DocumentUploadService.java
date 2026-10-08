@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.akpedia.server.client.EmbeddingClient;
 import com.akpedia.server.client.GotenbergClient;
+import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.DocumentChunk;
 import com.akpedia.server.dto.DocumentEmbeddingResponse;
 import com.akpedia.server.dto.EmbeddingModelInfo;
@@ -54,6 +55,7 @@ public class DocumentUploadService {
     private final GotenbergClient gotenberg;
     private final EmbeddingClient embeddingClient;
     private final EmbeddingRepository embeddingRepository;
+    private final DefaultUserProvider defaultUser;
 
     public DocumentUploadService(
             DocumentRepository documents,
@@ -62,7 +64,8 @@ public class DocumentUploadService {
             UserRepository users,
             GotenbergClient gotenberg,
             EmbeddingClient embeddingClient,
-            EmbeddingRepository embeddingRepository) {
+            EmbeddingRepository embeddingRepository,
+            DefaultUserProvider defaultUser) {
         this.documents = documents;
         this.documentFiles = documentFiles;
         this.categories = categories;
@@ -70,6 +73,7 @@ public class DocumentUploadService {
         this.gotenberg = gotenberg;
         this.embeddingClient = embeddingClient;
         this.embeddingRepository = embeddingRepository;
+        this.defaultUser = defaultUser;
     }
 
     /**
@@ -79,13 +83,15 @@ public class DocumentUploadService {
      * @param filename    original file name, used to derive the stored name and pick the LibreOffice filter
      * @param contentType media type the caller sent for the upload
      * @param categoryId  category the document is filed under
-     * @param creatorId   user the document is attributed to
+     * @param creatorId   user the document is attributed to; when {@code null}, the document falls
+     *                    back to the configured default user, which is the only author this sprint
+     *                    has while there is no registration or login
      * @param name        display name; falls back to {@code filename} with a {@code .pdf} extension when blank
      * @param description optional description
      * @return the persisted document, with its category and creator already loaded
      * @throws InvalidDocumentUploadException     if the file is empty
      * @throws CategoryNotFoundException          if no category exists with {@code categoryId}
-     * @throws UserNotFoundException              if no user exists with {@code creatorId}
+     * @throws UserNotFoundException              if no user exists with the resolved creator id
      * @throws com.akpedia.server.exception.PdfConversionException if the conversion to PDF fails
      */
     @Transactional
@@ -97,8 +103,12 @@ public class DocumentUploadService {
 
         Category category = categories.findById(categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
-        User creator = users.findById(creatorId)
-                .orElseThrow(() -> new UserNotFoundException(creatorId));
+        // No registration or login yet, so an upload that names no creator is attributed to the
+        // seeded default user instead of being refused. The id was resolved at startup, so this
+        // cannot be the reason the lookup below fails.
+        Long authorId = creatorId != null ? creatorId : defaultUser.userId();
+        User creator = users.findById(authorId)
+                .orElseThrow(() -> new UserNotFoundException(authorId));
 
         byte[] pdf = isAlreadyPdf(filename, contentType, content)
                 ? content
