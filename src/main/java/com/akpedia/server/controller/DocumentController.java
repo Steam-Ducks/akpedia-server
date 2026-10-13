@@ -1,6 +1,7 @@
 package com.akpedia.server.controller;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -94,22 +95,24 @@ public class DocumentController {
     }
 
     @Operation(
-            summary = "Upload a document, convert it to PDF, and index it with akpedia-ml",
+            summary = "Upload a document, convert it to PDF, and store it pending approval",
             description = """
                     Accepts any format Gotenberg can convert through LibreOffice (docx, xlsx, pptx, odt, rtf,
                     images, plain text...). Uploaded PDFs are stored directly without reconversion.
                     The stored binary is always the resulting PDF; the original format is not retained.
 
-                    After storage, the PDF is sent to akpedia-ml to generate embeddings, which are stored in
-                    `embeddings`. A failure at this stage does not undo the upload: the stored document keeps
-                    `processing_status: FAILED` and the reason in `processing_error` for a later retry.
-                    Only PDF conversion is required for a 201 response.""")
+                    The document is stored with `status: PENDING_APPROVAL` and `processing_status: PENDING`.
+                    Nothing is sent to akpedia-ml here: the document is only embedded for search once it is
+                    approved, so it has no rows in `embeddings` until then. It can be opened and previewed
+                    in the meantime, which is how the approver reads it.
+
+                    `suggestedCategoryId` and `categoryConfidence` record the category the classifier
+                    suggested and how sure it was, for the approver to confirm or correct.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "201",
-                description = "Document converted and stored; processing_status indicates whether akpedia-ml indexing succeeded."),
+        @ApiResponse(responseCode = "201", description = "Document converted and stored, awaiting approval."),
         @ApiResponse(responseCode = "400", description = "Invalid request (empty file, missing parameter, or invalid parameter).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "The specified category or user does not exist.",
+        @ApiResponse(responseCode = "404", description = "The specified category, suggested category or user does not exist.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -131,11 +134,17 @@ public class DocumentController {
                     + "or login: omitting it attributes the document to the configured default user.")
             Long creatorId,
             @RequestParam(value = "name", required = false) String name,
-            @RequestParam(value = "description", required = false) String description) throws IOException {
+            @RequestParam(value = "description", required = false) String description,
+            @RequestParam(value = "suggestedCategoryId", required = false)
+            @Parameter(description = "Category the classifier suggested; one of the catalog's categories.")
+            Long suggestedCategoryId,
+            @RequestParam(value = "categoryConfidence", required = false)
+            @Parameter(description = "Confidence of the suggestion, from 0 to 1. Requires `suggestedCategoryId`.")
+            BigDecimal categoryConfidence) throws IOException {
 
         Document document = uploadService.upload(
                 file.getBytes(), file.getOriginalFilename(), file.getContentType(),
-                categoryId, creatorId, name, description);
+                categoryId, creatorId, name, description, suggestedCategoryId, categoryConfidence);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(DocumentUploadResponse.from(document));
     }
@@ -149,9 +158,9 @@ public class DocumentController {
                     name carries the `.pdf` extension even when the document was named without one.
 
                     Two documents are not openable: an archived one (403), which is out of circulation, and one
-                    whose indexing is still in flight (409) -- the same request works once the indexing lands.
-                    A document whose indexing *failed* does open: its PDF was stored before that step ran, so
-                    the bytes are intact and only search is missing them.
+                    akpedia-ml is indexing right now (409) -- the same request works once the indexing lands.
+                    A document awaiting approval opens, since the approver has to read it, and so does one
+                    whose indexing *failed*: the PDF is stored at upload, so only search is missing it.
 
                     The response is private and revalidated on every use, and carries an `ETag` and
                     `Last-Modified`: a browser that already holds the document asks again and gets a 304 with no

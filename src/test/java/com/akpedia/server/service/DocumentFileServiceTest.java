@@ -14,8 +14,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
@@ -201,17 +199,26 @@ class DocumentFileServiceTest {
         verifyNoInteractions(documentFiles);
     }
 
-    @ParameterizedTest
-    @EnumSource(value = ProcessingStatus.class, names = {"PENDING", "PROCESSING"})
-    @DisplayName("a document whose indexing has not settled is refused, and its blob is never loaded")
-    void documentStillBeingIndexedIsRefused(ProcessingStatus processingStatus) {
-        metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE, DocumentStatus.APPROVED, processingStatus));
+    @Test
+    @DisplayName("a document akpedia-ml is indexing right now is refused, and its blob is never loaded")
+    void documentBeingIndexedIsRefused() {
+        metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
+                DocumentStatus.APPROVED, ProcessingStatus.PROCESSING));
 
         assertThatThrownBy(() -> service.describe(7L))
                 .isInstanceOf(DocumentNotProcessedException.class)
-                .hasMessageContaining(processingStatus.name());
+                .hasMessageContaining("PROCESSING");
 
         verifyNoInteractions(documentFiles);
+    }
+
+    @Test
+    @DisplayName("a document awaiting approval opens: the approver has to read it before it is indexed")
+    void documentAwaitingApprovalIsServed() {
+        storedDocument(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
+                DocumentStatus.PENDING_APPROVAL, ProcessingStatus.PENDING));
+
+        assertThat(service.contentOf(service.describe(7L))).isEqualTo(PDF_BYTES);
     }
 
     @Test
