@@ -110,7 +110,7 @@ akpedia-server/
     │   │   │   ├── PdfConversionUnavailableException.java
     │   │   │   └── PdfConversionRejectedException.java
     │   │   └── service/
-    │   │       └── DocumentUploadService.java # orquestra conversão + persistência + indexação
+    │   │       └── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -305,12 +305,9 @@ porta de saída para o serviço de embeddings:
 | `embedDocument(byte[] content, String filename, String contentType)` | extrai, divide em chunks e gera um vetor por chunk |
 | `embedQuery(String text)`                                           | gera o vetor do texto buscado                      |
 
-Quem usa o `EmbeddingClient` hoje é o
-[`DocumentUploadService`](src/main/java/com/akpedia/server/service/DocumentUploadService.java),
-logo depois de salvar o documento e o PDF: para cada `DocumentChunk` da resposta, salva um
-`Embedding`; se o cliente lançar `EmbeddingException` (fora do ar, recusado, ou algo ilegível),
-o `catch` marca o documento como `processing_status: FAILED` com o motivo em `processing_error`
-em vez de desfazer o upload — ver [Documentos](#documentos) para a rota completa.
+Quem usa o `EmbeddingClient` hoje é a busca, que chama `embedQuery` para vetorizar o texto
+pesquisado. O upload não o chama mais: o documento fica aguardando aprovação e só é indexado
+(`embedDocument`) depois de aprovado — ver [Documentos](#documentos).
 
 Toda falha sai como `EmbeddingException`, com mensagem que nomeia a rota e o que estava sendo feito:
 
@@ -371,12 +368,12 @@ ar, e não precisa de nada rodando. Para ver o **timeout** em vez da conexão re
 enviado passa direto, sem reconversão — o binário salvo é sempre o PDF resultante, o formato
 original não é retido.
 
-Depois de salvo, o PDF é enviado ao **akpedia-ml** (mesma rota que `POST /api/v1/documents/embed`
-chama) para virar chunks com vetores, que ficam em `embeddings`. Essa etapa não é obrigatória
-para a resposta ser 201: uma falha nela (akpedia-ml fora do ar, por exemplo) só deixa o
-documento com `processing_status: FAILED` e o motivo em `processing_error` — o documento e o
-PDF já estavam salvos antes dela rodar, então nada se perde e dá para reindexar depois. Só a
-conversão para PDF é obrigatória; se ela falhar, nada é salvo (ver status de erro abaixo).
+O documento é salvo **aguardando aprovação**: `status: PENDING_APPROVAL` e
+`processing_status: PENDING`. O upload não chama o akpedia-ml e não grava nada em `embeddings` —
+a indexação para busca só acontece depois que o documento é aprovado, para não gastar
+processamento com o que ainda pode ser rejeitado. Enquanto isso o documento já pode ser aberto e
+visualizado (é assim que o aprovador o lê), mas não aparece na busca nem na lista de recentes.
+Se a conversão para PDF falhar, nada é salvo (ver status de erro abaixo).
 
 | Campo (multipart) | Obrigatório | Descrição                                             |
 |--------------------|:-----------:|--------------------------------------------------------|
@@ -385,6 +382,8 @@ conversão para PDF é obrigatória; se ela falhar, nada é salvo (ver status de
 | `creatorId`        | não         | id de um usuário existente; omitido, cai no [usuário padrão](#usuário-padrão-temporário) |
 | `name`             | não         | nome do documento; default é o nome do arquivo com `.pdf` |
 | `description`      | não         | descrição livre                                          |
+| `suggestedCategoryId` | não      | id da categoria sugerida pelo classificador; precisa ser uma das categorias do catálogo |
+| `categoryConfidence`  | não      | confiança da sugestão, de 0 a 1; só é aceita junto com `suggestedCategoryId` |
 
 ```bash
 curl -X POST localhost:8080/api/v1/documents \
@@ -413,23 +412,24 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
   "file_size": 48213,
   "category_id": 1,
   "creator_id": 1,
-  "status": "DRAFT",
-  "processing_status": "COMPLETED",
+  "status": "PENDING_APPROVAL",
+  "processing_status": "PENDING",
   "processing_error": null,
+  "suggested_category_id": 2,
+  "category_confidence": 0.87,
   "created_at": "2026-09-21T20:24:00Z"
 }
 ```
 
-`processing_status` vem `COMPLETED` quando a indexação no akpedia-ml deu certo, ou `FAILED`
-(com o motivo em `processing_error`) quando não deu — nos dois casos a resposta é 201, porque
-o documento e o PDF já foram salvos antes dessa etapa rodar.
+`suggested_category_id` e `category_confidence` vêm `null` quando o upload não trouxe sugestão.
 
 #### Status de erro
 
 | Situação                                  | Status | `code`                        |
 |--------------------------------------------|--------|-------------------------------|
 | arquivo vazio, ou parâmetro ausente/inválido | 400    | `invalid_request`             |
-| categoria informada não existe              | 404    | `category_not_found`          |
+| `categoryConfidence` fora de 0 a 1, ou sem `suggestedCategoryId` | 400 | `invalid_request` |
+| categoria informada ou sugerida não existe  | 404    | `category_not_found`          |
 | usuário informado não existe                | 404    | `user_not_found`               |
 | arquivo acima de 25 MB                      | 413    | `file_too_large`              |
 | Gotenberg recebeu mas recusou o arquivo     | 422    | `pdf_conversion_rejected`     |
@@ -472,16 +472,18 @@ O que restringe é o estado do próprio documento:
 | Estado                                          | Resposta | Por quê                                                        |
 |--------------------------------------------------|----------|----------------------------------------------------------------|
 | `status: ARCHIVED`                               | 403      | documento fora de circulação; arquivar é definitivo             |
-| `processing_status: PENDING` ou `PROCESSING`     | 409      | a indexação no akpedia-ml ainda não terminou                    |
+| `processing_status: PROCESSING`                  | 409      | o akpedia-ml está indexando o documento neste momento           |
 
 Os outros `status` (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`) abrem normalmente.
 
-O 409 é conflito de estado, não recusa: os dois viram `COMPLETED` sozinhos, então a mesma
+O 409 é conflito de estado, não recusa: a indexação termina sozinha, então a mesma
 requisição passa a funcionar — é o que separa esse caso do 403, que não muda.
 
-**`processing_status: FAILED` abre.** O PDF é convertido e salvo *antes* da etapa de embeddings,
-que é justamente por isso que uma falha nela não desfaz o upload — então o binário está íntegro e
-só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
+**`processing_status: PENDING` abre.** É o estado em que o upload deixa o documento até ele ser
+aprovado, e o aprovador precisa ler o documento para decidir.
+
+**`processing_status: FAILED` abre.** O PDF é convertido e salvo no upload, bem antes da etapa
+de embeddings — então o binário está íntegro e só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
 para sempre por causa de uma etapa que nem tocou no arquivo.
 
 A busca (`GET /api/v1/search`) usa o mesmo critério: a query já filtrava `processing_status =

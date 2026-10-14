@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 import org.junit.jupiter.api.DisplayName;
@@ -43,6 +44,7 @@ import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotProcessedException;
+import com.akpedia.server.exception.InvalidDocumentUploadException;
 import com.akpedia.server.exception.PdfConversionRejectedException;
 import com.akpedia.server.exception.PdfConversionUnavailableException;
 import com.akpedia.server.exception.UserNotFoundException;
@@ -75,26 +77,26 @@ class DocumentControllerTest {
     private static final Instant LAST_MODIFIED = Instant.parse("2026-09-24T22:31:05Z");
     private static final String ETAG = "\"1-17-1790634665000\"";
 
-    private static Document document(ProcessingStatus processingStatus, String processingError) {
+    /** A freshly uploaded document, the way the service hands one back: stored and awaiting approval. */
+    private static Document document() {
         Sector sector = new Sector("TI", "setor de TI");
         Category category = new Category("Manuais", "manuais tecnicos");
         User creator = new User("Ana", "ana@akpedia.test", "hash", sector);
-        Document document = new Document("relatorio.pdf", "application/pdf", 2048L, category, creator, DocumentStatus.DRAFT);
+        Document document = new Document(
+                "relatorio.pdf", "application/pdf", 2048L, category, creator, DocumentStatus.PENDING_APPROVAL);
         ReflectionTestUtils.setField(category, "id", 10L);
         ReflectionTestUtils.setField(creator, "id", 20L);
         ReflectionTestUtils.setField(document, "id", 1L);
-        document.setProcessingStatus(processingStatus);
-        document.setProcessingError(processingError);
         return document;
     }
 
     @Test
-    @DisplayName("POST /api/v1/documents converts, saves, indexes and answers 201 with the metadata")
+    @DisplayName("POST /api/v1/documents converts, saves and answers 201 with the document pending approval")
     void uploadStoresConvertedDocument() throws Exception {
         given(uploadService.upload(any(), eq("relatorio.docx"),
                 eq("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-                eq(10L), eq(20L), isNull(), isNull()))
-                .willReturn(document(ProcessingStatus.COMPLETED, null));
+                eq(10L), eq(20L), isNull(), isNull(), isNull(), isNull()))
+                .willReturn(document());
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "relatorio.docx",
@@ -108,31 +110,82 @@ class DocumentControllerTest {
                 .andExpect(jsonPath("$.mime_type").value("application/pdf"))
                 .andExpect(jsonPath("$.category_id").value(10))
                 .andExpect(jsonPath("$.creator_id").value(20))
-                .andExpect(jsonPath("$.status").value("DRAFT"))
-                .andExpect(jsonPath("$.processing_status").value("COMPLETED"))
-                .andExpect(jsonPath("$.processing_error").value(nullValue()));
+                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.processing_status").value("PENDING"))
+                .andExpect(jsonPath("$.processing_error").value(nullValue()))
+                .andExpect(jsonPath("$.suggested_category_id").value(nullValue()))
+                .andExpect(jsonPath("$.category_confidence").value(nullValue()));
     }
 
     @Test
-    @DisplayName("a document that could not be indexed still answers 201, with the reason exposed")
-    void uploadDegradedByFailedIndexingStillAnswers201() throws Exception {
-        given(uploadService.upload(any(), any(), any(), eq(10L), eq(20L), isNull(), isNull()))
-                .willReturn(document(ProcessingStatus.FAILED, "akpedia-ml esta fora do ar"));
+    @DisplayName("the suggested category and its confidence reach the service and come back in the response")
+    void uploadCarriesTheCategorySuggestion() throws Exception {
+        Document document = document();
+        Category suggested = new Category("Tecnico", "Documentos tecnicos");
+        ReflectionTestUtils.setField(suggested, "id", 11L);
+        document.setSuggestedCategory(suggested);
+        document.setCategoryConfidence(new BigDecimal("0.87"));
+        given(uploadService.upload(any(), any(), any(), eq(10L), eq(20L), isNull(), isNull(),
+                eq(11L), eq(new BigDecimal("0.87"))))
+                .willReturn(document);
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "relatorio.docx", "application/msword", "conteudo".getBytes()))
                         .param("categoryId", "10")
-                        .param("creatorId", "20"))
+                        .param("creatorId", "20")
+                        .param("suggestedCategoryId", "11")
+                        .param("categoryConfidence", "0.87"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.processing_status").value("FAILED"))
-                .andExpect(jsonPath("$.processing_error").value("akpedia-ml esta fora do ar"));
+                .andExpect(jsonPath("$.suggested_category_id").value(11))
+                .andExpect(jsonPath("$.category_confidence").value(0.87));
+    }
+
+    @Test
+    @DisplayName("an upload with no creatorId is accepted and handed to the service without one")
+    void uploadWithoutCreatorIsAccepted() throws Exception {
+        given(uploadService.upload(any(), any(), any(), eq(10L), isNull(), isNull(), isNull(), isNull(), isNull()))
+                .willReturn(document());
+
+        mvc.perform(multipart("/api/v1/documents")
+                        .file(new MockMultipartFile("file", "relatorio.docx", "application/msword", "conteudo".getBytes()))
+                        .param("categoryId", "10"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"));
+    }
+
+    @Test
+    @DisplayName("a confidence the service refuses answers 400, not 500")
+    void invalidConfidenceBecomes400() throws Exception {
+        willThrow(new InvalidDocumentUploadException("categoryConfidence must be between 0 and 1."))
+                .given(uploadService).upload(any(), any(), any(), anyLong(), anyLong(), any(), any(), any(), any());
+
+        mvc.perform(multipart("/api/v1/documents")
+                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
+                        .param("categoryId", "1")
+                        .param("creatorId", "1")
+                        .param("suggestedCategoryId", "2")
+                        .param("categoryConfidence", "1.5"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
+    }
+
+    @Test
+    @DisplayName("a non-numeric categoryConfidence answers 400, not 500")
+    void nonNumericConfidenceBecomes400() throws Exception {
+        mvc.perform(multipart("/api/v1/documents")
+                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
+                        .param("categoryId", "1")
+                        .param("suggestedCategoryId", "2")
+                        .param("categoryConfidence", "alta"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
     }
 
     @Test
     @DisplayName("an unknown category answers 404, not 500")
     void unknownCategoryBecomes404() throws Exception {
         willThrow(new CategoryNotFoundException(999L))
-                .given(uploadService).upload(any(), any(), any(), eq(999L), anyLong(), any(), any());
+                .given(uploadService).upload(any(), any(), any(), eq(999L), anyLong(), any(), any(), any(), any());
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
@@ -146,7 +199,7 @@ class DocumentControllerTest {
     @DisplayName("an unknown creator answers 404, not 500")
     void unknownCreatorBecomes404() throws Exception {
         willThrow(new UserNotFoundException(999L))
-                .given(uploadService).upload(any(), any(), any(), anyLong(), eq(999L), any(), any());
+                .given(uploadService).upload(any(), any(), any(), anyLong(), eq(999L), any(), any(), any(), any());
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
@@ -160,7 +213,7 @@ class DocumentControllerTest {
     @DisplayName("a file Gotenberg refuses to convert answers 422")
     void conversionRejectionBecomes422() throws Exception {
         willThrow(new PdfConversionRejectedException("refused", HttpStatus.BAD_REQUEST, null))
-                .given(uploadService).upload(any(), any(), any(), anyLong(), anyLong(), any(), any());
+                .given(uploadService).upload(any(), any(), any(), anyLong(), anyLong(), any(), any(), any(), any());
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.xyz", "application/octet-stream", new byte[] {1}))
@@ -174,7 +227,7 @@ class DocumentControllerTest {
     @DisplayName("Gotenberg being down answers 503, not 500")
     void conversionUnavailableBecomes503() throws Exception {
         willThrow(new PdfConversionUnavailableException("gotenberg is down", null))
-                .given(uploadService).upload(any(), any(), any(), anyLong(), anyLong(), any(), any());
+                .given(uploadService).upload(any(), any(), any(), anyLong(), anyLong(), any(), any(), any(), any());
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
@@ -357,7 +410,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("a document akpedia-ml is still indexing answers 409, so a retry makes sense")
     void notIndexedDocumentBecomes409() throws Exception {
-        willThrow(new DocumentNotProcessedException(1L, ProcessingStatus.PENDING)).given(fileService).describe(1L);
+        willThrow(new DocumentNotProcessedException(1L, ProcessingStatus.PROCESSING)).given(fileService).describe(1L);
 
         mvc.perform(get("/api/v1/documents/1/file"))
                 .andExpect(status().isConflict())

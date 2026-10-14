@@ -159,7 +159,7 @@ public class ApiExceptionHandler {
     }
 
     /**
-     * 409: the document exists but akpedia-ml is still to index it.
+     * 409: the document exists but akpedia-ml is indexing it right now.
      *
      * <p>A conflict with the document's current state, not a refusal of the request: unlike the
      * 403 above, this one stops being an error as soon as the indexing completes, so the caller
