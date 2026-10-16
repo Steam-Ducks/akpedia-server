@@ -23,6 +23,7 @@ import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 @WebMvcTest(controllers = DocumentController.class)
@@ -42,6 +43,9 @@ class DocumentListHttpTest {
 
     @MockBean
     private DocumentListService listService;
+
+    @MockBean
+    private DocumentSubmissionService submissionService;
 
     @Test
     @DisplayName("GET /api/v1/documents answers each document with the eight agreed fields")
