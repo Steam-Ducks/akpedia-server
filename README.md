@@ -443,10 +443,10 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
 
-### Sugerir a categoria (antes de enviar)
+### Sugerir título, descrição e categoria (antes de enviar)
 
-`POST /api/v1/documents/analyze` recebe o arquivo e devolve a categoria que o akpedia-ml
-reconheceu, para a tela de upload já vir preenchida. **Nada é persistido**: o arquivo é lido,
+`POST /api/v1/documents/analyze` recebe o arquivo e devolve o título, a descrição e a categoria
+que o akpedia-ml leu do documento, para a tela de upload já vir preenchida. **Nada é persistido**: o arquivo é lido,
 convertido em memória e descartado, então uma análise abandonada não deixa documento nem linha
 nenhuma atrás.
 
@@ -467,6 +467,8 @@ curl -X POST localhost:8080/api/v1/documents/analyze \
 
 ```json
 {
+  "title": "Manual de Manutenção do Trem de Pouso",
+  "description": "Este manual descreve os procedimentos de inspeção...",
   "suggested_category_id": 2,
   "confidence": 0.873
 }
@@ -475,6 +477,23 @@ curl -X POST localhost:8080/api/v1/documents/analyze \
 O `suggested_category_id` é exatamente o que o `POST /api/v1/documents` recebe como
 `suggestedCategoryId`, e o `confidence` como `categoryConfidence` — a tela devolve os dois sem
 precisar consultar nada.
+
+O `title` vem dos metadados do PDF, da linha de maior fonte da primeira página ou, na falta dos
+dois, do nome do arquivo. A `description` é o primeiro parágrafo com conteúdo do documento, ou
+`null` quando não há nenhum.
+
+**Sem sugestão de categoria** (o akpedia-ml ainda não tem a base de categorias), a resposta é
+`200` com `suggested_category_id` e `confidence` `null`. Não é erro: o título e a descrição vêm do
+mesmo jeito, e a tela deixa a categoria para o usuário escolher.
+
+```json
+{
+  "title": "manual",
+  "description": null,
+  "suggested_category_id": null,
+  "confidence": null
+}
+```
 
 #### Status de erro
 

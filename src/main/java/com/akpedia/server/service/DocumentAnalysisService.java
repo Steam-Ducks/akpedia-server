@@ -16,11 +16,12 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 
 /**
- * Suggests a category for a document the user is about to upload, without storing anything.
+ * Suggests a title, description and category for a document the user is about to upload, without
+ * storing anything.
  *
  * <p>By the architecture the upload screen never talks to akpedia-ml: it posts the file here, and
- * this server decides whether the format is acceptable, converts it, asks the classifier, and
- * answers with a category the screen can hand straight back to the upload. Nothing is persisted,
+ * this server decides whether the format is acceptable, converts it, asks akpedia-ml, and answers
+ * with suggestions the screen can hand straight back to the upload. Nothing is persisted,
  * so an analysis the user abandons leaves no trace.
  */
 @Service
@@ -40,12 +41,12 @@ public class DocumentAnalysisService {
     }
 
     /**
-     * Converts the document if needed and returns the category the classifier suggests.
+     * Converts the document if needed and returns the title, description and category akpedia-ml suggests.
      *
      * @param content     raw bytes of the uploaded file
      * @param filename    original file name, used to validate the format and to pick the converter
      * @param contentType media type the caller declared for the upload
-     * @return the suggested category id and the classifier's confidence
+     * @return the suggestions; category id and confidence are {@code null} when the classifier has none
      * @throws InvalidDocumentUploadException          if the file is empty
      * @throws UnsupportedDocumentFormatException      if the format is not on the accepted list
      * @throws CategorySuggestionUnavailableException  if akpedia-ml never answered
@@ -66,10 +67,21 @@ public class DocumentAnalysisService {
         byte[] pdf = alreadyPdf ? content : gotenberg.convertToPdf(content, filename, contentType);
 
         DocumentClassification classification = classify(pdf, filename);
+
+        // No category is akpedia-ml saying "I don't know" (no centroids deployed yet), not a broken
+        // contract: the title and description still go back, and the user picks the category.
+        if (classification.category() == null || classification.category().isBlank()) {
+            return new DocumentAnalysisResponse(classification.title(), classification.description(), null, null);
+        }
+
         Category suggested = categories.findByName(classification.category())
                 .orElseThrow(() -> new UnknownSuggestedCategoryException(classification.category()));
 
-        return new DocumentAnalysisResponse(suggested.getId(), confidenceOf(classification));
+        return new DocumentAnalysisResponse(
+                classification.title(),
+                classification.description(),
+                suggested.getId(),
+                confidenceOf(classification));
     }
 
     /**

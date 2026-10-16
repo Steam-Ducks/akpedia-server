@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -63,10 +66,19 @@ class DocumentAnalysisServiceTest {
         ReflectionTestUtils.setField(tecnico, "id", 7L);
     }
 
+    private static final String TITLE = "Manual do Trem de Pouso";
+    private static final String DESCRIPTION = "Este manual descreve os procedimentos de inspecao.";
+
+    /** What akpedia-ml answers, with the title and description every test shares. */
+    private static DocumentClassification analysis(String category, BigDecimal confidence) {
+        Map<String, BigDecimal> scores = category == null || confidence == null ? Map.of() : Map.of(category, confidence);
+        return new DocumentClassification(TITLE, DESCRIPTION, category, confidence, scores, 3);
+    }
+
     /** The happy path of the two collaborators, so each test only states what it is about. */
     private void givenClassifierSuggests(String category, String confidence) {
         given(embeddingClient.classifyDocument(any(), any(), any()))
-                .willReturn(new DocumentClassification("manual.pdf", category, new BigDecimal(confidence)));
+                .willReturn(analysis(category, new BigDecimal(confidence)));
         given(categories.findByName(category)).willReturn(
                 "Tecnico".equals(category) ? Optional.of(tecnico) : Optional.empty());
     }
@@ -79,6 +91,8 @@ class DocumentAnalysisServiceTest {
 
         DocumentAnalysisResponse result = service.analyze(pdf, "manual.pdf", "application/pdf");
 
+        assertThat(result.title()).isEqualTo(TITLE);
+        assertThat(result.description()).isEqualTo(DESCRIPTION);
         assertThat(result.suggestedCategoryId()).isEqualTo(7L);
         assertThat(result.confidence()).isEqualByComparingTo("0.873");
         verifyNoInteractions(gotenberg);
@@ -205,11 +219,28 @@ class DocumentAnalysisServiceTest {
                 .hasMessageContaining("Financeiro");
     }
 
+    @ParameterizedTest(name = "category \"{0}\"")
+    @NullAndEmptySource
+    @ValueSource(strings = "  ")
+    @DisplayName("no category from akpedia-ml is no suggestion, not an error: title and description still come back")
+    void missingCategoryIsNoSuggestion(String category) {
+        given(embeddingClient.classifyDocument(any(), any(), any())).willReturn(analysis(category, null));
+
+        DocumentAnalysisResponse result = service.analyze("%PDF-1.4".getBytes(), "manual.pdf", "application/pdf");
+
+        assertThat(result.title()).isEqualTo(TITLE);
+        assertThat(result.description()).isEqualTo(DESCRIPTION);
+        assertThat(result.suggestedCategoryId()).isNull();
+        assertThat(result.confidence()).isNull();
+        // Nothing to resolve, so the catalog is not even asked: a 502 here would hide the title.
+        verifyNoInteractions(categories);
+    }
+
     @Test
     @DisplayName("a missing confidence comes back as zero instead of null")
     void missingConfidenceBecomesZero() {
         given(embeddingClient.classifyDocument(any(), any(), any()))
-                .willReturn(new DocumentClassification("manual.pdf", "Tecnico", null));
+                .willReturn(analysis("Tecnico", null));
         given(categories.findByName("Tecnico")).willReturn(Optional.of(tecnico));
 
         DocumentAnalysisResponse result = service.analyze("%PDF-1.4".getBytes(), "manual.pdf", "application/pdf");

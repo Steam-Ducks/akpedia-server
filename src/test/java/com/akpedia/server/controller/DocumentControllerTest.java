@@ -451,13 +451,32 @@ class DocumentControllerTest {
     @DisplayName("POST /api/v1/documents/analyze answers 200 with the suggestion for each accepted format")
     void analyzeAcceptsEverySupportedFormat(String filename, String contentType) throws Exception {
         given(analysisService.analyze(any(), eq(filename), eq(contentType)))
-                .willReturn(new DocumentAnalysisResponse(7L, new BigDecimal("0.873")));
+                .willReturn(new DocumentAnalysisResponse(
+                        "Manual do Trem de Pouso", "Este manual descreve a inspecao.", 7L, new BigDecimal("0.873")));
 
         mvc.perform(multipart("/api/v1/documents/analyze")
                         .file(new MockMultipartFile("file", filename, contentType, "conteudo".getBytes())))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Manual do Trem de Pouso"))
+                .andExpect(jsonPath("$.description").value("Este manual descreve a inspecao."))
                 .andExpect(jsonPath("$.suggested_category_id").value(7))
                 .andExpect(jsonPath("$.confidence").value(0.873));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 200 with null category when there is no suggestion")
+    void analyzeAnswersOkWithoutACategory() throws Exception {
+        given(analysisService.analyze(any(), eq("manual.pdf"), eq("application/pdf")))
+                .willReturn(new DocumentAnalysisResponse("Manual do Trem de Pouso", null, null, null));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Manual do Trem de Pouso"))
+                // Present and null, not missing: the screen tells "no suggestion" apart from an old contract.
+                .andExpect(jsonPath("$.suggested_category_id").value(nullValue()))
+                .andExpect(jsonPath("$.confidence").value(nullValue()))
+                .andExpect(jsonPath("$.description").value(nullValue()));
     }
 
     @Test

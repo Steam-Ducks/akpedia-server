@@ -100,11 +100,17 @@ public class DocumentController {
     }
 
     @Operation(
-            summary = "Suggest a category for a document, without storing it",
+            summary = "Suggest a title, description and category for a document, without storing it",
             description = """
-                    Answers the category akpedia-ml recognises for the file, so the upload screen can
-                    pre-fill it before anything is sent. The screen never calls akpedia-ml itself: it posts
-                    the file here, and this server validates the format, converts it and asks the classifier.
+                    Answers the title, description and category akpedia-ml reads from the file, so the upload
+                    screen can pre-fill the form before anything is sent. The screen never calls akpedia-ml
+                    itself: it posts the file here, and this server validates the format, converts it and asks
+                    akpedia-ml.
+
+                    `suggested_category_id` and `confidence` are `null` when akpedia-ml has no category to
+                    suggest; the screen then leaves the category for the user to pick. The title and
+                    description come back either way (`description` is `null` when the document has no
+                    paragraph long enough).
 
                     **Nothing is persisted.** The file is read, converted in memory and discarded, so an
                     analysis the user abandons leaves no document and no rows behind.
@@ -116,7 +122,8 @@ public class DocumentController {
                     `suggestedCategoryId`, and `confidence` as `categoryConfidence`, so both can be handed
                     straight back without a lookup.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "The suggested category and how sure the classifier is."),
+        @ApiResponse(responseCode = "200",
+                description = "The suggested title, description and category (null when there is no suggestion)."),
         @ApiResponse(responseCode = "400", description = "Invalid request (empty file or missing part).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
