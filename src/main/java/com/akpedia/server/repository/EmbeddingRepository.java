@@ -23,6 +23,10 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
          * person responsible, and when the document last changed -- come after the score, so the
          * positions of the original columns stay where {@code SearchService} reads them. A document
          * never edited has no {@code updated_at}, so its creation time stands in.
+         *
+         * <p>Only approved documents are searchable: one still under review, or rejected, holds
+         * vectors but must not surface to anyone. The same rule guards
+         * {@link DocumentRepository#findRecent}; the two have to move together.
          */
         @Query(value = """
                         SELECT document_id, name, description, mime_type, matched_chunk, chunk_index, score,
@@ -47,7 +51,7 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                                 JOIN categories c ON c.id = d.category_id
                                 JOIN users u ON u.id = d.creator_id
                                 WHERE d.processing_status = 'COMPLETED'
-                                    AND d.status <> 'ARCHIVED'
+                                    AND d.status = 'APPROVED'
                                     AND e.model_name = :modelName
                                     AND e.dimensions = :dimensions
                         ) matches

@@ -486,9 +486,14 @@ aprovado, e o aprovador precisa ler o documento para decidir.
 de embeddings — então o binário está íntegro e só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
 para sempre por causa de uma etapa que nem tocou no arquivo.
 
-A busca (`GET /api/v1/search`) usa o mesmo critério: a query já filtrava `processing_status =
-'COMPLETED'` e agora também deixa `ARCHIVED` de fora, senão um resultado da pesquisa levaria a um
-403 ao ser aberto.
+A busca (`GET /api/v1/search`) é mais restrita: além de `processing_status = 'COMPLETED'`, a query
+exige `status = 'APPROVED'`. Só documento aprovado é visível — um em revisão ou recusado tem
+vetores no banco, e sem esse filtro apareceria para qualquer um. Arquivado também fica de fora,
+senão um resultado da pesquisa levaria a um 403 ao ser aberto.
+
+A mesma regra vale para `GET /api/v1/documents`, a listagem recente. O status exigido está escrito
+dentro das duas queries, não é parâmetro: numa listagem pública, quem chama poder escolher o que
+aparece é exatamente como um documento em revisão chega a quem não devia vê-lo.
 
 ```bash
 # no navegador, basta abrir a URL
@@ -534,9 +539,10 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 
 ### Endpoint
 
-`GET /api/v1/search?q=<texto>&limit=<n>` faz busca semântica nos documentos indexados. O texto da
-consulta é vetorizado pelo akpedia-ml e comparado por similaridade de cosseno com os `embeddings`
-salvos.
+`GET /api/v1/search?q=<texto>&limit=<n>` faz busca semântica nos documentos **aprovados e
+indexados**. O texto da consulta é vetorizado pelo akpedia-ml e comparado por similaridade de
+cosseno com os `embeddings` salvos. Documento em revisão (`PENDING_APPROVAL`), recusado
+(`REJECTED`) ou arquivado não aparece, mesmo tendo vetores.
 
 | Parâmetro | Obrigatório | Descrição                                                                 |
 |-----------|:-----------:|---------------------------------------------------------------------------|

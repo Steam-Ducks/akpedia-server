@@ -7,6 +7,7 @@ import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.Embedding;
 import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
+import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -51,6 +52,9 @@ class SearchQueryTest {
 
         document = TestFixtures.document(category, creator);
         document.setDescription("manual tecnico do time");
+        // Approved, because that is the only status search returns: these tests are about the
+        // shape of a row, and an unapproved document would yield no row to inspect.
+        document.setStatus(DocumentStatus.APPROVED);
         document.setProcessingStatus(ProcessingStatus.COMPLETED);
         entityManager.persist(document);
         entityManager.persist(new Embedding(

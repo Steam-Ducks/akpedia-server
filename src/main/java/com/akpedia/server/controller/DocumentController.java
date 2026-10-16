@@ -81,9 +81,11 @@ public class DocumentController {
             description = """
                     Answers up to `limit` documents (5 by default, at most 50), the most recently changed first;
                     a document never edited counts from its creation. Lists the same documents search can
-                    return -- indexed and not archived -- each with the fields a search result carries about
+                    return -- approved and indexed -- each with the fields a search result carries about
                     the document: `category`, the `responsible_name` of the user who uploaded it, and
-                    `updated_at`.""")
+                    `updated_at`.
+
+                    A document still under review, rejected or archived is never listed, even once indexed.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Documents, most recently changed first; the list may be empty."),
         @ApiResponse(responseCode = "400", description = "The limit is invalid.",
