@@ -3,7 +3,9 @@ package com.akpedia.server.repository;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
+import java.util.Collection;
 import java.util.List;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -33,5 +35,34 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
     List<Document> findRecent(
             @Param("processingStatus") ProcessingStatus processingStatus,
             @Param("excludedStatus") DocumentStatus excludedStatus,
+            Pageable pageable);
+
+    /**
+     * One page of an author's own submissions, most recently submitted first.
+     *
+     * <p>Only documents with a status the author can act on: {@code DRAFT} never left the author's
+     * hands and {@code ARCHIVED} is out of circulation, and neither maps to a submission state.
+     *
+     * <p>Ordered by {@code createdAt}, with the id breaking ties so that two documents submitted in
+     * the same instant do not swap places between pages and hide one of themselves.
+     *
+     * <p>The category comes fetched because every row shows it; the creator does not, since the
+     * caller already knows whose submissions these are.
+     */
+    @Query(value = """
+            SELECT d FROM Document d
+            JOIN FETCH d.category
+            WHERE d.creator.id = :creatorId
+              AND d.status IN :statuses
+            ORDER BY d.createdAt DESC, d.id DESC
+            """,
+            countQuery = """
+            SELECT count(d) FROM Document d
+            WHERE d.creator.id = :creatorId
+              AND d.status IN :statuses
+            """)
+    Page<Document> findSubmissions(
+            @Param("creatorId") Long creatorId,
+            @Param("statuses") Collection<DocumentStatus> statuses,
             Pageable pageable);
 }

@@ -30,10 +30,13 @@ import org.springframework.web.multipart.MultipartFile;
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentSummary;
+import com.akpedia.server.dto.PagedResponse;
+import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 import io.swagger.v3.oas.annotations.Hidden;
@@ -66,14 +69,17 @@ public class DocumentController {
     private final DocumentUploadService uploadService;
     private final DocumentFileService fileService;
     private final DocumentListService listService;
+    private final DocumentSubmissionService submissionService;
 
     public DocumentController(
             DocumentUploadService uploadService,
             DocumentFileService fileService,
-            DocumentListService listService) {
+            DocumentListService listService,
+            DocumentSubmissionService submissionService) {
         this.uploadService = uploadService;
         this.fileService = fileService;
         this.listService = listService;
+        this.submissionService = submissionService;
     }
 
     @Operation(
@@ -92,6 +98,47 @@ public class DocumentController {
     @GetMapping("/documents")
     public List<DocumentSummary> recent(@RequestParam(required = false) Integer limit) {
         return listService.recent(limit);
+    }
+
+    @Operation(
+            summary = "List the author's own submissions and where each one stands",
+            description = """
+                    Answers the documents uploaded by `creatorId`, most recently submitted first, each with
+                    a status derived for the author rather than the stored one:
+
+                    - `UNDER_REVIEW`: waiting on an approver, whatever the indexing is doing;
+                    - `PUBLISHED`: approved, so colleagues can find it;
+                    - `RETURNED`: sent back, with `review_comment` saying why.
+
+                    Unlike `GET /documents` and search, this route shows unapproved documents on purpose --
+                    they are the caller's own, and saying what is still under review is the point. It shows
+                    nobody else's.
+
+                    `review_comment` and `reviewed_at` are only present on a returned document. A document
+                    that is still a draft, or that was archived, is not a submission and is not listed.
+
+                    Without `creatorId` the configured default user is used, since this sprint has no
+                    login (see the README).""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "One page of submissions; the page may be empty."),
+        @ApiResponse(responseCode = "400", description = "page or size is out of bounds.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "No user exists with the given creatorId.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents/submissions")
+    public PagedResponse<SubmissionSummary> submissions(
+            @RequestParam(required = false)
+            @Parameter(description = "Author whose submissions to list. Defaults to the configured user.")
+            Long creatorId,
+            @RequestParam(required = false)
+            @Parameter(description = "Zero-based page. Defaults to 0.")
+            Integer page,
+            @RequestParam(required = false)
+            @Parameter(description = "Results per page, from 1 to 50. Defaults to 10.")
+            Integer size) {
+
+        return submissionService.submissions(creatorId, page, size);
     }
 
     @Operation(
