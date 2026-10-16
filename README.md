@@ -86,13 +86,15 @@ akpedia-server/
     │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
-    │   │   │   ├── DocumentController.java # upload de documentos
+    │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
     │   │   ├── dto/ # objetos de transporte
     │   │   │   ├── DocumentEmbeddingResponse.java
     │   │   │   ├── DocumentChunk.java
     │   │   │   ├── DocumentUploadResponse.java
+    │   │   │   ├── DocumentAnalysisResponse.java # sugestão devolvida ao /analyze
+    │   │   │   ├── DocumentClassification.java # o que o akpedia-ml responde ao classificar
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -105,12 +107,17 @@ akpedia-server/
     │   │   │   ├── EmbeddingRejectedException.java
     │   │   │   ├── CategoryNotFoundException.java
     │   │   │   ├── UserNotFoundException.java
+    │   │   │   ├── UnsupportedDocumentFormatException.java # 415 do /analyze
+    │   │   │   ├── CategorySuggestionUnavailableException.java # 503: liberar escolha manual
+    │   │   │   ├── UnknownSuggestedCategoryException.java # 502: categoria fora do catálogo
     │   │   │   ├── InvalidDocumentUploadException.java
     │   │   │   ├── PdfConversionException.java
     │   │   │   ├── PdfConversionUnavailableException.java
     │   │   │   └── PdfConversionRejectedException.java
     │   │   └── service/
-    │   │       └── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
+    │   │       ├── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
+    │   │       ├── DocumentAnalysisService.java # sugere categoria sem persistir nada
+    │   │       └── DocumentFormats.java # formatos aceitos e detecção de PDF, compartilhados
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -435,6 +442,66 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 | Gotenberg recebeu mas recusou o arquivo     | 422    | `pdf_conversion_rejected`     |
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
+
+### Sugerir a categoria (antes de enviar)
+
+`POST /api/v1/documents/analyze` recebe o arquivo e devolve a categoria que o akpedia-ml
+reconheceu, para a tela de upload já vir preenchida. **Nada é persistido**: o arquivo é lido,
+convertido em memória e descartado, então uma análise abandonada não deixa documento nem linha
+nenhuma atrás.
+
+Pela arquitetura, a tela nunca fala com o akpedia-ml: ela posta aqui, e é o servidor que valida o
+formato, converte e chama o classificador.
+
+| Campo (multipart) | Obrigatório | Descrição                                   |
+|--------------------|:-----------:|----------------------------------------------|
+| `file`             | sim         | arquivo a analisar: PDF, DOC/DOCX ou XLS/XLSX |
+
+A lista de formatos é **mais estreita que a do upload**, que aceita tudo que o Gotenberg
+converte. Arquivos que não são PDF são convertidos antes de ir ao classificador.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents/analyze \
+  -F "file=@manual.docx"
+```
+
+```json
+{
+  "suggested_category_id": 2,
+  "confidence": 0.873
+}
+```
+
+O `suggested_category_id` é exatamente o que o `POST /api/v1/documents` recebe como
+`suggestedCategoryId`, e o `confidence` como `categoryConfidence` — a tela devolve os dois sem
+precisar consultar nada.
+
+#### Status de erro
+
+| Situação                                      | Status | `code`                            |
+|------------------------------------------------|--------|-----------------------------------|
+| arquivo vazio, ou parte `file` ausente          | 400    | `invalid_request`                 |
+| arquivo acima de 25 MB                          | 413    | `file_too_large`                  |
+| formato fora de PDF, DOC/DOCX e XLS/XLSX        | 415    | `unsupported_format`              |
+| Gotenberg recebeu mas recusou o arquivo         | 422    | `pdf_conversion_rejected`         |
+| categoria sugerida não existe no catálogo       | 502    | `unknown_suggested_category`      |
+| **classificador fora do ar ou além do timeout** | 503    | `category_suggestion_unavailable` |
+
+O 415 traz a lista aceita no corpo, para a tela não precisar manter uma cópia que divergiria da
+do servidor:
+
+```json
+{
+  "code": "unsupported_format",
+  "message": "O formato de 'apresentacao.pptx' nao e aceito. Envie um arquivo PDF, DOC, DOCX, XLS ou XLSX.",
+  "supported_extensions": ["pdf", "doc", "docx", "xls", "xlsx"]
+}
+```
+
+> O 503 tem `code` próprio, diferente do `embedding_service_unavailable` das outras rotas. É de
+> propósito: esse é o único caso em que a tela deve **liberar a escolha manual da categoria** e
+> seguir com o envio, em vez de mostrar erro e parar. Já o 502 significa que o classificador e o
+> catálogo divergiram — aí alguém precisa reconciliar os dois.
 
 ### Abrir o arquivo
 

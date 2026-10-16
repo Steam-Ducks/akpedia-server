@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentUploadService;
@@ -42,6 +43,9 @@ class DocumentListHttpTest {
 
     @MockBean
     private DocumentListService listService;
+
+    @MockBean
+    private DocumentAnalysisService analysisService;
 
     @Test
     @DisplayName("GET /api/v1/documents answers each document with the eight agreed fields")
