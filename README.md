@@ -522,6 +522,50 @@ do servidor:
 > seguir com o envio, em vez de mostrar erro e parar. Já o 502 significa que o classificador e o
 > catálogo divergiram — aí alguém precisa reconciliar os dois.
 
+### Fila de aprovação
+
+`GET /api/v1/documents/pending?page=&size=` lista os documentos em `PENDING_APPROVAL`, **o upload
+mais antigo primeiro** — a fila é atendida na ordem de chegada. Empates no `created_at` são
+desfeitos pelo `id`, para as páginas não trocarem itens entre si. `page` começa em 0 (padrão 0) e
+`size` vai de 1 a 50 (padrão 20); fora disso, 400 `invalid_request`.
+
+Cada documento leva quem enviou e de qual setor, quando, e a categoria sugerida pelo
+classificador com a confiança — os dois `null` quando o upload não trouxe sugestão. O arquivo
+de um documento da fila abre normalmente por `/documents/{id}/file` (ver abaixo).
+
+```bash
+curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
+```
+
+```json
+{
+  "content": [
+    {
+      "id": 12,
+      "name": "manual-vpn.pdf",
+      "creator_name": "Mariana Costa",
+      "sector_name": "Engenharia",
+      "created_at": "2026-10-13T19:06:15.123Z",
+      "suggested_category": { "id": 1, "name": "Tecnico" },
+      "confidence": 0.870
+    },
+    {
+      "id": 15,
+      "name": "politica-ferias.pdf",
+      "creator_name": "Usuário padrão",
+      "sector_name": "Administrativo",
+      "created_at": "2026-10-14T11:20:02.481Z",
+      "suggested_category": null,
+      "confidence": null
+    }
+  ],
+  "page": 0,
+  "size": 2,
+  "total_elements": 5,
+  "total_pages": 3
+}
+```
+
 ### Abrir o arquivo
 
 `GET /api/v1/documents/{id}/file` devolve o binário armazenado do documento. A resposta vem com

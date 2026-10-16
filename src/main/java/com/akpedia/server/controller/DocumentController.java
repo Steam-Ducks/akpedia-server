@@ -32,6 +32,8 @@ import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
+import com.akpedia.server.dto.PageResponse;
+import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
@@ -145,6 +147,26 @@ public class DocumentController {
             MultipartFile file) throws IOException {
 
         return analysisService.analyze(file.getBytes(), file.getOriginalFilename(), file.getContentType());
+    }
+
+    @Operation(
+            summary = "List the documents awaiting approval",
+            description = """
+                    The review queue: every document in `PENDING_APPROVAL`, the oldest upload first, `size`
+                    per page (20 by default, at most 50) starting from `page` 0. Each document carries who
+                    uploaded it and from which sector, when, and the category the classifier suggested with
+                    its `confidence` -- both null when the upload carried no suggestion. A pending document's
+                    file opens through `/documents/{id}/file`, which is how the approver reads it.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "One page of the queue; `content` is empty past the last page."),
+        @ApiResponse(responseCode = "400", description = "The page or the size is invalid.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents/pending")
+    public PageResponse<PendingDocument> pending(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return listService.pending(page, size);
     }
 
     @Operation(

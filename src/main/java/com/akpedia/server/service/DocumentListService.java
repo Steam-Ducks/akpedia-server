@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.akpedia.server.config.SearchProperties;
 import com.akpedia.server.dto.DocumentSummary;
+import com.akpedia.server.dto.PageResponse;
+import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
@@ -18,12 +20,13 @@ import com.akpedia.server.repository.DocumentRepository;
 import com.akpedia.server.repository.EmbeddingRepository;
 
 /**
- * Lists the documents most recently changed, for a page to show before anything is searched.
+ * Lists documents outside of search: the ones most recently changed, and the review queue.
  *
- * <p>Lists the same documents search can return: indexed and not archived. A document still being
- * indexed or out of circulation would be offered here and then refused when opened.
+ * <p>The recent list holds the same documents search can return: indexed and not archived. A
+ * document still being indexed or out of circulation would be offered there and then refused when
+ * opened.
  *
- * <p>Each document carries an excerpt of its first chunk, cut to the same length as a search
+ * <p>Each recent document carries an excerpt of its first chunk, cut to the same length as a search
  * snippet, so a card can say what the document is about even when it was uploaded without a
  * description.
  */
@@ -32,6 +35,9 @@ public class DocumentListService {
 
     static final int DEFAULT_LIMIT = 5;
     static final int MAX_LIMIT = 50;
+
+    static final int DEFAULT_PAGE_SIZE = 20;
+    static final int MAX_PAGE_SIZE = 50;
 
     private final DocumentRepository documents;
     private final EmbeddingRepository embeddings;
@@ -61,6 +67,30 @@ public class DocumentListService {
         return recent.stream()
                 .map(document -> DocumentSummary.from(document, excerpts.get(document.getId())))
                 .toList();
+    }
+
+    /**
+     * The documents awaiting approval, one page at a time, the oldest first.
+     *
+     * @param requestedPage page index counted from 0; the first page when null
+     * @param requestedSize documents per page, {@value #DEFAULT_PAGE_SIZE} when null
+     * @throws InvalidDocumentListRequestException if the page is negative or the size out of range
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<PendingDocument> pending(Integer requestedPage, Integer requestedSize) {
+        int page = requestedPage == null ? 0 : requestedPage;
+        int size = requestedSize == null ? DEFAULT_PAGE_SIZE : requestedSize;
+        if (page < 0) {
+            throw new InvalidDocumentListRequestException("page must be 0 or greater.");
+        }
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new InvalidDocumentListRequestException(
+                    "size must be between 1 and %d.".formatted(MAX_PAGE_SIZE));
+        }
+
+        return PageResponse.from(
+                documents.findOldestFirstByStatus(DocumentStatus.PENDING_APPROVAL, PageRequest.of(page, size)),
+                PendingDocument::from);
     }
 
     /** The excerpt of each document, by id, fetched in one query for the whole page. */
