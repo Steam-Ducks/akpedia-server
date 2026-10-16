@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.akpedia.server.config.SearchProperties;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.entity.Document;
-import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.repository.DocumentRepository;
@@ -54,8 +53,7 @@ public class DocumentListService {
                     "limit must be between 1 and %d.".formatted(MAX_LIMIT));
         }
 
-        List<Document> recent = documents.findRecent(
-                ProcessingStatus.COMPLETED, DocumentStatus.ARCHIVED, PageRequest.of(0, limit));
+        List<Document> recent = documents.findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, limit));
         Map<Long, String> excerpts = excerptsOf(recent);
 
         return recent.stream()

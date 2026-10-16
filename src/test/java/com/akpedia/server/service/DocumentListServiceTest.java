@@ -60,7 +60,7 @@ class DocumentListServiceTest {
     @Test
     @DisplayName("each document carries the start of its text, trimmed like a search snippet")
     void excerptIsTheTrimmedFirstChunk() {
-        given(documents.findRecent(any(), any(), any())).willReturn(List.of(document(1L), document(2L)));
+        given(documents.findRecent(any(), any())).willReturn(List.of(document(1L), document(2L)));
         given(embeddings.findFirstChunks(List.of(1L, 2L)))
                 .willReturn(List.<Object[]>of(new Object[] {1L, "  Como configurar\n a VPN " + "palavra ".repeat(30)}));
 
@@ -78,12 +78,11 @@ class DocumentListServiceTest {
     @Test
     @DisplayName("with no limit, the five most recent indexed, not archived documents are asked for")
     void defaultsToFive() {
-        given(documents.findRecent(any(), any(), any())).willReturn(List.of());
+        given(documents.findRecent(any(), any())).willReturn(List.of());
 
         service.recent(null);
 
-        then(documents).should().findRecent(
-                eq(ProcessingStatus.COMPLETED), eq(DocumentStatus.ARCHIVED), eq(PageRequest.of(0, 5)));
+        then(documents).should().findRecent(eq(ProcessingStatus.COMPLETED), eq(PageRequest.of(0, 5)));
     }
 
     @Test
@@ -92,6 +91,6 @@ class DocumentListServiceTest {
         assertThatThrownBy(() -> service.recent(0)).isInstanceOf(InvalidDocumentListRequestException.class);
         assertThatThrownBy(() -> service.recent(51)).isInstanceOf(InvalidDocumentListRequestException.class);
 
-        then(documents).should(never()).findRecent(any(), any(), any());
+        then(documents).should(never()).findRecent(any(), any());
     }
 }
