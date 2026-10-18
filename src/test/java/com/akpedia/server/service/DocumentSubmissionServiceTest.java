@@ -25,7 +25,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.akpedia.server.config.DefaultUserProvider;
-import com.akpedia.server.dto.PagedResponse;
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.SubmissionStatus;
 import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Category;
@@ -33,6 +33,7 @@ import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.enums.DocumentStatus;
+import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.repository.DocumentRepository;
@@ -67,7 +68,12 @@ class DocumentSubmissionServiceTest {
     }
 
     private Document document(long id, DocumentStatus status, String reviewComment) {
+        return document(id, status, ProcessingStatus.PENDING, reviewComment);
+    }
+
+    private Document document(long id, DocumentStatus status, ProcessingStatus processing, String reviewComment) {
         Document document = new Document("manual.pdf", "application/pdf", 1024L, category, author, status);
+        document.setProcessingStatus(processing);
         ReflectionTestUtils.setField(document, "id", id);
         ReflectionTestUtils.setField(document, "createdAt", OffsetDateTime.parse("2026-10-16T11:20:00Z"));
         if (reviewComment != null) {
@@ -89,20 +95,47 @@ class DocumentSubmissionServiceTest {
     void pendingApprovalReadsAsUnderReview() {
         givenSubmissions(document(1L, DocumentStatus.PENDING_APPROVAL, null));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).items().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.UNDER_REVIEW);
         assertThat(summary.reviewComment()).isNull();
     }
 
     @Test
-    @DisplayName("an approved document reads as PUBLISHED")
-    void approvedReadsAsPublished() {
-        givenSubmissions(document(2L, DocumentStatus.APPROVED, null));
+    @DisplayName("an approved and indexed document reads as PUBLISHED")
+    void approvedAndIndexedReadsAsPublished() {
+        givenSubmissions(document(2L, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED, null));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).items().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.PUBLISHED);
+        assertThat(summary.reviewComment()).isNull();
+    }
+
+    @Test
+    @DisplayName("an approved document still being indexed reads as PROCESSING, not PUBLISHED")
+    void approvedButNotIndexedReadsAsProcessing() {
+        // Search cannot reach it yet; PUBLISHED would have the author tell colleagues to look for
+        // something they will not find.
+        givenSubmissions(
+                document(5L, DocumentStatus.APPROVED, ProcessingStatus.PENDING, null),
+                document(6L, DocumentStatus.APPROVED, ProcessingStatus.PROCESSING, null));
+
+        List<SubmissionSummary> found = service.submissions(AUTHOR_ID, null, null).content();
+
+        assertThat(found).extracting(SubmissionSummary::submissionStatus)
+                .containsOnly(SubmissionStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("an approved document whose indexing failed reads as INDEXING_FAILED, not PROCESSING")
+    void approvedButIndexingFailedReadsAsIndexingFailed() {
+        // PROCESSING would promise the document will show up in search, and it will not.
+        givenSubmissions(document(7L, DocumentStatus.APPROVED, ProcessingStatus.FAILED, null));
+
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
+
+        assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.INDEXING_FAILED);
         assertThat(summary.reviewComment()).isNull();
     }
 
@@ -111,7 +144,7 @@ class DocumentSubmissionServiceTest {
     void rejectedReadsAsReturnedWithTheComment() {
         givenSubmissions(document(3L, DocumentStatus.REJECTED, "Falta a secao de revisao A."));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).items().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.RETURNED);
         assertThat(summary.reviewComment()).isEqualTo("Falta a secao de revisao A.");
@@ -123,9 +156,10 @@ class DocumentSubmissionServiceTest {
     void commentOnAnApprovedDocumentIsNotShown() {
         // The approver commented and approved anyway. Showing the comment beside PUBLISHED would
         // read as if the document were still waiting on a fix.
-        givenSubmissions(document(4L, DocumentStatus.APPROVED, "Ajuste o titulo na proxima versao."));
+        givenSubmissions(document(4L, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED,
+                "Ajuste o titulo na proxima versao."));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).items().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.PUBLISHED);
         assertThat(summary.reviewComment()).isNull();
@@ -217,13 +251,13 @@ class DocumentSubmissionServiceTest {
         given(documents.findSubmissions(eq(AUTHOR_ID), any(), any())).willReturn(
                 new PageImpl<>(List.of(document(1L, DocumentStatus.APPROVED, null)), PageRequest.of(1, 10), 23));
 
-        PagedResponse<SubmissionSummary> response = service.submissions(AUTHOR_ID, 1, 10);
+        PageResponse<SubmissionSummary> response = service.submissions(AUTHOR_ID, 1, 10);
 
         assertThat(response.page()).isEqualTo(1);
         assertThat(response.size()).isEqualTo(10);
         assertThat(response.totalElements()).isEqualTo(23);
         assertThat(response.totalPages()).isEqualTo(3);
-        assertThat(response.items()).hasSize(1);
+        assertThat(response.content()).hasSize(1);
     }
 
     @Test

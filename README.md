@@ -94,8 +94,8 @@ akpedia-server/
     │   │   │   ├── DocumentChunk.java
     │   │   │   ├── DocumentUploadResponse.java
     │   │   │   ├── SubmissionSummary.java # um envio do autor, com status derivado
-    │   │   │   ├── SubmissionStatus.java # UNDER_REVIEW / PUBLISHED / RETURNED
-    │   │   │   ├── PagedResponse.java # envelope de paginacao (items + totais)
+    │   │   │   ├── SubmissionStatus.java # status do envio visto pelo autor (ver Minhas submissões)
+    │   │   │   ├── PageResponse.java # envelope de paginacao (content + totais)
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -445,11 +445,18 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 `GET /api/v1/documents/submissions` devolve os documentos que a pessoa enviou, do mais recente
 para o mais antigo, cada um com um status **derivado** para o autor em vez do status armazenado:
 
-| `submission_status` | Status no banco    | O que significa para o autor                   |
-|---------------------|--------------------|------------------------------------------------|
-| `UNDER_REVIEW`      | `PENDING_APPROVAL` | esperando um aprovador, em qualquer estado de processamento |
-| `PUBLISHED`         | `APPROVED`         | aprovado, os colegas já encontram              |
-| `RETURNED`          | `REJECTED`         | devolvido; o `review_comment` diz o motivo     |
+| `submission_status` | No banco                                          | O que significa para o autor                    |
+|---------------------|---------------------------------------------------|-------------------------------------------------|
+| `UNDER_REVIEW`      | `PENDING_APPROVAL`, em qualquer `processing_status` | esperando um aprovador                         |
+| `PROCESSING`        | `APPROVED` com `processing_status` `PENDING` ou `PROCESSING` | aprovado, mas a busca ainda não o encontra |
+| `PUBLISHED`         | `APPROVED` com `processing_status: COMPLETED`     | aprovado e indexado, os colegas já encontram    |
+| `INDEXING_FAILED`   | `APPROVED` com `processing_status: FAILED`        | aprovado, mas a indexação falhou e a busca não vai encontrá-lo |
+| `RETURNED`          | `REJECTED`                                        | devolvido; o `review_comment` diz o motivo      |
+
+Aprovar não basta para o documento aparecer na busca: a indexação só começa depois da aprovação.
+Por isso `APPROVED` se divide em três — chamar de `PUBLISHED` um documento que ainda está sendo
+indexado faria o autor avisar os colegas de algo que eles ainda não encontram. E a falha tem
+estado próprio porque `PROCESSING` prometeria uma coisa que não vai acontecer.
 
 Diferente da busca e da listagem de recentes, esta rota **mostra documento não aprovado de
 propósito** — são os do próprio autor, e dizer o que ainda está em revisão é o objetivo dela. O
@@ -470,15 +477,17 @@ curl "localhost:8080/api/v1/documents/submissions?page=0&size=10"
 
 ```json
 {
-  "items": [
+  "content": [
     {
       "document_id": 7,
       "name": "contrato.pdf",
+      "description": null,
       "category": "Juridico",
       "submission_status": "RETURNED",
       "review_comment": "Falta a secao de revisao A.",
       "reviewed_at": "2026-10-16T12:00:00Z",
-      "created_at": "2026-10-16T11:20:00Z"
+      "created_at": "2026-10-16T11:20:00Z",
+      "updated_at": null
     },
     {
       "document_id": 5,
@@ -498,6 +507,7 @@ curl "localhost:8080/api/v1/documents/submissions?page=0&size=10"
 ```
 
 O `review_comment` e o `reviewed_at` só aparecem em documento devolvido — **ausentes**, não nulos.
+Os outros campos vêm sempre, `null` quando não têm valor, então toda linha tem as mesmas chaves.
 Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem: ao lado de
 `PUBLISHED` ele se leria como se o documento ainda estivesse esperando correção.
 
@@ -510,6 +520,50 @@ Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem
 
 > Um `creatorId` inexistente responde 404 em vez de página vazia: página vazia se leria como
 > "você não enviou nada", que é uma resposta diferente — e a que o autor acreditaria.
+
+### Fila de aprovação
+
+`GET /api/v1/documents/pending?page=&size=` lista os documentos em `PENDING_APPROVAL`, **o upload
+mais antigo primeiro** — a fila é atendida na ordem de chegada. Empates no `created_at` são
+desfeitos pelo `id`, para as páginas não trocarem itens entre si. `page` começa em 0 (padrão 0) e
+`size` vai de 1 a 50 (padrão 20); fora disso, 400 `invalid_request`.
+
+Cada documento leva quem enviou e de qual setor, quando, e a categoria sugerida pelo
+classificador com a confiança — os dois `null` quando o upload não trouxe sugestão. O arquivo
+de um documento da fila abre normalmente por `/documents/{id}/file` (ver abaixo).
+
+```bash
+curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
+```
+
+```json
+{
+  "content": [
+    {
+      "id": 12,
+      "name": "manual-vpn.pdf",
+      "creator_name": "Mariana Costa",
+      "sector_name": "Engenharia",
+      "created_at": "2026-10-13T19:06:15.123Z",
+      "suggested_category": { "id": 1, "name": "Tecnico" },
+      "confidence": 0.870
+    },
+    {
+      "id": 15,
+      "name": "politica-ferias.pdf",
+      "creator_name": "Usuário padrão",
+      "sector_name": "Administrativo",
+      "created_at": "2026-10-14T11:20:02.481Z",
+      "suggested_category": null,
+      "confidence": null
+    }
+  ],
+  "page": 0,
+  "size": 2,
+  "total_elements": 5,
+  "total_pages": 3
+}
+```
 
 ### Abrir o arquivo
 

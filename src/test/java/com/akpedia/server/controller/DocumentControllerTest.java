@@ -1,6 +1,7 @@
 package com.akpedia.server.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -34,7 +35,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.akpedia.server.dto.DocumentFileDescriptor;
-import com.akpedia.server.dto.PagedResponse;
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.SubmissionStatus;
 import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Category;
@@ -439,8 +440,8 @@ class DocumentControllerTest {
     // GET /api/v1/documents/submissions
     // ------------------------------------------------------------------
 
-    private static PagedResponse<SubmissionSummary> onePage(SubmissionSummary summary) {
-        return new PagedResponse<>(List.of(summary), 0, 10, 1, 1);
+    private static PageResponse<SubmissionSummary> onePage(SubmissionSummary summary) {
+        return new PageResponse<>(List.of(summary), 0, 10, 1, 1);
     }
 
     @Test
@@ -453,15 +454,49 @@ class DocumentControllerTest {
 
         mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].document_id").value(1))
-                .andExpect(jsonPath("$.items[0].submission_status").value("UNDER_REVIEW"))
+                .andExpect(jsonPath("$.content[0].document_id").value(1))
+                .andExpect(jsonPath("$.content[0].submission_status").value("UNDER_REVIEW"))
                 // Absent, not null: a document under review has no rejection to report.
-                .andExpect(jsonPath("$.items[0].review_comment").doesNotExist())
-                .andExpect(jsonPath("$.items[0].reviewed_at").doesNotExist());
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist())
+                .andExpect(jsonPath("$.content[0].reviewed_at").doesNotExist())
+                // Only the review fields are left out: the rest stay as nulls, so every row has the
+                // same keys.
+                .andExpect(jsonPath("$.content[0]").value(hasKey("description")))
+                .andExpect(jsonPath("$.content[0].description").value(nullValue()))
+                .andExpect(jsonPath("$.content[0]").value(hasKey("updated_at")))
+                .andExpect(jsonPath("$.content[0].updated_at").value(nullValue()));
     }
 
     @Test
-    @DisplayName("GET /documents/submissions answers PUBLISHED for an approved document")
+    @DisplayName("GET /documents/submissions answers PROCESSING for an approved document not yet indexed")
+    void submissionsProcessing() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(4L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.PROCESSING, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("PROCESSING"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers INDEXING_FAILED for an approved document whose indexing failed")
+    void submissionsIndexingFailed() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(5L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.INDEXING_FAILED, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("INDEXING_FAILED"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers PUBLISHED for an approved, indexed document")
     void submissionsPublished() throws Exception {
         given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
                 new SubmissionSummary(2L, "norma.pdf", "descricao", "Regulatorio",
@@ -471,9 +506,9 @@ class DocumentControllerTest {
 
         mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].submission_status").value("PUBLISHED"))
-                .andExpect(jsonPath("$.items[0].category").value("Regulatorio"))
-                .andExpect(jsonPath("$.items[0].review_comment").doesNotExist());
+                .andExpect(jsonPath("$.content[0].submission_status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.content[0].category").value("Regulatorio"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
     }
 
     @Test
@@ -487,16 +522,16 @@ class DocumentControllerTest {
 
         mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].submission_status").value("RETURNED"))
-                .andExpect(jsonPath("$.items[0].review_comment").value("Falta a secao de revisao A."))
-                .andExpect(jsonPath("$.items[0].reviewed_at").exists());
+                .andExpect(jsonPath("$.content[0].submission_status").value("RETURNED"))
+                .andExpect(jsonPath("$.content[0].review_comment").value("Falta a secao de revisao A."))
+                .andExpect(jsonPath("$.content[0].reviewed_at").exists());
     }
 
     @Test
     @DisplayName("GET /documents/submissions carries the paging totals and works without creatorId")
     void submissionsCarryPagingTotals() throws Exception {
         given(submissionService.submissions(isNull(), eq(1), eq(10))).willReturn(
-                new PagedResponse<>(List.of(), 1, 10, 23, 3));
+                new PageResponse<>(List.of(), 1, 10, 23, 3));
 
         mvc.perform(get("/api/v1/documents/submissions").param("page", "1").param("size", "10"))
                 .andExpect(status().isOk())
@@ -504,7 +539,7 @@ class DocumentControllerTest {
                 .andExpect(jsonPath("$.size").value(10))
                 .andExpect(jsonPath("$.total_elements").value(23))
                 .andExpect(jsonPath("$.total_pages").value(3))
-                .andExpect(jsonPath("$.items").isEmpty());
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test

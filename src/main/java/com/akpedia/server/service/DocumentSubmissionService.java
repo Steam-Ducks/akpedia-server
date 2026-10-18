@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.akpedia.server.config.DefaultUserProvider;
-import com.akpedia.server.dto.PagedResponse;
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
@@ -60,7 +60,7 @@ public class DocumentSubmissionService {
      * @throws UserNotFoundException               if no user exists with the given id
      */
     @Transactional(readOnly = true)
-    public PagedResponse<SubmissionSummary> submissions(
+    public PageResponse<SubmissionSummary> submissions(
             Long requestedCreatorId, Integer requestedPage, Integer requestedSize) {
 
         int page = requestedPage == null ? 0 : requestedPage;
@@ -82,6 +82,6 @@ public class DocumentSubmissionService {
         Page<Document> found = documents.findSubmissions(
                 creatorId, SUBMITTED_STATUSES, PageRequest.of(page, size));
 
-        return PagedResponse.of(found, SubmissionSummary::from);
+        return PageResponse.from(found, SubmissionSummary::from);
     }
 }

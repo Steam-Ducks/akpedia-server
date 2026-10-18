@@ -30,9 +30,10 @@ import org.springframework.web.multipart.MultipartFile;
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentSummary;
-import com.akpedia.server.dto.PagedResponse;
-import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
+import com.akpedia.server.dto.PageResponse;
+import com.akpedia.server.dto.PendingDocument;
+import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -107,14 +108,17 @@ public class DocumentController {
                     a status derived for the author rather than the stored one:
 
                     - `UNDER_REVIEW`: waiting on an approver, whatever the indexing is doing;
-                    - `PUBLISHED`: approved, so colleagues can find it;
+                    - `PROCESSING`: approved and being indexed, so search does not reach it yet;
+                    - `PUBLISHED`: approved and indexed, so colleagues can find it;
+                    - `INDEXING_FAILED`: approved, but indexing failed, so search will not reach it;
                     - `RETURNED`: sent back, with `review_comment` saying why.
 
                     Unlike `GET /documents` and search, this route shows unapproved documents on purpose --
                     they are the caller's own, and saying what is still under review is the point. It shows
                     nobody else's.
 
-                    `review_comment` and `reviewed_at` are only present on a returned document. A document
+                    `review_comment` and `reviewed_at` are only present on a returned document; every other
+                    field is always present, null when it has no value. A document
                     that is still a draft, or that was archived, is not a submission and is not listed.
 
                     Without `creatorId` the configured default user is used, since this sprint has no
@@ -127,7 +131,7 @@ public class DocumentController {
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @GetMapping("/documents/submissions")
-    public PagedResponse<SubmissionSummary> submissions(
+    public PageResponse<SubmissionSummary> submissions(
             @RequestParam(required = false)
             @Parameter(description = "Author whose submissions to list. Defaults to the configured user.")
             Long creatorId,
@@ -139,6 +143,26 @@ public class DocumentController {
             Integer size) {
 
         return submissionService.submissions(creatorId, page, size);
+    }
+
+    @Operation(
+            summary = "List the documents awaiting approval",
+            description = """
+                    The review queue: every document in `PENDING_APPROVAL`, the oldest upload first, `size`
+                    per page (20 by default, at most 50) starting from `page` 0. Each document carries who
+                    uploaded it and from which sector, when, and the category the classifier suggested with
+                    its `confidence` -- both null when the upload carried no suggestion. A pending document's
+                    file opens through `/documents/{id}/file`, which is how the approver reads it.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "One page of the queue; `content` is empty past the last page."),
+        @ApiResponse(responseCode = "400", description = "The page or the size is invalid.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents/pending")
+    public PageResponse<PendingDocument> pending(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return listService.pending(page, size);
     }
 
     @Operation(
