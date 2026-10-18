@@ -14,10 +14,10 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
         /**
          * Returns the closest eligible chunk once per document, already ordered by relevance.
          *
-         * <p>Eligible leaves out what cannot be opened afterwards: a document still being indexed
-         * has no usable vectors yet, and an archived one is refused by
-         * {@code GET /documents/{id}/file}, so listing it here would offer a result that leads to a
-         * 403.
+         * <p>Eligible means approved and indexed. A document still being indexed has no usable
+         * vectors yet; one awaiting approval or returned for a fix is not available to colleagues;
+         * and an archived one is refused by {@code GET /documents/{id}/file}, so listing it here
+         * would offer a result that leads to a 403.
          *
          * <p>The columns a result card shows besides the match -- category, the creator as the
          * person responsible, and when the document last changed -- come after the score, so the

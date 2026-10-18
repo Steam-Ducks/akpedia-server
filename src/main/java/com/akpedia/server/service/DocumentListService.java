@@ -19,8 +19,9 @@ import com.akpedia.server.repository.EmbeddingRepository;
 /**
  * Lists the documents most recently changed, for a page to show before anything is searched.
  *
- * <p>Lists the same documents search can return: indexed and not archived. A document still being
- * indexed or out of circulation would be offered here and then refused when opened.
+ * <p>Lists the same documents search can return: approved and indexed. A document still awaiting
+ * approval, returned for a fix, still being indexed or archived would be offered here and then
+ * refused when opened.
  *
  * <p>Each document carries an excerpt of its first chunk, cut to the same length as a search
  * snippet, so a card can say what the document is about even when it was uploaded without a

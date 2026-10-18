@@ -76,8 +76,10 @@ class DocumentListServiceTest {
     }
 
     @Test
-    @DisplayName("with no limit, the five most recent indexed, not archived documents are asked for")
+    @DisplayName("with no limit, the five most recent indexed documents are asked for")
     void defaultsToFive() {
+        // Only approved documents are listed, but that filter lives in the query itself and is
+        // checked against the database in RecentDocumentsQueryTest.
         given(documents.findRecent(any(), any())).willReturn(List.of());
 
         service.recent(null);
