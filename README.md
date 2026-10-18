@@ -578,24 +578,43 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 
 ### Endpoint
 
-`GET /api/v1/search?q=<texto>&limit=<n>` faz busca semântica nos documentos indexados. O texto da
-consulta é vetorizado pelo akpedia-ml e comparado por similaridade de cosseno com os `embeddings`
-salvos.
+`GET /api/v1/search?q=<texto>&categoryIds=<ids>&limit=<n>` faz busca semântica nos documentos
+indexados, com filtro opcional por categoria. O texto da consulta é vetorizado pelo akpedia-ml e
+comparado por similaridade de cosseno com os `embeddings` salvos.
 
-| Parâmetro | Obrigatório | Descrição                                                                 |
-|-----------|:-----------:|---------------------------------------------------------------------------|
-| `q`       | sim         | palavra, frase ou pergunta                                                 |
-| `limit`   | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
+| Parâmetro     | Obrigatório | Descrição                                                                 |
+|---------------|:-----------:|---------------------------------------------------------------------------|
+| `q`           | não\*       | palavra, frase ou pergunta                                                |
+| `categoryIds` | não\*       | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); filtra os resultados a essas categorias |
+| `limit`       | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
+
+\* Pelo menos um dos dois precisa vir na requisição; sem nenhum, a rota responde `400`.
+
+Com `categoryIds` e sem `q`, a busca é só o filtro: os resultados vêm ordenados pela última
+alteração do documento (mais recente primeiro), e `score` volta `null`, já que não há texto para
+comparar. Com `q`, `categoryIds` só restringe quais documentos entram na comparação; os resultados
+continuam ordenados por relevância.
 
 Só entram documentos com `processing_status: COMPLETED` — sem vetores não há o que comparar. Cada
-documento aparece **uma vez só**, representado pelo trecho que mais se aproximou da consulta, e os
-resultados vêm ordenados por relevância. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam, então
-uma busca sem nada parecido responde `200` com lista vazia — não 404.
+documento aparece **uma vez só**, representado pelo trecho que mais se aproximou da consulta (ou,
+sem `q`, pelo primeiro trecho do documento, como excerto), e os resultados vêm ordenados por
+relevância ou por data, conforme acima. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam quando
+há `q`, então uma busca sem nada parecido responde `200` com lista vazia — não 404.
+
+A lista de categorias para montar o filtro vem de `GET /api/v1/categories`, que responde o
+catálogo inteiro, ordenado por nome:
+
+```json
+[
+  { "id": 1, "name": "Engenharia", "description": "Documentos de engenharia" },
+  { "id": 2, "name": "Normativa", "description": null }
+]
+```
 
 ### Formato do resultado
 
 Cada item da lista tem estes sete campos, sempre presentes (`description` vem `null` quando o
-documento foi enviado sem uma):
+documento foi enviado sem uma, e `score` vem `null` quando a busca não teve `q`):
 
 | Campo           | Tipo    | O que é                                                                    |
 |-----------------|---------|----------------------------------------------------------------------------|
@@ -603,8 +622,8 @@ documento foi enviado sem uma):
 | `name`          | texto   | título do documento                                                        |
 | `description`   | texto   | descrição informada no upload, ou `null`                                   |
 | `mime_type`     | texto   | formato do arquivo armazenado; hoje sempre `application/pdf`                |
-| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico)         |
-| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo)                       |
+| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico); `null` sem `q` |
+| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo); o primeiro trecho do documento quando a busca não teve `q` |
 | `chunk_index`   | número  | posição desse trecho no documento, contando de 0                           |
 
 ```bash
@@ -657,10 +676,10 @@ de folga.
 
 #### Status de erro
 
-| Situação                                          | Status | `code`                          |
-|----------------------------------------------------|--------|---------------------------------|
-| `q` ausente ou em branco, ou `limit` fora do teto  | 400    | `invalid_request`               |
-| akpedia-ml respondeu algo que não dá para usar     | 502    | `embedding_service_error`       |
+| Situação                                                      | Status | `code`                     |
+|----------------------------------------------------------------|--------|---------------------------|
+| nem `q` nem `categoryIds`, ou `limit` fora do teto             | 400    | `invalid_request`          |
+| akpedia-ml respondeu algo que não dá para usar                 | 502    | `embedding_service_error`  |
 | akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
 
 ---
