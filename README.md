@@ -95,6 +95,9 @@ akpedia-server/
     │   │   │   ├── DocumentUploadResponse.java
     │   │   │   ├── DocumentAnalysisResponse.java # sugestão devolvida ao /analyze
     │   │   │   ├── DocumentClassification.java # o que o akpedia-ml responde ao classificar
+    │   │   │   ├── SubmissionSummary.java # um envio do autor, com status derivado
+    │   │   │   ├── SubmissionStatus.java # status do envio visto pelo autor (ver Minhas submissões)
+    │   │   │   ├── PageResponse.java # envelope de paginacao (content + totais)
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -117,7 +120,8 @@ akpedia-server/
     │   │   └── service/
     │   │       ├── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
     │   │       ├── DocumentAnalysisService.java # sugere categoria sem persistir nada
-    │   │       └── DocumentFormats.java # formatos aceitos e detecção de PDF, compartilhados
+    │   │       ├── DocumentFormats.java # formatos aceitos e detecção de PDF, compartilhados
+    │   │       └── DocumentSubmissionService.java # lista os envios do autor
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -442,6 +446,87 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 | Gotenberg recebeu mas recusou o arquivo     | 422    | `pdf_conversion_rejected`     |
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
+
+### Minhas submissões
+
+`GET /api/v1/documents/submissions` devolve os documentos que a pessoa enviou, do mais recente
+para o mais antigo, cada um com um status **derivado** para o autor em vez do status armazenado:
+
+| `submission_status` | No banco                                          | O que significa para o autor                    |
+|---------------------|---------------------------------------------------|-------------------------------------------------|
+| `UNDER_REVIEW`      | `PENDING_APPROVAL`, em qualquer `processing_status` | esperando um aprovador                         |
+| `PROCESSING`        | `APPROVED` com `processing_status` `PENDING` ou `PROCESSING` | aprovado, mas a busca ainda não o encontra |
+| `PUBLISHED`         | `APPROVED` com `processing_status: COMPLETED`     | aprovado e indexado, os colegas já encontram    |
+| `INDEXING_FAILED`   | `APPROVED` com `processing_status: FAILED`        | aprovado, mas a indexação falhou e a busca não vai encontrá-lo |
+| `RETURNED`          | `REJECTED`                                        | devolvido; o `review_comment` diz o motivo      |
+
+Aprovar não basta para o documento aparecer na busca: a indexação só começa depois da aprovação.
+Por isso `APPROVED` se divide em três — chamar de `PUBLISHED` um documento que ainda está sendo
+indexado faria o autor avisar os colegas de algo que eles ainda não encontram. E a falha tem
+estado próprio porque `PROCESSING` prometeria uma coisa que não vai acontecer.
+
+Diferente da busca e da listagem de recentes, esta rota **mostra documento não aprovado de
+propósito** — são os do próprio autor, e dizer o que ainda está em revisão é o objetivo dela. O
+que ela não mostra é documento de outra pessoa.
+
+Documento em `DRAFT` nunca saiu das mãos do autor e `ARCHIVED` está fora de circulação: nenhum dos
+dois é uma submissão, então não aparecem aqui.
+
+| Parâmetro   | Obrigatório | Descrição                                                      |
+|-------------|:-----------:|-----------------------------------------------------------------|
+| `creatorId` | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
+| `page`      | não         | página, começando em 0; default 0                               |
+| `size`      | não         | resultados por página, de 1 a 50; default 10                    |
+
+```bash
+curl "localhost:8080/api/v1/documents/submissions?page=0&size=10"
+```
+
+```json
+{
+  "content": [
+    {
+      "document_id": 7,
+      "name": "contrato.pdf",
+      "description": null,
+      "category": "Juridico",
+      "submission_status": "RETURNED",
+      "review_comment": "Falta a secao de revisao A.",
+      "reviewed_at": "2026-10-16T12:00:00Z",
+      "created_at": "2026-10-16T11:20:00Z",
+      "updated_at": null
+    },
+    {
+      "document_id": 5,
+      "name": "manual.pdf",
+      "description": "manual tecnico",
+      "category": "Manuais",
+      "submission_status": "PUBLISHED",
+      "created_at": "2026-10-15T09:00:00Z",
+      "updated_at": "2026-10-15T18:30:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 10,
+  "total_elements": 23,
+  "total_pages": 3
+}
+```
+
+O `review_comment` e o `reviewed_at` só aparecem em documento devolvido — **ausentes**, não nulos.
+Os outros campos vêm sempre, `null` quando não têm valor, então toda linha tem as mesmas chaves.
+Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem: ao lado de
+`PUBLISHED` ele se leria como se o documento ainda estivesse esperando correção.
+
+#### Status de erro
+
+| Situação                                  | Status | `code`            |
+|--------------------------------------------|--------|-------------------|
+| `page` negativo, ou `size` fora de 1 a 50  | 400    | `invalid_request` |
+| `creatorId` que nenhum usuário tem         | 404    | `user_not_found`  |
+
+> Um `creatorId` inexistente responde 404 em vez de página vazia: página vazia se leria como
+> "você não enviou nada", que é uma resposta diferente — e a que o autor acreditaria.
 
 ### Sugerir título, descrição e categoria (antes de enviar)
 

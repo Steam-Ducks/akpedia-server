@@ -30,6 +30,7 @@ import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 @WebMvcTest(controllers = DocumentController.class)
@@ -49,6 +50,9 @@ class DocumentListHttpTest {
 
     @MockBean
     private DocumentListService listService;
+
+    @MockBean
+    private DocumentSubmissionService submissionService;
 
     @MockBean
     private DocumentAnalysisService analysisService;

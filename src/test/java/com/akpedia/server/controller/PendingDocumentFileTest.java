@@ -30,6 +30,7 @@ import com.akpedia.server.repository.DocumentRepository;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 /**
@@ -59,6 +60,9 @@ class PendingDocumentFileTest {
 
     @MockBean
     private DocumentListService listService;
+
+    @MockBean
+    private DocumentSubmissionService submissionService;
 
     @MockBean
     private DocumentAnalysisService analysisService;

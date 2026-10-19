@@ -1,6 +1,7 @@
 package com.akpedia.server.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -17,6 +18,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -36,6 +38,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
+import com.akpedia.server.dto.PageResponse;
+import com.akpedia.server.dto.SubmissionStatus;
+import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.Sector;
@@ -49,6 +54,7 @@ import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotProcessedException;
+import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.exception.InvalidDocumentUploadException;
 import com.akpedia.server.exception.PdfConversionRejectedException;
 import com.akpedia.server.exception.PdfConversionUnavailableException;
@@ -58,6 +64,7 @@ import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 /**
@@ -83,6 +90,9 @@ class DocumentControllerTest {
 
     @MockBean
     private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private DocumentSubmissionService submissionService;
 
     /** Fixed validators, so the conditional-request cases can send the exact values back. */
     private static final Instant LAST_MODIFIED = Instant.parse("2026-09-24T22:31:05Z");
@@ -432,6 +442,134 @@ class DocumentControllerTest {
     @DisplayName("a non-numeric document id answers 400, not 500")
     void nonNumericDocumentIdBecomes400() throws Exception {
         mvc.perform(get("/api/v1/documents/abc/file"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
+    }
+
+    // ------------------------------------------------------------------
+    // GET /api/v1/documents/submissions
+    // ------------------------------------------------------------------
+
+    private static PageResponse<SubmissionSummary> onePage(SubmissionSummary summary) {
+        return new PageResponse<>(List.of(summary), 0, 10, 1, 1);
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers UNDER_REVIEW without review fields")
+    void submissionsUnderReview() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(1L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.UNDER_REVIEW, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].document_id").value(1))
+                .andExpect(jsonPath("$.content[0].submission_status").value("UNDER_REVIEW"))
+                // Absent, not null: a document under review has no rejection to report.
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist())
+                .andExpect(jsonPath("$.content[0].reviewed_at").doesNotExist())
+                // Only the review fields are left out: the rest stay as nulls, so every row has the
+                // same keys.
+                .andExpect(jsonPath("$.content[0]").value(hasKey("description")))
+                .andExpect(jsonPath("$.content[0].description").value(nullValue()))
+                .andExpect(jsonPath("$.content[0]").value(hasKey("updated_at")))
+                .andExpect(jsonPath("$.content[0].updated_at").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers PROCESSING for an approved document not yet indexed")
+    void submissionsProcessing() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(4L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.PROCESSING, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("PROCESSING"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers INDEXING_FAILED for an approved document whose indexing failed")
+    void submissionsIndexingFailed() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(5L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.INDEXING_FAILED, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("INDEXING_FAILED"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers PUBLISHED for an approved, indexed document")
+    void submissionsPublished() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(2L, "norma.pdf", "descricao", "Regulatorio",
+                        SubmissionStatus.PUBLISHED, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"),
+                        OffsetDateTime.parse("2026-10-16T13:00:00Z"))));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.content[0].category").value("Regulatorio"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers RETURNED with the reason it came back")
+    void submissionsReturned() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(3L, "contrato.pdf", null, "Juridico",
+                        SubmissionStatus.RETURNED, "Falta a secao de revisao A.",
+                        OffsetDateTime.parse("2026-10-16T12:00:00Z"),
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("RETURNED"))
+                .andExpect(jsonPath("$.content[0].review_comment").value("Falta a secao de revisao A."))
+                .andExpect(jsonPath("$.content[0].reviewed_at").exists());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions carries the paging totals and works without creatorId")
+    void submissionsCarryPagingTotals() throws Exception {
+        given(submissionService.submissions(isNull(), eq(1), eq(10))).willReturn(
+                new PageResponse<>(List.of(), 1, 10, 23, 3));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.total_elements").value(23))
+                .andExpect(jsonPath("$.total_pages").value(3))
+                .andExpect(jsonPath("$.content").isEmpty());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers 404 for a creatorId no user has")
+    void submissionsUnknownCreator() throws Exception {
+        willThrow(new UserNotFoundException(404L))
+                .given(submissionService).submissions(eq(404L), isNull(), isNull());
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "404"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("user_not_found"));
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers 400 for a size out of bounds")
+    void submissionsSizeOutOfBounds() throws Exception {
+        willThrow(new InvalidDocumentListRequestException("size must be between 1 and 50."))
+                .given(submissionService).submissions(isNull(), isNull(), eq(0));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("size", "0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
     }
