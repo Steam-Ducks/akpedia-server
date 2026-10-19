@@ -15,7 +15,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param description  optional description given at upload
  * @param mimeType     format of the stored file; always {@code application/pdf}, since the upload
  *                     converts everything, but read from the document rather than assumed
- * @param score        cosine similarity between the query and the matched chunk, from -1 to 1
+ * @param score        cosine similarity between the query and the matched chunk, from -1 to 1;
+ *                     {@code null} when the search had no text to compare against, such as a
+ *                     category filter used alone
  * @param matchedChunk excerpt of the chunk that matched, trimmed to the configured length
  * @param chunkIndex   position of that chunk in the document, counted from 0, which is what tells
  *                     the reader whether the match is at the start of the document or deep into it
@@ -28,7 +30,7 @@ public record SearchResult(
         String name,
         String description,
         @JsonProperty("mime_type") String mimeType,
-        double score,
+        Double score,
         @JsonProperty("matched_chunk") String matchedChunk,
         @JsonProperty("chunk_index") Integer chunkIndex,
         String category,
