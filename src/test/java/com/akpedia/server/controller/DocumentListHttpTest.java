@@ -27,6 +27,7 @@ import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.dto.PendingDocument.SuggestedCategory;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentSubmissionService;
@@ -52,6 +53,9 @@ class DocumentListHttpTest {
 
     @MockBean
     private DocumentSubmissionService submissionService;
+
+    @MockBean
+    private DocumentAnalysisService analysisService;
 
     @Test
     @DisplayName("GET /api/v1/documents answers each document with the eight agreed fields")

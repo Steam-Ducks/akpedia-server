@@ -26,6 +26,38 @@ import com.akpedia.server.dto.EmbeddingErrorResponse;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
+    /**
+     * 415: the upload is in a format the analysis does not accept.
+     *
+     * <p>Carries the accepted list in the body so the screen can say what to send instead
+     * without hardcoding a list that would drift from the server's.
+     */
+    @ExceptionHandler(UnsupportedDocumentFormatException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnsupportedFormat(UnsupportedDocumentFormatException e) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(new ApiErrorResponse("unsupported_format", e.getMessage(), e.getSupportedExtensions()));
+    }
+
+    /**
+     * 503: the category could not be suggested because akpedia-ml never answered.
+     *
+     * <p>Its own code, distinct from {@code embedding_service_unavailable}: this is the failure
+     * the upload screen recovers from by letting the user pick the category by hand, and it can
+     * only do that if it can recognise it.
+     */
+    @ExceptionHandler(CategorySuggestionUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleSuggestionUnavailable(CategorySuggestionUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiErrorResponse("category_suggestion_unavailable", e.getMessage()));
+    }
+
+    /** 502: akpedia-ml suggested a category this server's catalog does not have. */
+    @ExceptionHandler(UnknownSuggestedCategoryException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnknownSuggestedCategory(UnknownSuggestedCategoryException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiErrorResponse("unknown_suggested_category", e.getMessage()));
+    }
+
     /** 503: the embedding service is down, unreachable, or past the read timeout. */
     @ExceptionHandler(EmbeddingUnavailableException.class)
     public ResponseEntity<ApiErrorResponse> handleUnavailable(EmbeddingUnavailableException e) {

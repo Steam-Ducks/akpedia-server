@@ -2,6 +2,8 @@ package com.akpedia.server.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -63,7 +65,7 @@ class SearchServiceTest {
     private void searchAnswers(List<Object[]> rows) {
         given(embeddingClient.embedQuery("technical manual"))
                 .willReturn(new QueryEmbeddingResponse(model(), vector()));
-        given(embeddings.search(anyString(), eq("fake-model"), eq(384), anyDouble(), anyInt()))
+        given(embeddings.search(anyString(), eq("fake-model"), eq(384), anyDouble(), anyBoolean(), any(), anyInt()))
                 .willReturn(rows);
     }
 
@@ -76,7 +78,7 @@ class SearchServiceTest {
     }
 
     private SearchResult firstResult() {
-        return service.search(" technical manual ", null).get(0);
+        return service.search(" technical manual ", null, null).get(0);
     }
 
     @Test
@@ -157,24 +159,61 @@ class SearchServiceTest {
         };
         searchAnswers(List.<Object[]>of(row("trecho", 1), second));
 
-        assertThat(service.search("technical manual", null))
+        assertThat(service.search("technical manual", null, null))
                 .extracting(SearchResult::documentId, SearchResult::chunkIndex)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(1L, 1), org.assertj.core.groups.Tuple.tuple(2L, 7));
     }
 
     @Test
-    @DisplayName("a blank query is refused before the embedding service is called")
-    void blankQueryIsRejectedBeforeCallingTheEmbeddingService() {
-        assertThatThrownBy(() -> service.search("   ", 10))
+    @DisplayName("a blank query with no category filter is refused before the embedding service is called")
+    void blankQueryWithNoFilterIsRejectedBeforeCallingTheEmbeddingService() {
+        assertThatThrownBy(() -> service.search("   ", null, 10))
                 .isInstanceOf(InvalidSearchRequestException.class)
-                .hasMessage("q must not be blank.");
+                .hasMessage("q or categoryIds must be present.");
     }
 
     @Test
     @DisplayName("a limit past the configured maximum is refused")
     void limitMustStayWithinConfiguredBounds() {
-        assertThatThrownBy(() -> service.search("manual", 51))
+        assertThatThrownBy(() -> service.search("manual", null, 51))
                 .isInstanceOf(InvalidSearchRequestException.class);
+    }
+
+    @Test
+    @DisplayName("a blank query combined with a category filter searches by category instead of failing")
+    void blankQueryWithCategoryFilterSearchesByCategory() {
+        List<Long> categoryIds = List.of(3L);
+        given(embeddings.searchRecentByCategory(true, categoryIds, 10))
+                .willReturn(List.<Object[]>of(row("primeiro capitulo", 0)));
+
+        assertThat(service.search(null, categoryIds, null))
+                .extracting(SearchResult::documentId)
+                .containsExactly(1L);
+    }
+
+    @Test
+    @DisplayName("a category-only result carries a null score, since there is no query to compare against")
+    void categoryOnlyResultHasNullScore() {
+        List<Long> categoryIds = List.of(3L);
+        Object[] rowWithNoScore = {
+            1L, "manual.pdf", "manual tecnico", "application/pdf", "primeiro capitulo", 0, null,
+            "Técnica", "Mariana Costa", Timestamp.from(UPDATED_AT.toInstant())
+        };
+        given(embeddings.searchRecentByCategory(true, categoryIds, 10)).willReturn(List.<Object[]>of(rowWithNoScore));
+
+        assertThat(service.search("", categoryIds, null).get(0).score()).isNull();
+    }
+
+    @Test
+    @DisplayName("a category filter is passed through to the repository as given, with hasCategories true")
+    void categoryFilterIsPassedThrough() {
+        List<Long> categoryIds = List.of(1L, 2L);
+        searchAnswers(row("trecho encontrado", 3));
+
+        service.search("technical manual", categoryIds, null);
+
+        org.mockito.BDDMockito.then(embeddings).should().search(
+                anyString(), eq("fake-model"), eq(384), anyDouble(), eq(true), eq(categoryIds), anyInt());
     }
 
     private static EmbeddingModelInfo model() {
