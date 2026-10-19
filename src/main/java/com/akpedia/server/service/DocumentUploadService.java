@@ -1,7 +1,6 @@
 package com.akpedia.server.service;
 
 import java.math.BigDecimal;
-import java.util.Locale;
 
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -105,7 +104,7 @@ public class DocumentUploadService {
         User creator = users.findById(authorId)
                 .orElseThrow(() -> new UserNotFoundException(authorId));
 
-        byte[] pdf = isAlreadyPdf(filename, contentType, content)
+        byte[] pdf = DocumentFormats.isAlreadyPdf(filename, contentType, content)
                 ? content
                 : gotenberg.convertToPdf(content, filename, contentType);
 
@@ -140,18 +139,6 @@ public class DocumentUploadService {
         if (categoryConfidence.signum() < 0 || categoryConfidence.compareTo(BigDecimal.ONE) > 0) {
             throw new InvalidDocumentUploadException("categoryConfidence must be between 0 and 1.");
         }
-    }
-
-    private boolean isAlreadyPdf(String filename, String contentType, byte[] content) {
-        boolean magicBytes = content.length >= 5
-                && content[0] == '%' && content[1] == 'P' && content[2] == 'D' && content[3] == 'F' && content[4] == '-';
-        if (magicBytes) {
-            return true;
-        }
-        if (contentType != null && contentType.toLowerCase(Locale.ROOT).contains("application/pdf")) {
-            return true;
-        }
-        return filename != null && filename.toLowerCase(Locale.ROOT).endsWith(".pdf");
     }
 
     private String withPdfExtension(String filename) {

@@ -26,7 +26,13 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
          *
          * <p>Only approved documents are searchable: one still under review, or rejected, holds
          * vectors but must not surface to anyone. The same rule guards
-         * {@link DocumentRepository#findRecent}; the two have to move together.
+         * {@link #searchRecentByCategory} and {@link DocumentRepository#findRecent}; the three have
+         * to move together.
+         *
+         * <p>{@code hasCategories} and {@code categoryIds} filter by category when the caller asked
+         * for one or more; {@code categoryIds} still needs a value when there is no filter, since an
+         * empty {@code IN ()} is invalid SQL, so the caller passes a placeholder the {@code OR}
+         * never reaches.
          */
         @Query(value = """
                         SELECT document_id, name, description, mime_type, matched_chunk, chunk_index, score,
@@ -54,6 +60,7 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                                     AND d.status = 'APPROVED'
                                     AND e.model_name = :modelName
                                     AND e.dimensions = :dimensions
+                                    AND (:hasCategories = false OR d.category_id IN (:categoryIds))
                         ) matches
                         WHERE document_rank = 1
                             AND score >= :minimumScore
@@ -65,6 +72,49 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                         @Param("modelName") String modelName,
                         @Param("dimensions") int dimensions,
                         @Param("minimumScore") double minimumScore,
+                        @Param("hasCategories") boolean hasCategories,
+                        @Param("categoryIds") Collection<Long> categoryIds,
+                        @Param("resultLimit") int resultLimit);
+
+        /**
+         * The same eligible documents {@link #search} would consider, filtered by category only and
+         * ordered by when they last changed -- for a query that asks for a category with no search
+         * text. {@code score} always comes back null: with no query there is nothing to compare the
+         * chunk against. The matched chunk is the document's first one, standing in as an excerpt.
+         */
+        @Query(value = """
+                        SELECT document_id, name, description, mime_type, matched_chunk, chunk_index, score,
+                               category, responsible_name, updated_at
+                        FROM (
+                                SELECT d.id AS document_id,
+                                             d.name,
+                                             d.description,
+                                             d.mime_type,
+                                             e.content AS matched_chunk,
+                                             e.chunk_index,
+                                             CAST(NULL AS double precision) AS score,
+                                             c.name AS category,
+                                             u.name AS responsible_name,
+                                             COALESCE(d.updated_at, d.created_at) AS updated_at,
+                                             ROW_NUMBER() OVER (
+                                                     PARTITION BY d.id
+                                                     ORDER BY e.chunk_index
+                                             ) AS document_rank
+                                FROM embeddings e
+                                JOIN documents d ON d.id = e.document_id
+                                JOIN categories c ON c.id = d.category_id
+                                JOIN users u ON u.id = d.creator_id
+                                WHERE d.processing_status = 'COMPLETED'
+                                    AND d.status = 'APPROVED'
+                                    AND (:hasCategories = false OR d.category_id IN (:categoryIds))
+                        ) matches
+                        WHERE document_rank = 1
+                        ORDER BY updated_at DESC
+                        LIMIT :resultLimit
+                        """, nativeQuery = true)
+        List<Object[]> searchRecentByCategory(
+                        @Param("hasCategories") boolean hasCategories,
+                        @Param("categoryIds") Collection<Long> categoryIds,
                         @Param("resultLimit") int resultLimit);
 
     /**

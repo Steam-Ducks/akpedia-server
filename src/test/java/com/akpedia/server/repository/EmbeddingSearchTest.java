@@ -53,6 +53,11 @@ class EmbeddingSearchTest {
 
     /** Persists a document in the given state, with one chunk the query can match. */
     private Document indexedDocument(DocumentStatus status, ProcessingStatus processingStatus) {
+        return indexedDocument(category, status, processingStatus);
+    }
+
+    /** Persists a document in the given category and state, with one chunk the query can match. */
+    private Document indexedDocument(Category category, DocumentStatus status, ProcessingStatus processingStatus) {
         Document document = TestFixtures.document(category, creator);
         document.setStatus(status);
         document.setProcessingStatus(processingStatus);
@@ -63,10 +68,17 @@ class EmbeddingSearchTest {
         return document;
     }
 
+    private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
+
     private List<Long> search() {
+        return search(false, NO_CATEGORY_FILTER);
+    }
+
+    private List<Long> search(boolean hasCategories, List<Long> categoryIds) {
         entityManager.clear();
         return embeddingRepository.search(
-                        queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, 10)
+                        queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE,
+                        hasCategories, categoryIds, 10)
                 .stream()
                 .map(row -> ((Number) row[0]).longValue())
                 .toList();
@@ -122,6 +134,63 @@ class EmbeddingSearchTest {
         entityManager.flush();
 
         assertThat(search()).containsOnlyOnce(document.getId());
+    }
+
+    @Test
+    @DisplayName("with hasCategories false, categoryIds is ignored and every eligible document comes back")
+    void withoutCategoryFilterEveryEligibleDocumentIsReturned() {
+        Category other = entityManager.persist(TestFixtures.category());
+        Document inSetupCategory = indexedDocument(DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document inOtherCategory = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+
+        assertThat(search(false, List.of(other.getId())))
+                .contains(inSetupCategory.getId(), inOtherCategory.getId());
+    }
+
+    @Test
+    @DisplayName("with hasCategories true, only documents in one of the given categories come back")
+    void categoryFilterLeavesOtherCategoriesOut() {
+        Category other = entityManager.persist(TestFixtures.category());
+        Document inFilter = indexedDocument(category, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document outOfFilter = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+
+        assertThat(search(true, List.of(category.getId())))
+                .contains(inFilter.getId())
+                .doesNotContain(outOfFilter.getId());
+    }
+
+    @Test
+    @DisplayName("several category ids combine with OR, not AND")
+    void multipleCategoryIdsAreCombinedWithOr() {
+        Category other = entityManager.persist(TestFixtures.category());
+        Category excluded = entityManager.persist(TestFixtures.category());
+        Document first = indexedDocument(category, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document second = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document third = indexedDocument(excluded, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+
+        assertThat(search(true, List.of(category.getId(), other.getId())))
+                .contains(first.getId(), second.getId())
+                .doesNotContain(third.getId());
+    }
+
+    @Test
+    @DisplayName("a category search with no text also returns only approved documents")
+    void categorySearchWithoutTextOnlyReturnsApprovedDocuments() {
+        Document eligible = indexedDocument(DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document draft = indexedDocument(DocumentStatus.DRAFT, ProcessingStatus.COMPLETED);
+        Document underReview = indexedDocument(DocumentStatus.PENDING_APPROVAL, ProcessingStatus.COMPLETED);
+        Document rejected = indexedDocument(DocumentStatus.REJECTED, ProcessingStatus.COMPLETED);
+        Document archived = indexedDocument(DocumentStatus.ARCHIVED, ProcessingStatus.COMPLETED);
+        entityManager.clear();
+
+        List<Long> found = embeddingRepository.searchRecentByCategory(true, List.of(category.getId()), 10)
+                .stream()
+                .map(row -> ((Number) row[0]).longValue())
+                .toList();
+
+        assertThat(found)
+                .contains(eligible.getId())
+                .doesNotContain(draft.getId(), underReview.getId(), rejected.getId(), archived.getId());
     }
 
 }

@@ -86,13 +86,18 @@ akpedia-server/
     │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
-    │   │   │   ├── DocumentController.java # upload de documentos
+    │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
     │   │   ├── dto/ # objetos de transporte
     │   │   │   ├── DocumentEmbeddingResponse.java
     │   │   │   ├── DocumentChunk.java
     │   │   │   ├── DocumentUploadResponse.java
+    │   │   │   ├── DocumentAnalysisResponse.java # sugestão devolvida ao /analyze
+    │   │   │   ├── DocumentClassification.java # o que o akpedia-ml responde ao classificar
+    │   │   │   ├── SubmissionSummary.java # um envio do autor, com status derivado
+    │   │   │   ├── SubmissionStatus.java # status do envio visto pelo autor (ver Minhas submissões)
+    │   │   │   ├── PageResponse.java # envelope de paginacao (content + totais)
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -105,12 +110,18 @@ akpedia-server/
     │   │   │   ├── EmbeddingRejectedException.java
     │   │   │   ├── CategoryNotFoundException.java
     │   │   │   ├── UserNotFoundException.java
+    │   │   │   ├── UnsupportedDocumentFormatException.java # 415 do /analyze
+    │   │   │   ├── CategorySuggestionUnavailableException.java # 503: liberar escolha manual
+    │   │   │   ├── UnknownSuggestedCategoryException.java # 502: categoria fora do catálogo
     │   │   │   ├── InvalidDocumentUploadException.java
     │   │   │   ├── PdfConversionException.java
     │   │   │   ├── PdfConversionUnavailableException.java
     │   │   │   └── PdfConversionRejectedException.java
     │   │   └── service/
-    │   │       └── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
+    │   │       ├── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
+    │   │       ├── DocumentAnalysisService.java # sugere categoria sem persistir nada
+    │   │       ├── DocumentFormats.java # formatos aceitos e detecção de PDF, compartilhados
+    │   │       └── DocumentSubmissionService.java # lista os envios do autor
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -436,6 +447,166 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
 
+### Minhas submissões
+
+`GET /api/v1/documents/submissions` devolve os documentos que a pessoa enviou, do mais recente
+para o mais antigo, cada um com um status **derivado** para o autor em vez do status armazenado:
+
+| `submission_status` | No banco                                          | O que significa para o autor                    |
+|---------------------|---------------------------------------------------|-------------------------------------------------|
+| `UNDER_REVIEW`      | `PENDING_APPROVAL`, em qualquer `processing_status` | esperando um aprovador                         |
+| `PROCESSING`        | `APPROVED` com `processing_status` `PENDING` ou `PROCESSING` | aprovado, mas a busca ainda não o encontra |
+| `PUBLISHED`         | `APPROVED` com `processing_status: COMPLETED`     | aprovado e indexado, os colegas já encontram    |
+| `INDEXING_FAILED`   | `APPROVED` com `processing_status: FAILED`        | aprovado, mas a indexação falhou e a busca não vai encontrá-lo |
+| `RETURNED`          | `REJECTED`                                        | devolvido; o `review_comment` diz o motivo      |
+
+Aprovar não basta para o documento aparecer na busca: a indexação só começa depois da aprovação.
+Por isso `APPROVED` se divide em três — chamar de `PUBLISHED` um documento que ainda está sendo
+indexado faria o autor avisar os colegas de algo que eles ainda não encontram. E a falha tem
+estado próprio porque `PROCESSING` prometeria uma coisa que não vai acontecer.
+
+Diferente da busca e da listagem de recentes, esta rota **mostra documento não aprovado de
+propósito** — são os do próprio autor, e dizer o que ainda está em revisão é o objetivo dela. O
+que ela não mostra é documento de outra pessoa.
+
+Documento em `DRAFT` nunca saiu das mãos do autor e `ARCHIVED` está fora de circulação: nenhum dos
+dois é uma submissão, então não aparecem aqui.
+
+| Parâmetro   | Obrigatório | Descrição                                                      |
+|-------------|:-----------:|-----------------------------------------------------------------|
+| `creatorId` | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
+| `page`      | não         | página, começando em 0; default 0                               |
+| `size`      | não         | resultados por página, de 1 a 50; default 10                    |
+
+```bash
+curl "localhost:8080/api/v1/documents/submissions?page=0&size=10"
+```
+
+```json
+{
+  "content": [
+    {
+      "document_id": 7,
+      "name": "contrato.pdf",
+      "description": null,
+      "category": "Juridico",
+      "submission_status": "RETURNED",
+      "review_comment": "Falta a secao de revisao A.",
+      "reviewed_at": "2026-10-16T12:00:00Z",
+      "created_at": "2026-10-16T11:20:00Z",
+      "updated_at": null
+    },
+    {
+      "document_id": 5,
+      "name": "manual.pdf",
+      "description": "manual tecnico",
+      "category": "Manuais",
+      "submission_status": "PUBLISHED",
+      "created_at": "2026-10-15T09:00:00Z",
+      "updated_at": "2026-10-15T18:30:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 10,
+  "total_elements": 23,
+  "total_pages": 3
+}
+```
+
+O `review_comment` e o `reviewed_at` só aparecem em documento devolvido — **ausentes**, não nulos.
+Os outros campos vêm sempre, `null` quando não têm valor, então toda linha tem as mesmas chaves.
+Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem: ao lado de
+`PUBLISHED` ele se leria como se o documento ainda estivesse esperando correção.
+
+#### Status de erro
+
+| Situação                                  | Status | `code`            |
+|--------------------------------------------|--------|-------------------|
+| `page` negativo, ou `size` fora de 1 a 50  | 400    | `invalid_request` |
+| `creatorId` que nenhum usuário tem         | 404    | `user_not_found`  |
+
+> Um `creatorId` inexistente responde 404 em vez de página vazia: página vazia se leria como
+> "você não enviou nada", que é uma resposta diferente — e a que o autor acreditaria.
+
+### Sugerir título, descrição e categoria (antes de enviar)
+
+`POST /api/v1/documents/analyze` recebe o arquivo e devolve o título, a descrição e a categoria
+que o akpedia-ml leu do documento, para a tela de upload já vir preenchida. **Nada é persistido**: o arquivo é lido,
+convertido em memória e descartado, então uma análise abandonada não deixa documento nem linha
+nenhuma atrás.
+
+Pela arquitetura, a tela nunca fala com o akpedia-ml: ela posta aqui, e é o servidor que valida o
+formato, converte e chama o classificador.
+
+| Campo (multipart) | Obrigatório | Descrição                                   |
+|--------------------|:-----------:|----------------------------------------------|
+| `file`             | sim         | arquivo a analisar: PDF, DOC/DOCX ou XLS/XLSX |
+
+A lista de formatos é **mais estreita que a do upload**, que aceita tudo que o Gotenberg
+converte. Arquivos que não são PDF são convertidos antes de ir ao classificador.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents/analyze \
+  -F "file=@manual.docx"
+```
+
+```json
+{
+  "title": "Manual de Manutenção do Trem de Pouso",
+  "description": "Este manual descreve os procedimentos de inspeção...",
+  "suggested_category_id": 2,
+  "confidence": 0.873
+}
+```
+
+O `suggested_category_id` é exatamente o que o `POST /api/v1/documents` recebe como
+`suggestedCategoryId`, e o `confidence` como `categoryConfidence` — a tela devolve os dois sem
+precisar consultar nada.
+
+O `title` vem dos metadados do PDF, da linha de maior fonte da primeira página ou, na falta dos
+dois, do nome do arquivo. A `description` é o primeiro parágrafo com conteúdo do documento, ou
+`null` quando não há nenhum.
+
+**Sem sugestão de categoria** (o akpedia-ml ainda não tem a base de categorias), a resposta é
+`200` com `suggested_category_id` e `confidence` `null`. Não é erro: o título e a descrição vêm do
+mesmo jeito, e a tela deixa a categoria para o usuário escolher.
+
+```json
+{
+  "title": "manual",
+  "description": null,
+  "suggested_category_id": null,
+  "confidence": null
+}
+```
+
+#### Status de erro
+
+| Situação                                      | Status | `code`                            |
+|------------------------------------------------|--------|-----------------------------------|
+| arquivo vazio, ou parte `file` ausente          | 400    | `invalid_request`                 |
+| arquivo acima de 25 MB                          | 413    | `file_too_large`                  |
+| formato fora de PDF, DOC/DOCX e XLS/XLSX        | 415    | `unsupported_format`              |
+| Gotenberg recebeu mas recusou o arquivo         | 422    | `pdf_conversion_rejected`         |
+| categoria sugerida não existe no catálogo       | 502    | `unknown_suggested_category`      |
+| **classificador fora do ar ou além do timeout** | 503    | `category_suggestion_unavailable` |
+
+O 415 traz a lista aceita no corpo, para a tela não precisar manter uma cópia que divergiria da
+do servidor:
+
+```json
+{
+  "code": "unsupported_format",
+  "message": "O formato de 'apresentacao.pptx' nao e aceito. Envie um arquivo PDF, DOC, DOCX, XLS ou XLSX.",
+  "supported_extensions": ["pdf", "doc", "docx", "xls", "xlsx"]
+}
+```
+
+> O 503 tem `code` próprio, diferente do `embedding_service_unavailable` das outras rotas. É de
+> propósito: esse é o único caso em que a tela deve **liberar a escolha manual da categoria** e
+> seguir com o envio, em vez de mostrar erro e parar. Já o 502 significa que o classificador e o
+> catálogo divergiram — aí alguém precisa reconciliar os dois.
+
 ### Fila de aprovação
 
 `GET /api/v1/documents/pending?page=&size=` lista os documentos em `PENDING_APPROVAL`, **o upload
@@ -583,25 +754,45 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 
 ### Endpoint
 
-`GET /api/v1/search?q=<texto>&limit=<n>` faz busca semântica nos documentos **aprovados e
-indexados**. O texto da consulta é vetorizado pelo akpedia-ml e comparado por similaridade de
-cosseno com os `embeddings` salvos. Documento em revisão (`PENDING_APPROVAL`), recusado
-(`REJECTED`) ou arquivado não aparece, mesmo tendo vetores.
+`GET /api/v1/search?q=<texto>&categoryIds=<ids>&limit=<n>` faz busca semântica nos documentos
+**aprovados e indexados**, com filtro opcional por categoria. O texto da consulta é vetorizado pelo
+akpedia-ml e comparado por similaridade de cosseno com os `embeddings` salvos. Documento em revisão
+(`PENDING_APPROVAL`), recusado (`REJECTED`) ou arquivado não aparece, mesmo tendo vetores — nem na
+busca só por categoria.
 
-| Parâmetro | Obrigatório | Descrição                                                                 |
-|-----------|:-----------:|---------------------------------------------------------------------------|
-| `q`       | sim         | palavra, frase ou pergunta                                                 |
-| `limit`   | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
+| Parâmetro     | Obrigatório | Descrição                                                                 |
+|---------------|:-----------:|---------------------------------------------------------------------------|
+| `q`           | não\*       | palavra, frase ou pergunta                                                |
+| `categoryIds` | não\*       | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); filtra os resultados a essas categorias |
+| `limit`       | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
 
-Só entram documentos com `processing_status: COMPLETED` — sem vetores não há o que comparar. Cada
-documento aparece **uma vez só**, representado pelo trecho que mais se aproximou da consulta, e os
-resultados vêm ordenados por relevância. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam, então
-uma busca sem nada parecido responde `200` com lista vazia — não 404.
+\* Pelo menos um dos dois precisa vir na requisição; sem nenhum, a rota responde `400`.
+
+Com `categoryIds` e sem `q`, a busca é só o filtro: os resultados vêm ordenados pela última
+alteração do documento (mais recente primeiro), e `score` volta `null`, já que não há texto para
+comparar. Com `q`, `categoryIds` só restringe quais documentos entram na comparação; os resultados
+continuam ordenados por relevância.
+
+Só entram documentos com `processing_status: COMPLETED` e `status: APPROVED` — sem vetores não há
+o que comparar. Cada documento aparece **uma vez só**, representado pelo trecho que mais se
+aproximou da consulta (ou, sem `q`, pelo primeiro trecho do documento, como excerto), e os
+resultados vêm ordenados por relevância ou por data, conforme acima. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam quando
+há `q`, então uma busca sem nada parecido responde `200` com lista vazia — não 404.
+
+A lista de categorias para montar o filtro vem de `GET /api/v1/categories`, que responde o
+catálogo inteiro, ordenado por nome:
+
+```json
+[
+  { "id": 1, "name": "Engenharia", "description": "Documentos de engenharia" },
+  { "id": 2, "name": "Normativa", "description": null }
+]
+```
 
 ### Formato do resultado
 
 Cada item da lista tem estes sete campos, sempre presentes (`description` vem `null` quando o
-documento foi enviado sem uma):
+documento foi enviado sem uma, e `score` vem `null` quando a busca não teve `q`):
 
 | Campo           | Tipo    | O que é                                                                    |
 |-----------------|---------|----------------------------------------------------------------------------|
@@ -609,8 +800,8 @@ documento foi enviado sem uma):
 | `name`          | texto   | título do documento                                                        |
 | `description`   | texto   | descrição informada no upload, ou `null`                                   |
 | `mime_type`     | texto   | formato do arquivo armazenado; hoje sempre `application/pdf`                |
-| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico)         |
-| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo)                       |
+| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico); `null` sem `q` |
+| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo); o primeiro trecho do documento quando a busca não teve `q` |
 | `chunk_index`   | número  | posição desse trecho no documento, contando de 0                           |
 
 ```bash
@@ -663,10 +854,10 @@ de folga.
 
 #### Status de erro
 
-| Situação                                          | Status | `code`                          |
-|----------------------------------------------------|--------|---------------------------------|
-| `q` ausente ou em branco, ou `limit` fora do teto  | 400    | `invalid_request`               |
-| akpedia-ml respondeu algo que não dá para usar     | 502    | `embedding_service_error`       |
+| Situação                                                      | Status | `code`                     |
+|----------------------------------------------------------------|--------|---------------------------|
+| nem `q` nem `categoryIds`, ou `limit` fora do teto             | 400    | `invalid_request`          |
+| akpedia-ml respondeu algo que não dá para usar                 | 502    | `embedding_service_error`  |
 | akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
 
 ---

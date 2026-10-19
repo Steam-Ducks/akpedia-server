@@ -28,14 +28,18 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.akpedia.server.dto.ApiErrorResponse;
+import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
 import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PendingDocument;
+import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 import io.swagger.v3.oas.annotations.Hidden;
@@ -68,14 +72,20 @@ public class DocumentController {
     private final DocumentUploadService uploadService;
     private final DocumentFileService fileService;
     private final DocumentListService listService;
+    private final DocumentAnalysisService analysisService;
+    private final DocumentSubmissionService submissionService;
 
     public DocumentController(
             DocumentUploadService uploadService,
             DocumentFileService fileService,
-            DocumentListService listService) {
+            DocumentListService listService,
+            DocumentAnalysisService analysisService,
+            DocumentSubmissionService submissionService) {
         this.uploadService = uploadService;
         this.fileService = fileService;
         this.listService = listService;
+        this.analysisService = analysisService;
+        this.submissionService = submissionService;
     }
 
     @Operation(
@@ -96,6 +106,98 @@ public class DocumentController {
     @GetMapping("/documents")
     public List<DocumentSummary> recent(@RequestParam(required = false) Integer limit) {
         return listService.recent(limit);
+    }
+
+    @Operation(
+            summary = "List the author's own submissions and where each one stands",
+            description = """
+                    Answers the documents uploaded by `creatorId`, most recently submitted first, each with
+                    a status derived for the author rather than the stored one:
+
+                    - `UNDER_REVIEW`: waiting on an approver, whatever the indexing is doing;
+                    - `PROCESSING`: approved and being indexed, so search does not reach it yet;
+                    - `PUBLISHED`: approved and indexed, so colleagues can find it;
+                    - `INDEXING_FAILED`: approved, but indexing failed, so search will not reach it;
+                    - `RETURNED`: sent back, with `review_comment` saying why.
+
+                    Unlike `GET /documents` and search, this route shows unapproved documents on purpose --
+                    they are the caller's own, and saying what is still under review is the point. It shows
+                    nobody else's.
+
+                    `review_comment` and `reviewed_at` are only present on a returned document; every other
+                    field is always present, null when it has no value. A document
+                    that is still a draft, or that was archived, is not a submission and is not listed.
+
+                    Without `creatorId` the configured default user is used, since this sprint has no
+                    login (see the README).""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "One page of submissions; the page may be empty."),
+        @ApiResponse(responseCode = "400", description = "page or size is out of bounds.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "No user exists with the given creatorId.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents/submissions")
+    public PageResponse<SubmissionSummary> submissions(
+            @RequestParam(required = false)
+            @Parameter(description = "Author whose submissions to list. Defaults to the configured user.")
+            Long creatorId,
+            @RequestParam(required = false)
+            @Parameter(description = "Zero-based page. Defaults to 0.")
+            Integer page,
+            @RequestParam(required = false)
+            @Parameter(description = "Results per page, from 1 to 50. Defaults to 10.")
+            Integer size) {
+
+        return submissionService.submissions(creatorId, page, size);
+    }
+
+    @Operation(
+            summary = "Suggest a title, description and category for a document, without storing it",
+            description = """
+                    Answers the title, description and category akpedia-ml reads from the file, so the upload
+                    screen can pre-fill the form before anything is sent. The screen never calls akpedia-ml
+                    itself: it posts the file here, and this server validates the format, converts it and asks
+                    akpedia-ml.
+
+                    `suggested_category_id` and `confidence` are `null` when akpedia-ml has no category to
+                    suggest; the screen then leaves the category for the user to pick. The title and
+                    description come back either way (`description` is `null` when the document has no
+                    paragraph long enough).
+
+                    **Nothing is persisted.** The file is read, converted in memory and discarded, so an
+                    analysis the user abandons leaves no document and no rows behind.
+
+                    Accepts PDF, DOC/DOCX and XLS/XLSX only -- a narrower list than the upload, which takes
+                    whatever Gotenberg converts. Non-PDF files are converted before being classified.
+
+                    The returned `suggested_category_id` is what `POST /api/v1/documents` takes as
+                    `suggestedCategoryId`, and `confidence` as `categoryConfidence`, so both can be handed
+                    straight back without a lookup.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200",
+                description = "The suggested title, description and category (null when there is no suggestion)."),
+        @ApiResponse(responseCode = "400", description = "Invalid request (empty file or missing part).",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "415", description = "Format is not one of PDF, DOC/DOCX or XLS/XLSX.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "422", description = "Gotenberg received the file but rejected the conversion.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "502", description = "The classifier suggested a category outside the catalog.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "503",
+                description = "The classifier is unavailable; the screen should let the user choose the category.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @PostMapping(path = "/documents/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public DocumentAnalysisResponse analyze(
+            @RequestPart("file")
+            @Schema(type = "string", format = "binary", description = "File to analyze: PDF, DOC/DOCX or XLS/XLSX.")
+            MultipartFile file) throws IOException {
+
+        return analysisService.analyze(file.getBytes(), file.getOriginalFilename(), file.getContentType());
     }
 
     @Operation(

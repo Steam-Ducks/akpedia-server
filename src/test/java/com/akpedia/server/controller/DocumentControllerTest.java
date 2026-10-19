@@ -1,6 +1,7 @@
 package com.akpedia.server.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -17,9 +18,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -31,7 +36,11 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
+import com.akpedia.server.dto.PageResponse;
+import com.akpedia.server.dto.SubmissionStatus;
+import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.Sector;
@@ -40,16 +49,22 @@ import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.CategoryNotFoundException;
+import com.akpedia.server.exception.CategorySuggestionUnavailableException;
 import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotProcessedException;
+import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.exception.InvalidDocumentUploadException;
 import com.akpedia.server.exception.PdfConversionRejectedException;
 import com.akpedia.server.exception.PdfConversionUnavailableException;
+import com.akpedia.server.exception.UnknownSuggestedCategoryException;
+import com.akpedia.server.exception.UnsupportedDocumentFormatException;
 import com.akpedia.server.exception.UserNotFoundException;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 /**
@@ -72,6 +87,12 @@ class DocumentControllerTest {
 
     @MockBean
     private DocumentListService listService;
+
+    @MockBean
+    private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private DocumentSubmissionService submissionService;
 
     /** Fixed validators, so the conditional-request cases can send the exact values back. */
     private static final Instant LAST_MODIFIED = Instant.parse("2026-09-24T22:31:05Z");
@@ -423,6 +444,221 @@ class DocumentControllerTest {
         mvc.perform(get("/api/v1/documents/abc/file"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
+    }
+
+    // ------------------------------------------------------------------
+    // GET /api/v1/documents/submissions
+    // ------------------------------------------------------------------
+
+    private static PageResponse<SubmissionSummary> onePage(SubmissionSummary summary) {
+        return new PageResponse<>(List.of(summary), 0, 10, 1, 1);
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers UNDER_REVIEW without review fields")
+    void submissionsUnderReview() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(1L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.UNDER_REVIEW, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].document_id").value(1))
+                .andExpect(jsonPath("$.content[0].submission_status").value("UNDER_REVIEW"))
+                // Absent, not null: a document under review has no rejection to report.
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist())
+                .andExpect(jsonPath("$.content[0].reviewed_at").doesNotExist())
+                // Only the review fields are left out: the rest stay as nulls, so every row has the
+                // same keys.
+                .andExpect(jsonPath("$.content[0]").value(hasKey("description")))
+                .andExpect(jsonPath("$.content[0].description").value(nullValue()))
+                .andExpect(jsonPath("$.content[0]").value(hasKey("updated_at")))
+                .andExpect(jsonPath("$.content[0].updated_at").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers PROCESSING for an approved document not yet indexed")
+    void submissionsProcessing() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(4L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.PROCESSING, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("PROCESSING"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers INDEXING_FAILED for an approved document whose indexing failed")
+    void submissionsIndexingFailed() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(5L, "manual.pdf", null, "Manuais",
+                        SubmissionStatus.INDEXING_FAILED, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("INDEXING_FAILED"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers PUBLISHED for an approved, indexed document")
+    void submissionsPublished() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(2L, "norma.pdf", "descricao", "Regulatorio",
+                        SubmissionStatus.PUBLISHED, null, null,
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"),
+                        OffsetDateTime.parse("2026-10-16T13:00:00Z"))));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.content[0].category").value("Regulatorio"))
+                .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers RETURNED with the reason it came back")
+    void submissionsReturned() throws Exception {
+        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+                new SubmissionSummary(3L, "contrato.pdf", null, "Juridico",
+                        SubmissionStatus.RETURNED, "Falta a secao de revisao A.",
+                        OffsetDateTime.parse("2026-10-16T12:00:00Z"),
+                        OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].submission_status").value("RETURNED"))
+                .andExpect(jsonPath("$.content[0].review_comment").value("Falta a secao de revisao A."))
+                .andExpect(jsonPath("$.content[0].reviewed_at").exists());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions carries the paging totals and works without creatorId")
+    void submissionsCarryPagingTotals() throws Exception {
+        given(submissionService.submissions(isNull(), eq(1), eq(10))).willReturn(
+                new PageResponse<>(List.of(), 1, 10, 23, 3));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.total_elements").value(23))
+                .andExpect(jsonPath("$.total_pages").value(3))
+                .andExpect(jsonPath("$.content").isEmpty());
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers 404 for a creatorId no user has")
+    void submissionsUnknownCreator() throws Exception {
+        willThrow(new UserNotFoundException(404L))
+                .given(submissionService).submissions(eq(404L), isNull(), isNull());
+
+        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "404"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("user_not_found"));
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions answers 400 for a size out of bounds")
+    void submissionsSizeOutOfBounds() throws Exception {
+        willThrow(new InvalidDocumentListRequestException("size must be between 1 and 50."))
+                .given(submissionService).submissions(isNull(), isNull(), eq(0));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
+    }
+
+    // ------------------------------------------------------------------
+    // POST /api/v1/documents/analyze
+    // ------------------------------------------------------------------
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+        "manual.pdf,       application/pdf",
+        "manual.doc,       application/msword",
+        "manual.docx,      application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "planilha.xls,     application/vnd.ms-excel",
+        "planilha.xlsx,    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    })
+    @DisplayName("POST /api/v1/documents/analyze answers 200 with the suggestion for each accepted format")
+    void analyzeAcceptsEverySupportedFormat(String filename, String contentType) throws Exception {
+        given(analysisService.analyze(any(), eq(filename), eq(contentType)))
+                .willReturn(new DocumentAnalysisResponse(
+                        "Manual do Trem de Pouso", "Este manual descreve a inspecao.", 7L, new BigDecimal("0.873")));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", filename, contentType, "conteudo".getBytes())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Manual do Trem de Pouso"))
+                .andExpect(jsonPath("$.description").value("Este manual descreve a inspecao."))
+                .andExpect(jsonPath("$.suggested_category_id").value(7))
+                .andExpect(jsonPath("$.confidence").value(0.873));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 200 with null category when there is no suggestion")
+    void analyzeAnswersOkWithoutACategory() throws Exception {
+        given(analysisService.analyze(any(), eq("manual.pdf"), eq("application/pdf")))
+                .willReturn(new DocumentAnalysisResponse("Manual do Trem de Pouso", null, null, null));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Manual do Trem de Pouso"))
+                // Present and null, not missing: the screen tells "no suggestion" apart from an old contract.
+                .andExpect(jsonPath("$.suggested_category_id").value(nullValue()))
+                .andExpect(jsonPath("$.confidence").value(nullValue()))
+                .andExpect(jsonPath("$.description").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 415 and the accepted list for a refused format")
+    void analyzeRejectsUnsupportedFormat() throws Exception {
+        willThrow(new UnsupportedDocumentFormatException("apresentacao.pptx", List.of("pdf", "doc", "docx", "xls", "xlsx")))
+                .given(analysisService).analyze(any(), eq("apresentacao.pptx"), eq("application/vnd.ms-powerpoint"));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "apresentacao.pptx",
+                                "application/vnd.ms-powerpoint", "conteudo".getBytes())))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("unsupported_format"))
+                // The screen reads this list instead of hardcoding one that would drift from the server's.
+                .andExpect(jsonPath("$.supported_extensions").value(
+                        org.hamcrest.Matchers.contains("pdf", "doc", "docx", "xls", "xlsx")))
+                .andExpect(jsonPath("$.message", containsString("apresentacao.pptx")));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 503 telling the screen to let the user choose")
+    void analyzeAnswersUnavailableWhenMlIsDown() throws Exception {
+        willThrow(new CategorySuggestionUnavailableException(new RuntimeException("connection refused")))
+                .given(analysisService).analyze(any(), eq("manual.pdf"), eq("application/pdf"));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isServiceUnavailable())
+                // Its own code: the screen recovers from this one by enabling manual input.
+                .andExpect(jsonPath("$.code").value("category_suggestion_unavailable"))
+                .andExpect(jsonPath("$.message", containsString("manualmente")));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 502 when the suggestion is outside the catalog")
+    void analyzeAnswersBadGatewayForACategoryNotInTheCatalog() throws Exception {
+        willThrow(new UnknownSuggestedCategoryException("Financeiro"))
+                .given(analysisService).analyze(any(), eq("manual.pdf"), eq("application/pdf"));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("unknown_suggested_category"))
+                .andExpect(jsonPath("$.message", containsString("Financeiro")));
     }
 
 }

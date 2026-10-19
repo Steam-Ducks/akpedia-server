@@ -59,7 +59,7 @@ class SearchControllerTest {
     @Test
     @DisplayName("GET /api/v1/search answers each result with the ten agreed fields")
     void searchResultCarriesTheAgreedFormat() throws Exception {
-        given(searchService.search("integracao", null)).willReturn(List.of(result()));
+        given(searchService.search("integracao", null, null)).willReturn(List.of(result()));
 
         mvc.perform(get("/api/v1/search").param("q", "integracao"))
                 .andExpect(status().isOk())
@@ -79,7 +79,7 @@ class SearchControllerTest {
     @Test
     @DisplayName("the result carries those fields and nothing else, so the contract stays readable")
     void searchResultCarriesNoOtherField() throws Exception {
-        given(searchService.search("integracao", null)).willReturn(List.of(result()));
+        given(searchService.search("integracao", null, null)).willReturn(List.of(result()));
 
         mvc.perform(get("/api/v1/search").param("q", "integracao"))
                 .andExpect(status().isOk())
@@ -96,7 +96,7 @@ class SearchControllerTest {
     @Test
     @DisplayName("a document uploaded without a description keeps the field, as null")
     void descriptionIsNullRatherThanAbsent() throws Exception {
-        given(searchService.search("integracao", null)).willReturn(List.of(new SearchResult(
+        given(searchService.search("integracao", null, null)).willReturn(List.of(new SearchResult(
                 7L, "manual.pdf", null, "application/pdf", 0.9, "trecho", 0,
                 "Técnica", "Mariana Costa", UPDATED_AT)));
 
@@ -109,7 +109,7 @@ class SearchControllerTest {
     @Test
     @DisplayName("a search with no match answers 200 and an empty list, not 404")
     void noMatchIsAnEmptyList() throws Exception {
-        given(searchService.search("inexistente", null)).willReturn(List.of());
+        given(searchService.search("inexistente", null, null)).willReturn(List.of());
 
         mvc.perform(get("/api/v1/search").param("q", "inexistente"))
                 .andExpect(status().isOk())
@@ -120,7 +120,7 @@ class SearchControllerTest {
     @Test
     @DisplayName("the result list is JSON, whatever the caller asks to accept")
     void responseIsJson() throws Exception {
-        given(searchService.search("integracao", null)).willReturn(List.of(result()));
+        given(searchService.search("integracao", null, null)).willReturn(List.of(result()));
 
         mvc.perform(get("/api/v1/search").param("q", "integracao").accept(MediaType.ALL))
                 .andExpect(status().isOk())
@@ -129,18 +129,43 @@ class SearchControllerTest {
     }
 
     @Test
-    @DisplayName("a missing q answers 400, not 500")
-    void missingQueryBecomes400() throws Exception {
+    @DisplayName("neither q nor categoryIds answers 400, not 500")
+    void missingQueryAndCategoriesBecomes400() throws Exception {
+        willThrow(new InvalidSearchRequestException("q or categoryIds must be present."))
+                .given(searchService).search(any(), any(), any());
+
         mvc.perform(get("/api/v1/search"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
     }
 
     @Test
+    @DisplayName("categoryIds alone, with no q, is a valid request")
+    void categoryIdsAloneIsAValidRequest() throws Exception {
+        given(searchService.search(null, List.of(1L, 3L), null)).willReturn(List.of(result()));
+
+        mvc.perform(get("/api/v1/search").param("categoryIds", "1", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].document_id").value(7));
+    }
+
+    @Test
+    @DisplayName("a category-only result's score comes back null")
+    void categoryOnlyResultScoreIsNull() throws Exception {
+        given(searchService.search(null, List.of(1L), null)).willReturn(List.of(new SearchResult(
+                7L, "manual.pdf", "manual tecnico do time", "application/pdf", null,
+                "primeiro capitulo", 0, "Técnica", "Mariana Costa", UPDATED_AT)));
+
+        mvc.perform(get("/api/v1/search").param("categoryIds", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].score").value(nullValue()));
+    }
+
+    @Test
     @DisplayName("an invalid limit answers 400 with the reason")
     void invalidLimitBecomes400() throws Exception {
         willThrow(new InvalidSearchRequestException("limit must be between 1 and 50."))
-                .given(searchService).search(any(), any());
+                .given(searchService).search(any(), any(), any());
 
         mvc.perform(get("/api/v1/search").param("q", "integracao").param("limit", "999"))
                 .andExpect(status().isBadRequest())
@@ -152,7 +177,7 @@ class SearchControllerTest {
     @DisplayName("the embedding service being down answers 503, not 500")
     void embeddingServiceDownBecomes503() throws Exception {
         willThrow(new EmbeddingUnavailableException("akpedia-ml esta fora do ar", null))
-                .given(searchService).search(any(), any());
+                .given(searchService).search(any(), any(), any());
 
         mvc.perform(get("/api/v1/search").param("q", "integracao"))
                 .andExpect(status().isServiceUnavailable())

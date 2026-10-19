@@ -76,7 +76,7 @@ class SearchQueryTest {
      */
     private Object[] rowOfTestDocument() {
         List<Object[]> rows = embeddingRepository.search(
-                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, 100);
+                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, false, List.of(-1L), 100);
 
         return rows.stream()
                 .filter(row -> ((Number) row[0]).longValue() == document.getId())
@@ -107,5 +107,27 @@ class SearchQueryTest {
     @DisplayName("the score of an exact match is 1, so the column really is the similarity")
     void scoreOfAnIdenticalVectorIsOne() {
         assertThat(((Number) rowOfTestDocument()[6]).doubleValue()).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-6));
+    }
+
+    @Test
+    @DisplayName("the recent-by-category row carries the same ten columns, with a null score")
+    void recentByCategoryRowCarriesEveryColumnInOrderWithNoScore() {
+        List<Object[]> rows = embeddingRepository.searchRecentByCategory(false, List.of(-1L), 100);
+        Object[] row = rows.stream()
+                .filter(candidate -> ((Number) candidate[0]).longValue() == document.getId())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the test document did not come back"));
+
+        assertThat(row).hasSize(10);
+        assertThat(((Number) row[0]).longValue()).isEqualTo(document.getId());
+        assertThat(row[1]).isEqualTo(document.getName());
+        assertThat(row[2]).isEqualTo("manual tecnico do time");
+        assertThat(row[3]).isEqualTo("application/pdf");
+        assertThat(row[4]).isEqualTo("trecho que casou");
+        assertThat(((Number) row[5]).intValue()).isEqualTo(4);
+        assertThat(row[6]).isNull();
+        assertThat(row[7]).isEqualTo(category.getName());
+        assertThat(row[8]).isEqualTo(creator.getName());
+        assertThat(row[9]).isNotNull();
     }
 }
