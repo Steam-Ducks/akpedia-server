@@ -28,12 +28,14 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.akpedia.server.dto.ApiErrorResponse;
+import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
 import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.entity.Document;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentUploadService;
@@ -68,14 +70,17 @@ public class DocumentController {
     private final DocumentUploadService uploadService;
     private final DocumentFileService fileService;
     private final DocumentListService listService;
+    private final DocumentAnalysisService analysisService;
 
     public DocumentController(
             DocumentUploadService uploadService,
             DocumentFileService fileService,
-            DocumentListService listService) {
+            DocumentListService listService,
+            DocumentAnalysisService analysisService) {
         this.uploadService = uploadService;
         this.fileService = fileService;
         this.listService = listService;
+        this.analysisService = analysisService;
     }
 
     @Operation(
@@ -94,6 +99,54 @@ public class DocumentController {
     @GetMapping("/documents")
     public List<DocumentSummary> recent(@RequestParam(required = false) Integer limit) {
         return listService.recent(limit);
+    }
+
+    @Operation(
+            summary = "Suggest a title, description and category for a document, without storing it",
+            description = """
+                    Answers the title, description and category akpedia-ml reads from the file, so the upload
+                    screen can pre-fill the form before anything is sent. The screen never calls akpedia-ml
+                    itself: it posts the file here, and this server validates the format, converts it and asks
+                    akpedia-ml.
+
+                    `suggested_category_id` and `confidence` are `null` when akpedia-ml has no category to
+                    suggest; the screen then leaves the category for the user to pick. The title and
+                    description come back either way (`description` is `null` when the document has no
+                    paragraph long enough).
+
+                    **Nothing is persisted.** The file is read, converted in memory and discarded, so an
+                    analysis the user abandons leaves no document and no rows behind.
+
+                    Accepts PDF, DOC/DOCX and XLS/XLSX only -- a narrower list than the upload, which takes
+                    whatever Gotenberg converts. Non-PDF files are converted before being classified.
+
+                    The returned `suggested_category_id` is what `POST /api/v1/documents` takes as
+                    `suggestedCategoryId`, and `confidence` as `categoryConfidence`, so both can be handed
+                    straight back without a lookup.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200",
+                description = "The suggested title, description and category (null when there is no suggestion)."),
+        @ApiResponse(responseCode = "400", description = "Invalid request (empty file or missing part).",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "415", description = "Format is not one of PDF, DOC/DOCX or XLS/XLSX.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "422", description = "Gotenberg received the file but rejected the conversion.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "502", description = "The classifier suggested a category outside the catalog.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "503",
+                description = "The classifier is unavailable; the screen should let the user choose the category.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @PostMapping(path = "/documents/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public DocumentAnalysisResponse analyze(
+            @RequestPart("file")
+            @Schema(type = "string", format = "binary", description = "File to analyze: PDF, DOC/DOCX or XLS/XLSX.")
+            MultipartFile file) throws IOException {
+
+        return analysisService.analyze(file.getBytes(), file.getOriginalFilename(), file.getContentType());
     }
 
     @Operation(

@@ -17,9 +17,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -31,6 +34,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
@@ -40,6 +44,7 @@ import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.CategoryNotFoundException;
+import com.akpedia.server.exception.CategorySuggestionUnavailableException;
 import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
@@ -47,7 +52,10 @@ import com.akpedia.server.exception.DocumentNotProcessedException;
 import com.akpedia.server.exception.InvalidDocumentUploadException;
 import com.akpedia.server.exception.PdfConversionRejectedException;
 import com.akpedia.server.exception.PdfConversionUnavailableException;
+import com.akpedia.server.exception.UnknownSuggestedCategoryException;
+import com.akpedia.server.exception.UnsupportedDocumentFormatException;
 import com.akpedia.server.exception.UserNotFoundException;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentUploadService;
@@ -72,6 +80,9 @@ class DocumentControllerTest {
 
     @MockBean
     private DocumentListService listService;
+
+    @MockBean
+    private DocumentAnalysisService analysisService;
 
     /** Fixed validators, so the conditional-request cases can send the exact values back. */
     private static final Instant LAST_MODIFIED = Instant.parse("2026-09-24T22:31:05Z");
@@ -423,6 +434,93 @@ class DocumentControllerTest {
         mvc.perform(get("/api/v1/documents/abc/file"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
+    }
+
+    // ------------------------------------------------------------------
+    // POST /api/v1/documents/analyze
+    // ------------------------------------------------------------------
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+        "manual.pdf,       application/pdf",
+        "manual.doc,       application/msword",
+        "manual.docx,      application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "planilha.xls,     application/vnd.ms-excel",
+        "planilha.xlsx,    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    })
+    @DisplayName("POST /api/v1/documents/analyze answers 200 with the suggestion for each accepted format")
+    void analyzeAcceptsEverySupportedFormat(String filename, String contentType) throws Exception {
+        given(analysisService.analyze(any(), eq(filename), eq(contentType)))
+                .willReturn(new DocumentAnalysisResponse(
+                        "Manual do Trem de Pouso", "Este manual descreve a inspecao.", 7L, new BigDecimal("0.873")));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", filename, contentType, "conteudo".getBytes())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Manual do Trem de Pouso"))
+                .andExpect(jsonPath("$.description").value("Este manual descreve a inspecao."))
+                .andExpect(jsonPath("$.suggested_category_id").value(7))
+                .andExpect(jsonPath("$.confidence").value(0.873));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 200 with null category when there is no suggestion")
+    void analyzeAnswersOkWithoutACategory() throws Exception {
+        given(analysisService.analyze(any(), eq("manual.pdf"), eq("application/pdf")))
+                .willReturn(new DocumentAnalysisResponse("Manual do Trem de Pouso", null, null, null));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Manual do Trem de Pouso"))
+                // Present and null, not missing: the screen tells "no suggestion" apart from an old contract.
+                .andExpect(jsonPath("$.suggested_category_id").value(nullValue()))
+                .andExpect(jsonPath("$.confidence").value(nullValue()))
+                .andExpect(jsonPath("$.description").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 415 and the accepted list for a refused format")
+    void analyzeRejectsUnsupportedFormat() throws Exception {
+        willThrow(new UnsupportedDocumentFormatException("apresentacao.pptx", List.of("pdf", "doc", "docx", "xls", "xlsx")))
+                .given(analysisService).analyze(any(), eq("apresentacao.pptx"), eq("application/vnd.ms-powerpoint"));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "apresentacao.pptx",
+                                "application/vnd.ms-powerpoint", "conteudo".getBytes())))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("unsupported_format"))
+                // The screen reads this list instead of hardcoding one that would drift from the server's.
+                .andExpect(jsonPath("$.supported_extensions").value(
+                        org.hamcrest.Matchers.contains("pdf", "doc", "docx", "xls", "xlsx")))
+                .andExpect(jsonPath("$.message", containsString("apresentacao.pptx")));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 503 telling the screen to let the user choose")
+    void analyzeAnswersUnavailableWhenMlIsDown() throws Exception {
+        willThrow(new CategorySuggestionUnavailableException(new RuntimeException("connection refused")))
+                .given(analysisService).analyze(any(), eq("manual.pdf"), eq("application/pdf"));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isServiceUnavailable())
+                // Its own code: the screen recovers from this one by enabling manual input.
+                .andExpect(jsonPath("$.code").value("category_suggestion_unavailable"))
+                .andExpect(jsonPath("$.message", containsString("manualmente")));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/documents/analyze answers 502 when the suggestion is outside the catalog")
+    void analyzeAnswersBadGatewayForACategoryNotInTheCatalog() throws Exception {
+        willThrow(new UnknownSuggestedCategoryException("Financeiro"))
+                .given(analysisService).analyze(any(), eq("manual.pdf"), eq("application/pdf"));
+
+        mvc.perform(multipart("/api/v1/documents/analyze")
+                        .file(new MockMultipartFile("file", "manual.pdf", "application/pdf", "%PDF-1.4".getBytes())))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("unknown_suggested_category"))
+                .andExpect(jsonPath("$.message", containsString("Financeiro")));
     }
 
 }

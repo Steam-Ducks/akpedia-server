@@ -17,6 +17,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import com.akpedia.server.config.EmbeddingProperties;
+import com.akpedia.server.dto.DocumentClassification;
 import com.akpedia.server.dto.DocumentEmbeddingResponse;
 import com.akpedia.server.dto.EmbeddingErrorResponse;
 import com.akpedia.server.dto.QueryEmbeddingResponse;
@@ -41,6 +42,7 @@ public class EmbeddingClient {
 
     private static final String DOCUMENT_PATH = "/api/v1/documents/process";
     private static final String QUERY_PATH = "/api/v1/embeddings/query";
+    private static final String ANALYZE_PATH = "/api/v1/documents/analyze";
 
     private final RestClient restClient;
     private final EmbeddingProperties properties;
@@ -75,6 +77,37 @@ public class EmbeddingClient {
                 .body(body)
                 .retrieve()
                 .body(DocumentEmbeddingResponse.class));
+    }
+
+    /**
+     * Asks akpedia-ml for a title, description and category for a document.
+     *
+     * <p>Sends the document the same way {@link #embedDocument} does, because the service reads
+     * the file in both routes; what differs is that nothing comes back to store, only suggestions.
+     *
+     * @param content     bytes to analyze, already converted to PDF by the caller
+     * @param filename    original name, which the service falls back to for the title; the
+     *                    extractor is picked from it or, when its extension is not PDF, from
+     *                    {@code contentType}
+     * @param contentType media type of {@code content}; {@code null} falls back to
+     *                    {@code application/octet-stream}
+     * @return the suggestions; the category is {@code null} when the service has none
+     * @throws EmbeddingUnavailableException if the service is down or slower than the read timeout
+     * @throws EmbeddingRejectedException    if the document is refused (unsupported, too large, unreadable, no text)
+     */
+    public DocumentClassification classifyDocument(byte[] content, String filename, String contentType) {
+        HttpHeaders partHeaders = new HttpHeaders();
+        partHeaders.setContentType(mediaTypeOrDefault(contentType));
+
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", new HttpEntity<>(new NamedByteArrayResource(content, filename), partHeaders));
+
+        return call("the analysis of document '" + filename + "'", ANALYZE_PATH, () -> restClient.post()
+                .uri(ANALYZE_PATH)
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(body)
+                .retrieve()
+                .body(DocumentClassification.class));
     }
 
     /**
