@@ -99,13 +99,20 @@ class EmbeddingSearchTest {
     }
 
     @Test
-    @DisplayName("an archived document is left out: its file answers 403, so the result would not open")
-    void archivedDocumentIsLeftOut() {
+    @DisplayName("only an approved document is searchable: every other status is left out")
+    void onlyApprovedDocumentsAreSearchable() {
         Document eligible = indexedDocument(DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        // A document under review or rejected holds vectors, so nothing but this filter keeps it
+        // out of everyone's results. Archived stays out too: its file answers 403.
+        Document draft = indexedDocument(DocumentStatus.DRAFT, ProcessingStatus.COMPLETED);
+        Document underReview = indexedDocument(DocumentStatus.PENDING_APPROVAL, ProcessingStatus.COMPLETED);
+        Document rejected = indexedDocument(DocumentStatus.REJECTED, ProcessingStatus.COMPLETED);
         Document archived = indexedDocument(DocumentStatus.ARCHIVED, ProcessingStatus.COMPLETED);
 
         // The eligible document is asserted alongside so an empty result cannot pass for a filter.
-        assertThat(search()).contains(eligible.getId()).doesNotContain(archived.getId());
+        assertThat(search())
+                .contains(eligible.getId())
+                .doesNotContain(draft.getId(), underReview.getId(), rejected.getId(), archived.getId());
     }
 
     @Test
@@ -164,6 +171,26 @@ class EmbeddingSearchTest {
         assertThat(search(true, List.of(category.getId(), other.getId())))
                 .contains(first.getId(), second.getId())
                 .doesNotContain(third.getId());
+    }
+
+    @Test
+    @DisplayName("a category search with no text also returns only approved documents")
+    void categorySearchWithoutTextOnlyReturnsApprovedDocuments() {
+        Document eligible = indexedDocument(DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document draft = indexedDocument(DocumentStatus.DRAFT, ProcessingStatus.COMPLETED);
+        Document underReview = indexedDocument(DocumentStatus.PENDING_APPROVAL, ProcessingStatus.COMPLETED);
+        Document rejected = indexedDocument(DocumentStatus.REJECTED, ProcessingStatus.COMPLETED);
+        Document archived = indexedDocument(DocumentStatus.ARCHIVED, ProcessingStatus.COMPLETED);
+        entityManager.clear();
+
+        List<Long> found = embeddingRepository.searchRecentByCategory(true, List.of(category.getId()), 10)
+                .stream()
+                .map(row -> ((Number) row[0]).longValue())
+                .toList();
+
+        assertThat(found)
+                .contains(eligible.getId())
+                .doesNotContain(draft.getId(), underReview.getId(), rejected.getId(), archived.getId());
     }
 
 }

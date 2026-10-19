@@ -14,15 +14,20 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
         /**
          * Returns the closest eligible chunk once per document, already ordered by relevance.
          *
-         * <p>Eligible leaves out what cannot be opened afterwards: a document still being indexed
-         * has no usable vectors yet, and an archived one is refused by
-         * {@code GET /documents/{id}/file}, so listing it here would offer a result that leads to a
-         * 403.
+         * <p>Eligible means approved and indexed. A document still being indexed has no usable
+         * vectors yet; one awaiting approval or returned for a fix is not available to colleagues;
+         * and an archived one is refused by {@code GET /documents/{id}/file}, so listing it here
+         * would offer a result that leads to a 403.
          *
          * <p>The columns a result card shows besides the match -- category, the creator as the
          * person responsible, and when the document last changed -- come after the score, so the
          * positions of the original columns stay where {@code SearchService} reads them. A document
          * never edited has no {@code updated_at}, so its creation time stands in.
+         *
+         * <p>Only approved documents are searchable: one still under review, or rejected, holds
+         * vectors but must not surface to anyone. The same rule guards
+         * {@link #searchRecentByCategory} and {@link DocumentRepository#findRecent}; the three have
+         * to move together.
          *
          * <p>{@code hasCategories} and {@code categoryIds} filter by category when the caller asked
          * for one or more; {@code categoryIds} still needs a value when there is no filter, since an
@@ -52,7 +57,7 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                                 JOIN categories c ON c.id = d.category_id
                                 JOIN users u ON u.id = d.creator_id
                                 WHERE d.processing_status = 'COMPLETED'
-                                    AND d.status <> 'ARCHIVED'
+                                    AND d.status = 'APPROVED'
                                     AND e.model_name = :modelName
                                     AND e.dimensions = :dimensions
                                     AND (:hasCategories = false OR d.category_id IN (:categoryIds))
@@ -100,7 +105,7 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                                 JOIN categories c ON c.id = d.category_id
                                 JOIN users u ON u.id = d.creator_id
                                 WHERE d.processing_status = 'COMPLETED'
-                                    AND d.status <> 'ARCHIVED'
+                                    AND d.status = 'APPROVED'
                                     AND (:hasCategories = false OR d.category_id IN (:categoryIds))
                         ) matches
                         WHERE document_rank = 1

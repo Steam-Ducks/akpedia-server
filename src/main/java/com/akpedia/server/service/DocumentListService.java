@@ -22,9 +22,9 @@ import com.akpedia.server.repository.EmbeddingRepository;
 /**
  * Lists documents outside of search: the ones most recently changed, and the review queue.
  *
- * <p>The recent list holds the same documents search can return: indexed and not archived. A
- * document still being indexed or out of circulation would be offered there and then refused when
- * opened.
+ * <p>The recent list holds the same documents search can return: approved and indexed. A
+ * document still awaiting approval, returned for a fix, still being indexed or archived would be
+ * offered there and then refused when opened.
  *
  * <p>Each recent document carries an excerpt of its first chunk, cut to the same length as a search
  * snippet, so a card can say what the document is about even when it was uploaded without a
@@ -60,8 +60,7 @@ public class DocumentListService {
                     "limit must be between 1 and %d.".formatted(MAX_LIMIT));
         }
 
-        List<Document> recent = documents.findRecent(
-                ProcessingStatus.COMPLETED, DocumentStatus.ARCHIVED, PageRequest.of(0, limit));
+        List<Document> recent = documents.findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, limit));
         Map<Long, String> excerpts = excerptsOf(recent);
 
         return recent.stream()

@@ -701,9 +701,14 @@ aprovado, e o aprovador precisa ler o documento para decidir.
 de embeddings — então o binário está íntegro e só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
 para sempre por causa de uma etapa que nem tocou no arquivo.
 
-A busca (`GET /api/v1/search`) usa o mesmo critério: a query já filtrava `processing_status =
-'COMPLETED'` e agora também deixa `ARCHIVED` de fora, senão um resultado da pesquisa levaria a um
-403 ao ser aberto.
+A busca (`GET /api/v1/search`) é mais restrita: além de `processing_status = 'COMPLETED'`, a query
+exige `status = 'APPROVED'`. Só documento aprovado é visível — um em revisão ou recusado tem
+vetores no banco, e sem esse filtro apareceria para qualquer um. Arquivado também fica de fora,
+senão um resultado da pesquisa levaria a um 403 ao ser aberto.
+
+A mesma regra vale para `GET /api/v1/documents`, a listagem recente. O status exigido está escrito
+dentro das duas queries, não é parâmetro: numa listagem pública, quem chama poder escolher o que
+aparece é exatamente como um documento em revisão chega a quem não devia vê-lo.
 
 ```bash
 # no navegador, basta abrir a URL
@@ -750,8 +755,10 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 ### Endpoint
 
 `GET /api/v1/search?q=<texto>&categoryIds=<ids>&limit=<n>` faz busca semântica nos documentos
-indexados, com filtro opcional por categoria. O texto da consulta é vetorizado pelo akpedia-ml e
-comparado por similaridade de cosseno com os `embeddings` salvos.
+**aprovados e indexados**, com filtro opcional por categoria. O texto da consulta é vetorizado pelo
+akpedia-ml e comparado por similaridade de cosseno com os `embeddings` salvos. Documento em revisão
+(`PENDING_APPROVAL`), recusado (`REJECTED`) ou arquivado não aparece, mesmo tendo vetores — nem na
+busca só por categoria.
 
 | Parâmetro     | Obrigatório | Descrição                                                                 |
 |---------------|:-----------:|---------------------------------------------------------------------------|
@@ -766,10 +773,10 @@ alteração do documento (mais recente primeiro), e `score` volta `null`, já qu
 comparar. Com `q`, `categoryIds` só restringe quais documentos entram na comparação; os resultados
 continuam ordenados por relevância.
 
-Só entram documentos com `processing_status: COMPLETED` — sem vetores não há o que comparar. Cada
-documento aparece **uma vez só**, representado pelo trecho que mais se aproximou da consulta (ou,
-sem `q`, pelo primeiro trecho do documento, como excerto), e os resultados vêm ordenados por
-relevância ou por data, conforme acima. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam quando
+Só entram documentos com `processing_status: COMPLETED` e `status: APPROVED` — sem vetores não há
+o que comparar. Cada documento aparece **uma vez só**, representado pelo trecho que mais se
+aproximou da consulta (ou, sem `q`, pelo primeiro trecho do documento, como excerto), e os
+resultados vêm ordenados por relevância ou por data, conforme acima. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam quando
 há `q`, então uma busca sem nada parecido responde `200` com lista vazia — não 404.
 
 A lista de categorias para montar o filtro vem de `GET /api/v1/categories`, que responde o
