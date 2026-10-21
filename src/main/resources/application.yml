@@ -28,6 +28,15 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Redis only carries the processing stream; the JPA repositories are not Redis ones.
+      repositories:
+        enabled: false
+
 server:
   port: ${SERVER_PORT:8080}
 
@@ -46,6 +55,12 @@ akpedia:
     minimum-score: ${SEARCH_MINIMUM_SCORE:0.85}
     # Length agreed for the excerpt a result carries, ellipsis included.
     snippet-length: ${SEARCH_SNIPPET_LENGTH:300}
+  processing:
+    # Redis stream the server publishes uploaded documents to, and the consumer group the
+    # akpedia-ml workers read it with. Both must match the worker's DOCUMENTS_STREAM and
+    # WORKER_GROUP.
+    stream: ${DOCUMENTS_STREAM:documents:processing}
+    group: ${WORKER_GROUP:ml-workers}
   gotenberg:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}
