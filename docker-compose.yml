@@ -22,6 +22,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: akpedia-redis
+    # AOF on, so the queue of approved documents survives a restart.
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:

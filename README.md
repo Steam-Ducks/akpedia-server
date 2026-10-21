@@ -84,9 +84,12 @@ akpedia-server/
     │   │   │   ├── DefaultUserProperties.java # akpedia.default-user-email
     │   │   │   ├── DefaultUserConfig.java
     │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
+    │   │   │   ├── ProcessingProperties.java # akpedia.processing.*: stream, grupo e reenvio
+    │   │   │   ├── ProcessingConfig.java
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
     │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
+    │   │   │   ├── DocumentReviewController.java # aprovar ou devolver um documento da fila
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
     │   │   ├── dto/ # objetos de transporte
@@ -98,6 +101,9 @@ akpedia-server/
     │   │   │   ├── SubmissionSummary.java # um envio do autor, com status derivado
     │   │   │   ├── SubmissionStatus.java # status do envio visto pelo autor (ver Minhas submissões)
     │   │   │   ├── PageResponse.java # envelope de paginacao (content + totais)
+    │   │   │   ├── ApproveDocumentRequest.java # correções opcionais do aprovador
+    │   │   │   ├── RejectDocumentRequest.java # motivo da devolução
+    │   │   │   ├── DocumentReviewResponse.java # o documento depois da decisão
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -110,6 +116,7 @@ akpedia-server/
     │   │   │   ├── EmbeddingRejectedException.java
     │   │   │   ├── CategoryNotFoundException.java
     │   │   │   ├── UserNotFoundException.java
+    │   │   │   ├── DocumentNotPendingApprovalException.java # 409: já decidido ou nunca enviado
     │   │   │   ├── UnsupportedDocumentFormatException.java # 415 do /analyze
     │   │   │   ├── CategorySuggestionUnavailableException.java # 503: liberar escolha manual
     │   │   │   ├── UnknownSuggestedCategoryException.java # 502: categoria fora do catálogo
@@ -121,7 +128,11 @@ akpedia-server/
     │   │       ├── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
     │   │       ├── DocumentAnalysisService.java # sugere categoria sem persistir nada
     │   │       ├── DocumentFormats.java # formatos aceitos e detecção de PDF, compartilhados
-    │   │       └── DocumentSubmissionService.java # lista os envios do autor
+    │   │       ├── DocumentSubmissionService.java # lista os envios do autor
+    │   │       ├── DocumentReviewService.java # aprova (com correções) ou devolve
+    │   │       ├── DocumentApprovedEvent.java # publicado na aprovação, tratado após o commit
+    │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit
+    │   │       └── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -129,7 +140,8 @@ akpedia-server/
     │           ├── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
     │           ├── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
     │           ├── V4__document_review_fields.sql # campos de revisão + catálogo de categorias
-    │           └── V5__seed_default_approver.sql # usuário padrão temporário (ver Configuração)
+    │           ├── V5__seed_default_approver.sql # usuário padrão temporário (ver Configuração)
+    │           └── V6__document_processing_enqueued_at.sql # quando o aprovado entrou na fila (outbox)
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
@@ -248,6 +260,39 @@ e o default já aponta para `http://gotenberg:3000`. Rodando fora do Docker, sub
 ```bash
 docker run --rm -p 3000:3000 gotenberg/gotenberg:8
 ```
+
+### Fila de indexação (Redis)
+
+| Variável                      | Default                | Para que serve                                                       |
+|-------------------------------|------------------------|----------------------------------------------------------------------|
+| `REDIS_HOST`                  | `localhost`            | Host do Redis                                                        |
+| `REDIS_PORT`                  | `6379`                 | Porta do Redis                                                       |
+| `REDIS_PASSWORD`              | (vazio)                | Senha do Redis, se houver                                            |
+| `REDIS_TIMEOUT`               | `2s`                   | Tempo máximo de um comando                                           |
+| `DOCUMENTS_STREAM`            | `documents:processing` | Stream onde entra o id de cada documento aprovado                    |
+| `WORKER_GROUP`                | `ml-workers`           | Consumer group dos workers do akpedia-ml                             |
+| `PROCESSING_RETRY_INTERVAL`   | `30s`                  | De quanto em quanto tempo reenviar aprovados que não chegaram à fila |
+| `PROCESSING_RETRY_GRACE`      | `1m`                   | Quanto esperar depois da aprovação antes de reenviar                 |
+| `PROCESSING_RETRY_BATCH_SIZE` | `50`                   | Quantos documentos uma rodada reenvia no máximo                      |
+
+`DOCUMENTS_STREAM` e `WORKER_GROUP` são um contrato com o worker do akpedia-ml, que usa as mesmas
+variáveis: mudar só de um lado deixa mensagens que ninguém lê.
+
+Um documento aprovado é entregue ao worker de indexação do akpedia-ml por uma Redis Stream (ver
+[Aprovar ou devolver](#aprovar-ou-devolver)). No `docker-compose.yml` o Redis sobe como serviço
+`redis` (imagem `redis:7-alpine`, com AOF ligado para a fila sobreviver a um restart), publicado
+na porta 6379 e na rede `akpedia-net`, onde o compose do akpedia-ml o alcança como
+`akpedia-redis`. Suba este compose antes do akpedia-ml, porque é ele que cria a rede. Rodando fora
+do Docker:
+
+```bash
+docker run --rm -p 6379:6379 redis:7-alpine
+```
+
+**O servidor precisa do Redis para subir.** No startup ele cria a stream e o consumer group
+(`XGROUP CREATE ... MKSTREAM`, idempotente). Se o Redis não responder, a aplicação não sobe: um
+servidor que não consegue enfileirar documentos não deve parecer saudável. Se o Redis cair com o
+servidor já no ar, as aprovações continuam sendo gravadas e entram na fila quando ele voltar.
 
 ---
 
@@ -651,6 +696,126 @@ curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
 }
 ```
 
+### Aprovar ou devolver
+
+É a decisão do aprovador sobre um documento da fila. As duas rotas só valem para documento em
+`PENDING_APPROVAL`; em qualquer outro status respondem **409** `document_not_pending_approval` — na
+prática, alguém já decidiu. O documento fica travado (`SELECT … FOR UPDATE`) enquanto a decisão é
+gravada, então dois aprovadores ao mesmo tempo não aprovam duas vezes nem aprovam e devolvem o
+mesmo documento.
+
+O aprovador registrado é o [usuário padrão](#usuário-padrão-temporário), como o autor do upload,
+enquanto não houver login.
+
+#### Aprovar
+
+`POST /api/v1/documents/{id}/approve` aprova e, de quebra, deixa o aprovador corrigir o que o autor
+mandou. O corpo é opcional, e cada campo também: o que vier substitui, o que faltar fica como está.
+
+| Campo         | Descrição                                               |
+|---------------|---------------------------------------------------------|
+| `name`        | novo título; se vier, não pode ser em branco (até 255)  |
+| `description` | nova descrição; em branco, remove a descrição           |
+| `categoryId`  | categoria correta; precisa existir no catálogo          |
+
+O documento vira `status: APPROVED` com `processing_status: PROCESSING`, e grava `approver_id`,
+`approved_at` e `reviewed_at`. Depois que a transação **comita**, o id dele entra na Redis Stream
+`DOCUMENTS_STREAM` (`documents:processing`, via `XADD`), de onde o worker de indexação do
+akpedia-ml lê pelo consumer group `ml-workers`:
+
+```
+XADD documents:processing * documentId 7
+```
+
+Publicar só depois do commit é o que impede que o worker indexe uma aprovação que deu rollback.
+Mas abre o caso contrário: a aprovação é gravada e o envio não acontece — o Redis estava fora do
+ar, ou o servidor caiu entre o commit e o `XADD`. Para nenhum documento ficar preso em
+`PROCESSING` esperando uma mensagem que nunca foi enviada, **a própria tabela `documents` serve de
+outbox**:
+
+- `processing_enqueued_at` só é preenchido depois que o Redis aceitou o id;
+- a cada `PROCESSING_RETRY_INTERVAL` (30s), o servidor procura documentos `APPROVED` +
+  `PROCESSING` com essa coluna vazia, aprovados há mais de `PROCESSING_RETRY_GRACE` (1min), e os
+  reenvia, os mais antigos primeiro;
+- a carência existe para não reenviar um documento cujo envio logo após o commit ainda está em
+  andamento; e uma rodada para no primeiro documento que o Redis recusar, porque os outros seriam
+  recusados também.
+
+A aprovação nunca é desfeita por causa do Redis, e o aprovador recebe 200 mesmo que o envio
+falhe: ele acontece depois, sozinho.
+
+**A entrega é "pelo menos uma vez".** Se o servidor cair depois de o Redis aceitar o id e antes de
+gravar `processing_enqueued_at`, o documento é enviado de novo, e o worker o indexa outra vez.
+Por isso gravar o resultado da indexação precisa ser idempotente do lado do servidor.
+
+> Enquanto está em `PROCESSING`, o `/file` do documento responde 409 (ver [Restrições](#restrições)),
+> até o worker terminar a indexação.
+
+```bash
+# sem correções
+curl -X POST localhost:8080/api/v1/documents/7/approve
+
+# corrigindo título e categoria
+curl -X POST localhost:8080/api/v1/documents/7/approve \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Manual de calibracao", "categoryId": 4}'
+```
+
+```json
+{
+  "id": 7,
+  "name": "Manual de calibracao",
+  "description": "manual tecnico",
+  "category_id": 4,
+  "status": "APPROVED",
+  "processing_status": "PROCESSING",
+  "approver_id": 1,
+  "approved_at": "2026-10-20T14:00:00Z",
+  "review_comment": null,
+  "reviewed_at": "2026-10-20T14:00:00Z"
+}
+```
+
+#### Devolver
+
+`POST /api/v1/documents/{id}/reject` devolve o documento ao autor. O `comment` é obrigatório: é o
+que o autor lê ao lado do documento em [Minhas submissões](#minhas-submissões).
+
+O documento vira `status: REJECTED` com `review_comment` e `reviewed_at`. O **PDF armazenado é
+apagado** (`document_files`), mas a linha do documento fica — é ela que mostra ao autor o que voltou
+e por quê.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents/7/reject \
+  -H 'Content-Type: application/json' \
+  -d '{"comment": "Falta a secao de revisao A."}'
+```
+
+```json
+{
+  "id": 7,
+  "name": "manual.pdf",
+  "description": null,
+  "category_id": 3,
+  "status": "REJECTED",
+  "processing_status": "PENDING",
+  "approver_id": null,
+  "approved_at": null,
+  "review_comment": "Falta a secao de revisao A.",
+  "reviewed_at": "2026-10-20T14:00:00Z"
+}
+```
+
+#### Status de erro
+
+| Situação                                                     | Status | `code`                          |
+|---------------------------------------------------------------|--------|---------------------------------|
+| corpo malformado; `name` em branco ou longo demais            | 400    | `invalid_request`               |
+| devolução sem corpo, sem `comment` ou com `comment` em branco | 400    | `invalid_request`               |
+| documento não existe                                          | 404    | `document_not_found`            |
+| `categoryId` da correção não existe                           | 404    | `category_not_found`            |
+| documento não está em `PENDING_APPROVAL`                      | 409    | `document_not_pending_approval` |
+
 ### Abrir o arquivo
 
 `GET /api/v1/documents/{id}/file` devolve o binário armazenado do documento. A resposta vem com
@@ -689,7 +854,9 @@ O que restringe é o estado do próprio documento:
 | `status: ARCHIVED`                               | 403      | documento fora de circulação; arquivar é definitivo             |
 | `processing_status: PROCESSING`                  | 409      | o akpedia-ml está indexando o documento neste momento           |
 
-Os outros `status` (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`) abrem normalmente.
+Os outros `status` (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`) abrem normalmente. Um documento
+`REJECTED` não tem mais arquivo — a [devolução](#aprovar-ou-devolver) apaga o PDF —, então
+responde 404 `document_file_not_found`.
 
 O 409 é conflito de estado, não recusa: a indexação termina sozinha, então a mesma
 requisição passa a funcionar — é o que separa esse caso do 403, que não muda.
@@ -744,7 +911,7 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 | `id` não numérico                                  | 400    | `invalid_request`          |
 | documento arquivado                                | 403    | `document_archived`        |
 | documento não existe                               | 404    | `document_not_found`       |
-| documento existe, mas não há arquivo armazenado    | 404    | `document_file_not_found`  |
+| documento existe, mas não há arquivo armazenado (ex.: devolvido) | 404 | `document_file_not_found` |
 | indexação do akpedia-ml ainda não terminou         | 409    | `document_not_processed`   |
 | `Range` pedido não cabe no arquivo                 | 416    | — (sem corpo)              |
 

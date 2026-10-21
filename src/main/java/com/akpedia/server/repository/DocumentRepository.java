@@ -3,11 +3,16 @@ package com.akpedia.server.repository;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
+import jakarta.persistence.LockModeType;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -87,4 +92,50 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
             """,
             countQuery = "SELECT COUNT(d) FROM Document d WHERE d.status = :status")
     Page<Document> findOldestFirstByStatus(@Param("status") DocumentStatus status, Pageable pageable);
+
+    /**
+     * The document, locked until the transaction ends, for an approver to decide on.
+     *
+     * <p>The lock is what makes the {@code PENDING_APPROVAL} check hold: two approvers deciding
+     * at once would otherwise both see it pending, and the document would be approved twice --
+     * and handed to the indexing worker twice -- or approved and rejected at the same time.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM Document d WHERE d.id = :id")
+    Optional<Document> findForReview(@Param("id") Long id);
+
+    /**
+     * Records that the approved document was handed to the indexing worker.
+     *
+     * <p>Native SQL because the column is read-only on the entity (see
+     * {@link Document#getProcessingEnqueuedAt()}), and conditional so a second send -- the retry
+     * racing the first one -- keeps the time of the first. Writing it this way also leaves
+     * {@code updated_at} alone: being enqueued is not a change to the document.
+     *
+     * @return how many rows changed: 0 when it was already recorded
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE documents
+            SET processing_enqueued_at = :enqueuedAt
+            WHERE id = :id
+              AND processing_enqueued_at IS NULL
+            """, nativeQuery = true)
+    int markEnqueued(@Param("id") Long id, @Param("enqueuedAt") OffsetDateTime enqueuedAt);
+
+    /**
+     * Approved documents that were never handed to the indexing worker, oldest approval first.
+     *
+     * <p>{@code approvedBefore} leaves out the ones just approved: those are normally being sent
+     * right after their commit, and sending them from here too would only duplicate them.
+     */
+    @Query("""
+            SELECT d.id FROM Document d
+            WHERE d.status = com.akpedia.server.entity.enums.DocumentStatus.APPROVED
+              AND d.processingStatus = com.akpedia.server.entity.enums.ProcessingStatus.PROCESSING
+              AND d.processingEnqueuedAt IS NULL
+              AND d.approvedAt < :approvedBefore
+            ORDER BY d.approvedAt ASC, d.id ASC
+            """)
+    List<Long> findPendingEnqueue(@Param("approvedBefore") OffsetDateTime approvedBefore, Pageable pageable);
 }
