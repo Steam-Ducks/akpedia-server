@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -111,6 +112,18 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", detail));
     }
 
+    /**
+     * 400: the request body is missing, or is not JSON of the expected shape.
+     *
+     * <p>Without this, Spring answers its own error shape instead of {@code invalid_request}, and a
+     * reject with no body at all would read differently from one whose comment is blank.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnreadableBody(HttpMessageNotReadableException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse(
+                "invalid_request", "The request body is missing or is not valid JSON."));
+    }
+
     /** 400: a required request parameter or multipart part is missing. */
     @ExceptionHandler({MissingServletRequestParameterException.class, MissingServletRequestPartException.class})
     public ResponseEntity<ApiErrorResponse> handleMissingParameter(Exception e) {
@@ -202,6 +215,17 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiErrorResponse("document_not_processed", e.getMessage()));
+    }
+
+    /**
+     * 409: the document is not waiting on a decision, so it cannot be approved or returned.
+     *
+     * <p>A conflict with the document's state: most often someone already decided on it.
+     */
+    @ExceptionHandler(DocumentNotPendingApprovalException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotPendingApproval(DocumentNotPendingApprovalException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("document_not_pending_approval", e.getMessage()));
     }
 
     /**

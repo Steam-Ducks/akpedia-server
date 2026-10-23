@@ -2,6 +2,7 @@ package com.akpedia.server.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
@@ -67,7 +68,7 @@ class ProcessingStreamInitializerTest {
     }
 
     private ProcessingStreamInitializer initializerFor(String stream) {
-        return new ProcessingStreamInitializer(redis, new ProcessingProperties(stream, GROUP));
+        return new ProcessingStreamInitializer(redis, new ProcessingProperties(stream, GROUP, Duration.ofSeconds(30), Duration.ofMinutes(1), 50));
     }
 
     private List<String> groupNames(String stream) {

@@ -16,7 +16,7 @@ import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 
 /**
- * Asserts that migrations V2 to V5 delivered the schema and seeds the entities assume.
+ * Asserts that migrations V2 to V6 delivered the schema and seeds the entities assume.
  * Complements ddl-auto: validate, which only checks columns and types.
  */
 @DataJpaTest
@@ -101,6 +101,26 @@ class SchemaMigrationTest {
                 "reviewed_at timestamp with time zone",
                 "suggested_category_id bigint",
                 "category_confidence numeric(4,3)");
+    }
+
+    @Test
+    @DisplayName("documents records when an approved document was enqueued, with a partial index over the pending ones")
+    void processingEnqueuedAtAndItsIndexExist() {
+        Object type = entityManager.createNativeQuery(
+                        "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                                + "WHERE a.attrelid = 'documents'::regclass AND a.attname = 'processing_enqueued_at'")
+                .getSingleResult();
+        Object index = entityManager.createNativeQuery(
+                        "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_documents_pending_enqueue'")
+                .getSingleResult();
+
+        assertThat(type).hasToString("timestamp with time zone");
+        // Partial: only the approved documents still waiting to be enqueued are indexed.
+        assertThat(index.toString())
+                .contains("(approved_at)")
+                .contains("processing_enqueued_at IS NULL")
+                .contains("'APPROVED'")
+                .contains("'PROCESSING'");
     }
 
     @Test
