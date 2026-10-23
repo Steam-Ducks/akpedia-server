@@ -4,6 +4,7 @@ import com.akpedia.server.entity.Embedding;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -130,5 +131,15 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
             """, nativeQuery = true)
     List<Object[]> findFirstChunks(@Param("documentIds") Collection<Long> documentIds);
 
-    void deleteByDocumentId(Long documentId);
+    /**
+     * Deletes every chunk of a document, to make room for a new indexing of it.
+     *
+     * <p>A bulk delete rather than a derived {@code deleteBy...}, which would load each chunk, vector
+     * included, only to remove it one by one.
+     *
+     * @return how many chunks were deleted
+     */
+    @Modifying
+    @Query("DELETE FROM Embedding e WHERE e.document.id = :documentId")
+    int deleteByDocumentId(@Param("documentId") Long documentId);
 }

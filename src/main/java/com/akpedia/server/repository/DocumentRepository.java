@@ -105,6 +105,17 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
     Optional<Document> findForReview(@Param("id") Long id);
 
     /**
+     * The document, locked until the transaction ends, for the indexing worker's result to land on.
+     *
+     * <p>The lock is what makes a repeated call back a no-op: the worker may report the same
+     * document twice (a message delivered again after a restart), and without it both calls would
+     * see it unfinished and both write its embeddings.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT d FROM Document d WHERE d.id = :id")
+    Optional<Document> findForIndexing(@Param("id") Long id);
+
+    /**
      * Records that the approved document was handed to the indexing worker.
      *
      * <p>Native SQL because the column is read-only on the entity (see
