@@ -32,6 +32,9 @@ class SubmissionsQueryTest {
     private static final List<DocumentStatus> SUBMITTED = List.of(
             DocumentStatus.PENDING_APPROVAL, DocumentStatus.APPROVED, DocumentStatus.REJECTED);
 
+    /** Placeholder the query needs even when {@code hasCategories} is false. */
+    private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
+
     @Autowired
     private TestEntityManager entityManager;
 
@@ -50,14 +53,24 @@ class SubmissionsQueryTest {
     }
 
     private Document persist(User creator, DocumentStatus status) {
-        Document document = TestFixtures.document(category, creator);
+        return persist(creator, status, category);
+    }
+
+    private Document persist(User creator, DocumentStatus status, Category documentCategory) {
+        Document document = TestFixtures.document(documentCategory, creator);
         document.setStatus(status);
         return entityManager.persistAndFlush(document);
     }
 
     private Page<Document> submissionsOf(User creator, int page, int size) {
+        return submissionsOf(creator, page, size, false, NO_CATEGORY_FILTER);
+    }
+
+    private Page<Document> submissionsOf(
+            User creator, int page, int size, boolean hasCategories, List<Long> categoryIds) {
         entityManager.clear();
-        return documentRepository.findSubmissions(creator.getId(), SUBMITTED, PageRequest.of(page, size));
+        return documentRepository.findSubmissions(
+                creator.getId(), SUBMITTED, hasCategories, categoryIds, PageRequest.of(page, size));
     }
 
     @Test
@@ -136,5 +149,33 @@ class SubmissionsQueryTest {
 
         assertThat(found.getContent()).isEmpty();
         assertThat(found.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("hasCategories narrows the listing and the count to the given categories")
+    void categoryFilterNarrowsResults() {
+        Category otherCategory = entityManager.persist(TestFixtures.category());
+        Document inFilter = persist(author, DocumentStatus.APPROVED, category);
+        Document outOfFilter = persist(author, DocumentStatus.APPROVED, otherCategory);
+
+        Page<Document> found = submissionsOf(author, 0, 50, true, List.of(category.getId()));
+
+        assertThat(found.getContent()).extracting(Document::getId)
+                .containsExactly(inFilter.getId())
+                .doesNotContain(outOfFilter.getId());
+        assertThat(found.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("hasCategories false lists every category, whatever categoryIds carries")
+    void noCategoryFilterListsEveryCategory() {
+        Category otherCategory = entityManager.persist(TestFixtures.category());
+        Document first = persist(author, DocumentStatus.APPROVED, category);
+        Document second = persist(author, DocumentStatus.APPROVED, otherCategory);
+
+        Page<Document> found = submissionsOf(author, 0, 50);
+
+        assertThat(found.getContent()).extracting(Document::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
     }
 }

@@ -58,22 +58,30 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
      *
      * <p>The category comes fetched because every row shows it; the creator does not, since the
      * caller already knows whose submissions these are.
+     *
+     * <p>{@code hasCategories} and {@code categoryIds} filter by category when the caller asked
+     * for one or more; {@code categoryIds} still needs a value when there is no filter, since an
+     * empty {@code IN ()} is invalid -- the same convention as {@link EmbeddingRepository#search}.
      */
     @Query(value = """
             SELECT d FROM Document d
             JOIN FETCH d.category
             WHERE d.creator.id = :creatorId
               AND d.status IN :statuses
+              AND (:hasCategories = false OR d.category.id IN :categoryIds)
             ORDER BY d.createdAt DESC, d.id DESC
             """,
             countQuery = """
             SELECT count(d) FROM Document d
             WHERE d.creator.id = :creatorId
               AND d.status IN :statuses
+              AND (:hasCategories = false OR d.category.id IN :categoryIds)
             """)
     Page<Document> findSubmissions(
             @Param("creatorId") Long creatorId,
             @Param("statuses") Collection<DocumentStatus> statuses,
+            @Param("hasCategories") boolean hasCategories,
+            @Param("categoryIds") Collection<Long> categoryIds,
             Pageable pageable);
 
     /**
