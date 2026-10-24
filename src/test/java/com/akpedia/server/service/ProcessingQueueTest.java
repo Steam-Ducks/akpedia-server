@@ -68,7 +68,8 @@ class ProcessingQueueTest {
 
         @Bean
         ProcessingProperties processingProperties() {
-            return new ProcessingProperties(STREAM, "ml-workers", Duration.ofSeconds(30), Duration.ofMinutes(1), 50);
+            return new ProcessingProperties(STREAM, "ml-workers", Duration.ofSeconds(30), Duration.ofMinutes(1), 50,
+                    Duration.ofMinutes(1), Duration.ofMinutes(10), 50, 3);
         }
     }
 
