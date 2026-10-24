@@ -56,6 +56,10 @@ akpedia:
     minimum-score: ${SEARCH_MINIMUM_SCORE:0.85}
     # Length agreed for the excerpt a result carries, ellipsis included.
     snippet-length: ${SEARCH_SNIPPET_LENGTH:300}
+  internal:
+    # Shared secret the akpedia-ml worker sends as X-Internal-Token on the /internal routes; the
+    # same value as its INTERNAL_API_TOKEN. Left empty, every /internal call answers 401.
+    token: ${INTERNAL_API_TOKEN:}
   processing:
     # Redis stream an approved document's id is added to, and the consumer group the
     # akpedia-ml workers read it with. Both must match the worker's DOCUMENTS_STREAM and

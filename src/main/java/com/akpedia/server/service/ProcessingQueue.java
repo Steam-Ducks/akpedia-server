@@ -32,6 +32,9 @@ import com.akpedia.server.repository.DocumentRepository;
  * document approved but never enqueued stays findable, and {@link ProcessingRetry} sends it
  * again. The documents table is, in effect, the outbox for the stream.
  *
+ * <p>The worker never acknowledges a message itself: it calls the server back, and the server
+ * acknowledges it with {@link #acknowledge} once the result is committed.
+ *
  * <p>The price is that a document can be sent twice: if the process dies after Redis accepted the
  * id but before the send was recorded, the retry sends it again. The worker has to treat a
  * repeated id as a no-op.
@@ -97,5 +100,24 @@ public class ProcessingQueue {
                     documentId, properties.stream(), e);
         }
         return true;
+    }
+
+    /**
+     * Acknowledges ({@code XACK}) a message the worker has finished with, taking it off the
+     * group's pending list.
+     *
+     * <p>Called once the worker's result, or its failure, is committed. Never throws: by then the
+     * outcome is saved, and a message left unacknowledged only means the worker sends the same
+     * result again after a restart, which is answered without rewriting anything.
+     *
+     * @param messageId id of the stream entry
+     */
+    public void acknowledge(String messageId) {
+        try {
+            redis.opsForStream().acknowledge(properties.stream(), properties.group(), messageId);
+        } catch (DataAccessException e) {
+            LOG.warn("Nao foi possivel confirmar (XACK) a mensagem {} em {}; ela continua pendente.",
+                    messageId, properties.stream(), e);
+        }
     }
 }

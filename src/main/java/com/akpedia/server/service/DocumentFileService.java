@@ -64,7 +64,24 @@ public class DocumentFileService {
         Document document = documents.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         checkIsOpenable(document);
+        return descriptorOf(document);
+    }
 
+    /**
+     * Describes the file of a document for the indexing worker, which reads it while the document
+     * is {@code PROCESSING} -- the one state {@link #describe} refuses, since it is the worker's own.
+     *
+     * @param documentId document being indexed
+     * @return the name, media type and validators of its file
+     * @throws DocumentNotFoundException if no document exists with {@code documentId}
+     */
+    @Transactional(readOnly = true)
+    public DocumentFileDescriptor describeForIndexing(Long documentId) {
+        return descriptorOf(documents.findById(documentId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId)));
+    }
+
+    private static DocumentFileDescriptor descriptorOf(Document document) {
         MediaType contentType = contentTypeOf(document);
         Instant lastModified = lastModifiedOf(document);
         return new DocumentFileDescriptor(

@@ -86,10 +86,14 @@ akpedia-server/
     │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
     │   │   │   ├── ProcessingProperties.java # akpedia.processing.*: stream, grupo e reenvio
     │   │   │   ├── ProcessingConfig.java
+    │   │   │   ├── InternalApiProperties.java # akpedia.internal.token: segredo das rotas /internal
+    │   │   │   ├── InternalApiConfig.java # registra o filtro só para /internal/*
+    │   │   │   ├── InternalTokenFilter.java # 401 sem o X-Internal-Token certo
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
     │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
     │   │   │   ├── DocumentReviewController.java # aprovar ou devolver um documento da fila
+    │   │   │   ├── InternalDocumentController.java # rotas /internal chamadas pelo worker do akpedia-ml
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
     │   │   ├── dto/ # objetos de transporte
@@ -104,6 +108,8 @@ akpedia-server/
     │   │   │   ├── ApproveDocumentRequest.java # correções opcionais do aprovador
     │   │   │   ├── RejectDocumentRequest.java # motivo da devolução
     │   │   │   ├── DocumentReviewResponse.java # o documento depois da decisão
+    │   │   │   ├── IndexedDocumentRequest.java # resultado do worker: chunks, vetores e messageId
+    │   │   │   ├── ProcessingFailureRequest.java # falha do worker: code, message e messageId
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -117,6 +123,8 @@ akpedia-server/
     │   │   │   ├── CategoryNotFoundException.java
     │   │   │   ├── UserNotFoundException.java
     │   │   │   ├── DocumentNotPendingApprovalException.java # 409: já decidido ou nunca enviado
+    │   │   │   ├── DocumentNotApprovedException.java # 409: embeddings de documento não aprovado
+    │   │   │   ├── InvalidEmbeddingsException.java # 400: vetor que não cabe no índice
     │   │   │   ├── UnsupportedDocumentFormatException.java # 415 do /analyze
     │   │   │   ├── CategorySuggestionUnavailableException.java # 503: liberar escolha manual
     │   │   │   ├── UnknownSuggestedCategoryException.java # 502: categoria fora do catálogo
@@ -131,7 +139,8 @@ akpedia-server/
     │   │       ├── DocumentSubmissionService.java # lista os envios do autor
     │   │       ├── DocumentReviewService.java # aprova (com correções) ou devolve
     │   │       ├── DocumentApprovedEvent.java # publicado na aprovação, tratado após o commit
-    │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit
+    │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit, e o XACK
+    │   │       ├── DocumentIndexingService.java # grava o resultado ou a falha do worker e confirma a mensagem
     │   │       └── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
     │   └── resources/
     │       ├── application.yml
@@ -277,6 +286,15 @@ docker run --rm -p 3000:3000 gotenberg/gotenberg:8
 
 `DOCUMENTS_STREAM` e `WORKER_GROUP` são um contrato com o worker do akpedia-ml, que usa as mesmas
 variáveis: mudar só de um lado deixa mensagens que ninguém lê.
+
+| Variável             | Default | Para que serve |
+|----------------------|---------|----------------|
+| `INTERNAL_API_TOKEN` | (vazio) | Segredo que o worker manda no header `X-Internal-Token` das [rotas internas](#indexação-pelo-worker-rotas-internas); o mesmo valor do `INTERNAL_API_TOKEN` do worker |
+
+Vazio, toda chamada a `/internal` responde 401 e nenhum documento aprovado é indexado; o servidor
+avisa disso no log ao subir. O `docker-compose.yml` e o `akpedia run` do dev container caem em
+`akpedia-dev-internal-token`, o mesmo valor que o lado do akpedia-ml usa; fora do ambiente local,
+defina um valor de verdade nos dois.
 
 Um documento aprovado é entregue ao worker de indexação do akpedia-ml por uma Redis Stream (ver
 [Aprovar ou devolver](#aprovar-ou-devolver)). No `docker-compose.yml` o Redis sobe como serviço
@@ -746,7 +764,8 @@ falhe: ele acontece depois, sozinho.
 
 **A entrega é "pelo menos uma vez".** Se o servidor cair depois de o Redis aceitar o id e antes de
 gravar `processing_enqueued_at`, o documento é enviado de novo, e o worker o indexa outra vez.
-Por isso gravar o resultado da indexação precisa ser idempotente do lado do servidor.
+Por isso gravar o resultado da indexação é idempotente do lado do servidor (ver
+[Indexação pelo worker](#indexação-pelo-worker-rotas-internas)).
 
 > Enquanto está em `PROCESSING`, o `/file` do documento responde 409 (ver [Restrições](#restrições)),
 > até o worker terminar a indexação.
@@ -815,6 +834,57 @@ curl -X POST localhost:8080/api/v1/documents/7/reject \
 | documento não existe                                          | 404    | `document_not_found`            |
 | `categoryId` da correção não existe                           | 404    | `category_not_found`            |
 | documento não está em `PENDING_APPROVAL`                      | 409    | `document_not_pending_approval` |
+
+### Indexação pelo worker (rotas internas)
+
+O worker do akpedia-ml não acessa o banco: ele lê o id da Redis Stream, baixa o PDF daqui, gera os
+embeddings e devolve o resultado (ou a falha) para cá. Quem grava, libera o documento para a busca
+e confirma a mensagem (`XACK`) é o servidor.
+
+Todas as rotas abaixo exigem o header `X-Internal-Token` igual ao
+[`INTERNAL_API_TOKEN`](#fila-de-indexação-redis); sem ele, ou com outro valor, respondem **401**
+`invalid_internal_token` antes de chegar ao controller.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /internal/documents/{id}/file` | Devolve o PDF como anexo, com o nome no `Content-Disposition`. Diferente do `/api/v1/.../file`, responde com o documento em `PROCESSING`, que é justamente quando o worker o lê |
+| `POST /internal/documents/{id}/embeddings` | Numa transação, apaga os embeddings do documento e grava os novos; marca `processing_status: COMPLETED`, `processed_at` e limpa `processing_error`. Depois do commit, dá `XACK` no `messageId` |
+| `POST /internal/documents/{id}/processing-failure` | Marca `processing_status: FAILED` com `processing_error` = `code: message`, e dá `XACK` no `messageId` |
+
+O corpo de `/embeddings` é a resposta do `POST /api/v1/documents/process` do akpedia-ml mais o
+`messageId` da stream; o de `/processing-failure` é `{"code", "message", "messageId"}`.
+
+**O `XACK` vem só depois do commit.** Se viesse antes, um rollback perderia o resultado: a mensagem
+sumiria e o documento ficaria preso em `PROCESSING`. Ao contrário, um commit seguido de um `XACK`
+que falhou deixa a mensagem pendente, e o worker manda o mesmo resultado de novo depois de
+reiniciar. Por isso as duas rotas são **idempotentes**:
+
+- documento já `COMPLETED` responde **200 sem regravar nada** (nem embeddings, nem
+  `processed_at`), e confirma a mensagem de novo;
+- uma falha que chega depois de um sucesso também é ignorada: o documento continua `COMPLETED`;
+- um documento que deu `FAILED` e depois recebe embeddings passa para `COMPLETED`.
+
+O documento fica travado (`SELECT … FOR UPDATE`) enquanto o resultado é gravado, então dois
+callbacks ao mesmo tempo não gravam os embeddings duas vezes.
+
+| Situação | Status | `code` | `XACK`? |
+|----------|--------|--------|---------|
+| sem token, ou token errado | 401 | `invalid_internal_token` | não |
+| corpo malformado ou `messageId` fora do formato `<ms>-<seq>` | 400 | `invalid_request` | não |
+| vetor que não tem 384 números, ou chunk sem texto | 400 | `invalid_embeddings` | não |
+| documento não existe (mais) | 404 | `document_not_found` | sim: não há onde gravar, e pendente ela só voltaria a cada reinício do worker |
+| embeddings de documento que não está `APPROVED` | 409 | `document_not_approved` | não |
+
+Num 400 ou 409 o worker reporta a falha em seguida, e é essa chamada que marca `FAILED` e confirma
+a mensagem.
+
+```bash
+TOKEN=akpedia-dev-internal-token
+curl -H "X-Internal-Token: $TOKEN" -o doc.pdf localhost:8080/internal/documents/7/file
+curl -X POST localhost:8080/internal/documents/7/processing-failure \
+  -H "X-Internal-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"code": "no_extractable_text", "message": "O PDF nao tem texto.", "messageId": "1761234567890-0"}'
+```
 
 ### Abrir o arquivo
 

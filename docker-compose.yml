@@ -75,6 +75,9 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Shared secret of the /internal routes; the akpedia-ml compose falls back to the same
+      # development value, so the worker can call back with no .env on either side.
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-akpedia-dev-internal-token}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
