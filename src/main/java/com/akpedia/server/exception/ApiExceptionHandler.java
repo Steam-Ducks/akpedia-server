@@ -229,6 +229,21 @@ public class ApiExceptionHandler {
     }
 
     /**
+     * 409: the worker sent embeddings for a document that is not approved, so they are not stored.
+     */
+    @ExceptionHandler(DocumentNotApprovedException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotApproved(DocumentNotApprovedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("document_not_approved", e.getMessage()));
+    }
+
+    /** 400: the worker's vectors do not fit the index, so none of them is stored. */
+    @ExceptionHandler(InvalidEmbeddingsException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidEmbeddings(InvalidEmbeddingsException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_embeddings", e.getMessage()));
+    }
+
+    /**
      * 404: the viewer asked for a page past the end of the document.
      *
      * <p>JSON set explicitly for the same reason as {@link #handleDocumentNotFound}: the page route
