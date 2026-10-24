@@ -24,7 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PendingDocument;
-import com.akpedia.server.dto.PendingDocument.SuggestedCategory;
+import com.akpedia.server.dto.PendingDocument.CategoryRef;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.service.DocumentAnalysisService;
@@ -100,12 +100,13 @@ class DocumentListHttpTest {
 
     private static PendingDocument pending(long id, String name, int day) {
         return new PendingDocument(
-                id, name, "Mariana Costa", "Engenharia", UPDATED_AT.withDayOfMonth(day),
-                new SuggestedCategory(3L, "Tecnico"), new BigDecimal("0.870"));
+                id, name, "Manual de operação da turbina", "Mariana Costa", "Engenharia",
+                UPDATED_AT.withDayOfMonth(day), new CategoryRef(5L, "Manuais"),
+                new CategoryRef(3L, "Tecnico"), new BigDecimal("0.870"));
     }
 
     @Test
-    @DisplayName("GET /api/v1/documents/pending answers a page of the queue, each document with the seven agreed fields")
+    @DisplayName("GET /api/v1/documents/pending answers a page of the queue, each document with the nine agreed fields")
     void pendingDocumentCarriesTheAgreedFormat() throws Exception {
         given(listService.pending(null, null)).willReturn(
                 new PageResponse<>(List.of(pending(7L, "manual.pdf", 20)), 0, 20, 1, 1));
@@ -113,12 +114,15 @@ class DocumentListHttpTest {
         mvc.perform(get("/api/v1/documents/pending"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)))
-                .andExpect(jsonPath("$.content[0].*", hasSize(7)))
+                .andExpect(jsonPath("$.content[0].*", hasSize(9)))
                 .andExpect(jsonPath("$.content[0].id").value(7))
                 .andExpect(jsonPath("$.content[0].name").value("manual.pdf"))
+                .andExpect(jsonPath("$.content[0].description").value("Manual de operação da turbina"))
                 .andExpect(jsonPath("$.content[0].creator_name").value("Mariana Costa"))
                 .andExpect(jsonPath("$.content[0].sector_name").value("Engenharia"))
                 .andExpect(jsonPath("$.content[0].created_at").value("2026-09-20T14:30:00Z"))
+                .andExpect(jsonPath("$.content[0].category.id").value(5))
+                .andExpect(jsonPath("$.content[0].category.name").value("Manuais"))
                 .andExpect(jsonPath("$.content[0].suggested_category.id").value(3))
                 .andExpect(jsonPath("$.content[0].suggested_category.name").value("Tecnico"))
                 .andExpect(jsonPath("$.content[0].confidence").value(0.87))
@@ -162,7 +166,8 @@ class DocumentListHttpTest {
     @DisplayName("a pending document with no suggestion answers both suggestion fields as null")
     void documentWithoutSuggestionAnswersNulls() throws Exception {
         given(listService.pending(null, null)).willReturn(new PageResponse<>(
-                List.of(new PendingDocument(7L, "manual.pdf", "Mariana Costa", "Engenharia", UPDATED_AT, null, null)),
+                List.of(new PendingDocument(7L, "manual.pdf", null, "Mariana Costa", "Engenharia", UPDATED_AT,
+                        new CategoryRef(5L, "Manuais"), null, null)),
                 0, 20, 1, 1));
 
         mvc.perform(get("/api/v1/documents/pending"))

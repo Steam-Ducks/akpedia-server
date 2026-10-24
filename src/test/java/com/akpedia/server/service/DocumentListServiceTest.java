@@ -113,12 +113,13 @@ class DocumentListServiceTest {
     }
 
     @Test
-    @DisplayName("each pending document carries its creator, sector and category suggestion, and the page its totals")
+    @DisplayName("each pending document carries its description, creator, sector, category and suggestion, and the page its totals")
     void pendingDocumentsAreMappedWithTheirPage() {
         Category suggested = new Category("Tecnico", null);
         ReflectionTestUtils.setField(suggested, "id", 3L);
         Document withSuggestion = document(1L);
         withSuggestion.setSuggestedCategory(suggested);
+        withSuggestion.setDescription("Manual de operação da turbina");
         withSuggestion.setCategoryConfidence(new BigDecimal("0.870"));
         PageRequest request = PageRequest.of(1, 2);
         given(documents.findOldestFirstByStatus(DocumentStatus.PENDING_APPROVAL, request))
@@ -128,10 +129,13 @@ class DocumentListServiceTest {
 
         assertThat(page.content()).extracting(PendingDocument::id).containsExactly(1L, 2L);
         PendingDocument first = page.content().get(0);
+        assertThat(first.description()).isEqualTo("Manual de operação da turbina");
         assertThat(first.creatorName()).isEqualTo("Mariana Costa");
         assertThat(first.sectorName()).isEqualTo("Engenharia");
-        assertThat(first.suggestedCategory()).isEqualTo(new PendingDocument.SuggestedCategory(3L, "Tecnico"));
+        assertThat(first.category().name()).isEqualTo("Manuais");
+        assertThat(first.suggestedCategory()).isEqualTo(new PendingDocument.CategoryRef(3L, "Tecnico"));
         assertThat(first.confidence()).isEqualByComparingTo("0.87");
+        assertThat(page.content().get(1).description()).isNull();
         assertThat(page.content().get(1).suggestedCategory()).isNull();
         assertThat(page.content().get(1).confidence()).isNull();
         assertThat(page.page()).isEqualTo(1);
