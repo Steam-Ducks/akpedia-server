@@ -106,7 +106,7 @@ class PendingDocumentsQueryTest {
     }
 
     @Test
-    @DisplayName("creator, sector and suggested category come loaded, and a document with no suggestion is still queued")
+    @DisplayName("creator, sector, category and suggested category come loaded, and a document with no suggestion is still queued")
     void fetchesWhatTheQueueShows() {
         Document suggested = persist(DocumentStatus.PENDING_APPROVAL, 1);
         Document unsuggested = persist(DocumentStatus.PENDING_APPROVAL, 2);
@@ -122,6 +122,7 @@ class PendingDocumentsQueryTest {
         assertThat(withSuggestion.getId()).isEqualTo(suggested.getId());
         assertThat(Hibernate.isInitialized(withSuggestion.getCreator())).isTrue();
         assertThat(Hibernate.isInitialized(withSuggestion.getCreator().getSector())).isTrue();
+        assertThat(Hibernate.isInitialized(withSuggestion.getCategory())).isTrue();
         assertThat(Hibernate.isInitialized(withSuggestion.getSuggestedCategory())).isTrue();
         assertThat(withSuggestion.getSuggestedCategory().getName()).isEqualTo(category.getName());
         assertThat(withSuggestion.getCategoryConfidence()).isEqualByComparingTo("0.87");

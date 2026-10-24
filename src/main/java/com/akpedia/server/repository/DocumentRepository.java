@@ -86,6 +86,7 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
             SELECT d FROM Document d
             JOIN FETCH d.creator c
             JOIN FETCH c.sector
+            JOIN FETCH d.category
             LEFT JOIN FETCH d.suggestedCategory
             WHERE d.status = :status
             ORDER BY d.createdAt ASC, d.id ASC
