@@ -13,6 +13,7 @@ import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.CategoryNotFoundException;
+import com.akpedia.server.exception.DocumentNotFailedException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotPendingApprovalException;
 import com.akpedia.server.repository.CategoryRepository;
@@ -121,6 +122,32 @@ public class DocumentReviewService {
         document.setReviewedAt(OffsetDateTime.now());
         documentFiles.deleteByDocumentId(documentId);
 
+        return DocumentReviewResponse.from(document);
+    }
+
+    /**
+     * Puts a document whose indexing failed back to {@code PROCESSING} and queues it again.
+     *
+     * <p>Locked the same way as a decision: two reprocess calls racing each other, or one racing
+     * the recovery job's own redelivery, must not both see it {@code FAILED} and send it twice.
+     *
+     * @param documentId the failed document to try again
+     * @return the document, now {@code PROCESSING}
+     * @throws DocumentNotFoundException if there is no such document
+     * @throws DocumentNotFailedException if its indexing did not fail
+     */
+    @Transactional
+    public DocumentReviewResponse reprocess(Long documentId) {
+        Document document = documents.findForReview(documentId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        if (document.getProcessingStatus() != ProcessingStatus.FAILED) {
+            throw new DocumentNotFailedException(documentId, document.getProcessingStatus());
+        }
+
+        document.setProcessingStatus(ProcessingStatus.PROCESSING);
+        document.setProcessingError(null);
+
+        events.publishEvent(new DocumentReprocessRequestedEvent(documentId));
         return DocumentReviewResponse.from(document);
     }
 

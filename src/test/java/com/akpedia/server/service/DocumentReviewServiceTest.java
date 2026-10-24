@@ -32,6 +32,7 @@ import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.CategoryNotFoundException;
+import com.akpedia.server.exception.DocumentNotFailedException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotPendingApprovalException;
 import com.akpedia.server.repository.CategoryRepository;
@@ -258,5 +259,50 @@ class DocumentReviewServiceTest {
                 .isInstanceOf(DocumentNotFoundException.class);
 
         verifyNoInteractions(documentFiles, events);
+    }
+
+    // ------------------------------------------------------------------
+    // reprocess
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("reprocessing a failed document puts it back to PROCESSING, clears the error and queues it")
+    void reprocessSendsAFailedDocumentAgain() {
+        Document document = stored(DocumentStatus.APPROVED);
+        document.setProcessingStatus(ProcessingStatus.FAILED);
+        document.setProcessingError("no_extractable_text");
+
+        DocumentReviewResponse response = service.reprocess(DOCUMENT_ID);
+
+        assertThat(document.getProcessingStatus()).isEqualTo(ProcessingStatus.PROCESSING);
+        assertThat(document.getProcessingError()).isNull();
+        assertThat(response.processingStatus()).isEqualTo(ProcessingStatus.PROCESSING);
+        verify(events).publishEvent(new DocumentReprocessRequestedEvent(DOCUMENT_ID));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = ProcessingStatus.class, names = "FAILED", mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("a document whose indexing did not fail cannot be reprocessed")
+    void reprocessRefusesAnyOtherProcessingStatus(ProcessingStatus processingStatus) {
+        Document document = stored(DocumentStatus.APPROVED);
+        document.setProcessingStatus(processingStatus);
+
+        assertThatThrownBy(() -> service.reprocess(DOCUMENT_ID))
+                .isInstanceOf(DocumentNotFailedException.class)
+                .hasMessageContaining(processingStatus.name());
+
+        assertThat(document.getProcessingStatus()).isEqualTo(processingStatus);
+        verify(events, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("reprocessing a document that does not exist answers not found")
+    void reprocessUnknownDocument() {
+        given(documents.findForReview(404L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.reprocess(404L))
+                .isInstanceOf(DocumentNotFoundException.class);
+
+        verifyNoInteractions(events);
     }
 }
