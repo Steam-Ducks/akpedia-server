@@ -47,7 +47,7 @@ public class DocumentPreviewController {
             description = """
                     Answers the document's name and `page_count`, which is how many pages the viewer may ask
                     for from `/preview/pages/{page}`. Refused exactly as the file route is: 403 when archived,
-                    409 while indexing is in flight.""")
+                    409 while indexing is in flight. A document awaiting approval is served.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "The document's name and number of pages."),
         @ApiResponse(responseCode = "403", description = "The document is archived.",

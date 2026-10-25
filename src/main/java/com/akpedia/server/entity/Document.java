@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -77,6 +78,30 @@ public class Document {
 
     @Column(name = "processed_at")
     private OffsetDateTime processedAt;
+
+    /**
+     * When the approved document was handed to the indexing worker; null until it has been.
+     *
+     * <p>Read-only here and written only by {@code DocumentRepository.markEnqueued}: Hibernate
+     * writes every column of an entity it saves, so a transaction holding an older copy of the
+     * document would otherwise put the null back and have it sent again.
+     */
+    @Column(name = "processing_enqueued_at", insertable = false, updatable = false)
+    private OffsetDateTime processingEnqueuedAt;
+
+    @Column(name = "review_comment", columnDefinition = "text")
+    private String reviewComment;
+
+    @Column(name = "reviewed_at")
+    private OffsetDateTime reviewedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "suggested_category_id")
+    private Category suggestedCategory;
+
+    /** Confidence of the category suggestion, from 0 to 1. */
+    @Column(name = "category_confidence", precision = 4, scale = 3)
+    private BigDecimal categoryConfidence;
 
     protected Document() {
     }
@@ -196,5 +221,41 @@ public class Document {
 
     public void setProcessedAt(OffsetDateTime processedAt) {
         this.processedAt = processedAt;
+    }
+
+    public OffsetDateTime getProcessingEnqueuedAt() {
+        return processingEnqueuedAt;
+    }
+
+    public String getReviewComment() {
+        return reviewComment;
+    }
+
+    public void setReviewComment(String reviewComment) {
+        this.reviewComment = reviewComment;
+    }
+
+    public OffsetDateTime getReviewedAt() {
+        return reviewedAt;
+    }
+
+    public void setReviewedAt(OffsetDateTime reviewedAt) {
+        this.reviewedAt = reviewedAt;
+    }
+
+    public Category getSuggestedCategory() {
+        return suggestedCategory;
+    }
+
+    public void setSuggestedCategory(Category suggestedCategory) {
+        this.suggestedCategory = suggestedCategory;
+    }
+
+    public BigDecimal getCategoryConfidence() {
+        return categoryConfidence;
+    }
+
+    public void setCategoryConfidence(BigDecimal categoryConfidence) {
+        this.categoryConfidence = categoryConfidence;
     }
 }

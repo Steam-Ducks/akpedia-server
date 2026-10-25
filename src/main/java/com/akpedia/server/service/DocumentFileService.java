@@ -3,9 +3,7 @@ package com.akpedia.server.service;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.EnumSet;
 import java.util.Locale;
-import java.util.Set;
 
 import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
@@ -31,19 +29,15 @@ import com.akpedia.server.repository.DocumentRepository;
  * actually pulls the blob out of the database. A refused document and a browser that already holds
  * the file both stop at the first step, so neither pays for reading bytes nobody will receive.
  *
- * <p>Two states are not openable: an archived document, which is out of circulation, and one whose
- * indexing is still in flight, which is not ready to be handed out yet. A document whose indexing
- * <em>failed</em> does open -- see {@link #checkIsOpenable}.
+ * <p>Two states are not openable: an archived document, which is out of circulation, and one
+ * akpedia-ml is indexing right now. A document still waiting for approval, or whose indexing
+ * <em>failed</em>, does open -- see {@link #checkIsOpenable}.
  */
 @Service
 public class DocumentFileService {
 
     /** Used when {@code documents.mime_type} holds something that is not a valid media type. */
     private static final MediaType FALLBACK_CONTENT_TYPE = MediaType.APPLICATION_PDF;
-
-    /** Indexing states that have not settled yet, and may still become {@code COMPLETED} on their own. */
-    private static final Set<ProcessingStatus> INDEXING_IN_FLIGHT =
-            EnumSet.of(ProcessingStatus.PENDING, ProcessingStatus.PROCESSING);
 
     /** Path separators and control characters, which have no business in a header value. */
     private static final String UNSAFE_IN_FILENAME = "[\\\\/\\p{Cntrl}]";
@@ -63,14 +57,31 @@ public class DocumentFileService {
      * @return the name, media type and validators the response should carry
      * @throws DocumentNotFoundException     if no document exists with {@code documentId}
      * @throws DocumentArchivedException     if the document is archived
-     * @throws DocumentNotProcessedException if akpedia-ml is still to index the document
+     * @throws DocumentNotProcessedException if akpedia-ml is indexing the document right now
      */
     @Transactional(readOnly = true)
     public DocumentFileDescriptor describe(Long documentId) {
         Document document = documents.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         checkIsOpenable(document);
+        return descriptorOf(document);
+    }
 
+    /**
+     * Describes the file of a document for the indexing worker, which reads it while the document
+     * is {@code PROCESSING} -- the one state {@link #describe} refuses, since it is the worker's own.
+     *
+     * @param documentId document being indexed
+     * @return the name, media type and validators of its file
+     * @throws DocumentNotFoundException if no document exists with {@code documentId}
+     */
+    @Transactional(readOnly = true)
+    public DocumentFileDescriptor describeForIndexing(Long documentId) {
+        return descriptorOf(documents.findById(documentId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId)));
+    }
+
+    private static DocumentFileDescriptor descriptorOf(Document document) {
         MediaType contentType = contentTypeOf(document);
         Instant lastModified = lastModifiedOf(document);
         return new DocumentFileDescriptor(
@@ -100,14 +111,17 @@ public class DocumentFileService {
      * Refuses the two document states that must not be served.
      *
      * <p>{@code ARCHIVED} is refused for good, so it answers 403 through the handler, while a
-     * document whose indexing has not settled answers 409: that one becomes openable on its own
-     * once the indexing lands, and the caller can retry the same request.
+     * document being indexed ({@code PROCESSING}) answers 409: that one becomes openable on its
+     * own once the indexing lands, and the caller can retry the same request.
      *
-     * <p>{@code FAILED} indexing, on the other hand, does <em>not</em> close the document. Its PDF
-     * was converted and stored before the embedding step ever ran -- that is the whole point of
-     * the upload tolerating an indexing failure -- so the bytes are intact and only search is
-     * missing them. With no reindexing route to recover from a 409, refusing it would lock an
-     * intact document away for good over a step that never touched it.
+     * <p>{@code PENDING} does <em>not</em> close the document. An upload stays in that state until
+     * it is approved, which is a person's decision and not something that settles on its own --
+     * and the approver has to open the document to make it.
+     *
+     * <p>Neither does {@code FAILED} indexing. The PDF is converted and stored at upload, long
+     * before the embedding step runs, so the bytes are intact and only search is missing them.
+     * With no reindexing route to recover from a 409, refusing it would lock an intact document
+     * away for good over a step that never touched it.
      *
      * <p>Runs on every request, revalidation included, which is what lets the response be cached
      * at all: a browser holding a document that has since been archived asks again and is refused,
@@ -117,7 +131,7 @@ public class DocumentFileService {
         if (document.getStatus() == DocumentStatus.ARCHIVED) {
             throw new DocumentArchivedException(document.getId());
         }
-        if (INDEXING_IN_FLIGHT.contains(document.getProcessingStatus())) {
+        if (document.getProcessingStatus() == ProcessingStatus.PROCESSING) {
             throw new DocumentNotProcessedException(document.getId(), document.getProcessingStatus());
         }
     }

@@ -29,6 +29,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import com.akpedia.server.config.EmbeddingProperties;
+import com.akpedia.server.dto.DocumentClassification;
 import com.akpedia.server.dto.DocumentEmbeddingResponse;
 import com.akpedia.server.dto.QueryEmbeddingResponse;
 import com.akpedia.server.exception.EmbeddingException;
@@ -46,6 +47,7 @@ class EmbeddingClientTest {
     private static final String BASE_URL = "http://embedding.test:8000";
     private static final String DOCUMENT_URL = BASE_URL + "/api/v1/documents/process";
     private static final String QUERY_URL = BASE_URL + "/api/v1/embeddings/query";
+    private static final String ANALYZE_URL = BASE_URL + "/api/v1/documents/analyze";
 
     private static final EmbeddingProperties PROPERTIES =
             new EmbeddingProperties(BASE_URL, Duration.ofSeconds(2), Duration.ofSeconds(30));
@@ -92,6 +94,61 @@ class EmbeddingClientTest {
         assertThat(response.chunks().get(1).index()).isEqualTo(1);
         assertThat(response.chunks().get(1).text()).isEqualTo("Segundo trecho.");
         assertThat(response.chunks().get(0).embedding()).containsExactly(0.1f, 0.2f, 0.3f);
+        service.verify();
+    }
+
+    @Test
+    @DisplayName("classifyDocument posts the PDF to /analyze and reads back the suggestions")
+    void classifyDocumentReturnsSuggestions() {
+        service.expect(requestTo(ANALYZE_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Content-Type", startsWith(MediaType.MULTIPART_FORM_DATA_VALUE)))
+                .andExpect(content().string(containsString("filename=\"manual.docx\"")))
+                .andExpect(content().string(containsString("Content-Type: application/pdf")))
+                .andRespond(withSuccess("""
+                        {
+                          "title": "Landing Gear Maintenance Manual",
+                          "description": "This manual describes the inspection procedures.",
+                          "category": "Tecnico",
+                          "confidence": 0.82,
+                          "scores": {"Tecnico": 0.82, "Regulatorio": 0.09, "Juridico": 0.03, "Qualidade": 0.06},
+                          "pages": 34
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        DocumentClassification response =
+                client.classifyDocument("%PDF-1.4".getBytes(StandardCharsets.UTF_8), "manual.docx", "application/pdf");
+
+        assertThat(response.title()).isEqualTo("Landing Gear Maintenance Manual");
+        assertThat(response.description()).isEqualTo("This manual describes the inspection procedures.");
+        assertThat(response.category()).isEqualTo("Tecnico");
+        assertThat(response.confidence()).isEqualByComparingTo("0.82");
+        assertThat(response.scores()).containsOnlyKeys("Tecnico", "Regulatorio", "Juridico", "Qualidade");
+        assertThat(response.pages()).isEqualTo(34);
+        service.verify();
+    }
+
+    @Test
+    @DisplayName("classifyDocument reads a null category as no suggestion, not as a failure")
+    void classifyDocumentAcceptsANullCategory() {
+        service.expect(requestTo(ANALYZE_URL))
+                .andRespond(withSuccess("""
+                        {
+                          "title": "manual",
+                          "description": null,
+                          "category": null,
+                          "confidence": null,
+                          "scores": {},
+                          "pages": 1
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        DocumentClassification response = client.classifyDocument(new byte[] {1}, "manual.pdf", "application/pdf");
+
+        assertThat(response.title()).isEqualTo("manual");
+        assertThat(response.category()).isNull();
+        assertThat(response.confidence()).isNull();
+        assertThat(response.scores()).isEmpty();
         service.verify();
     }
 

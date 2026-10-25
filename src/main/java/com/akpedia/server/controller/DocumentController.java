@@ -1,6 +1,7 @@
 package com.akpedia.server.controller;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -27,16 +28,23 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.akpedia.server.dto.ApiErrorResponse;
+import com.akpedia.server.dto.DocumentAnalysisResponse;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentSummary;
 import com.akpedia.server.dto.DocumentUploadResponse;
+import com.akpedia.server.dto.PageResponse;
+import com.akpedia.server.dto.PendingDocument;
+import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
+import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
+import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -64,14 +72,20 @@ public class DocumentController {
     private final DocumentUploadService uploadService;
     private final DocumentFileService fileService;
     private final DocumentListService listService;
+    private final DocumentAnalysisService analysisService;
+    private final DocumentSubmissionService submissionService;
 
     public DocumentController(
             DocumentUploadService uploadService,
             DocumentFileService fileService,
-            DocumentListService listService) {
+            DocumentListService listService,
+            DocumentAnalysisService analysisService,
+            DocumentSubmissionService submissionService) {
         this.uploadService = uploadService;
         this.fileService = fileService;
         this.listService = listService;
+        this.analysisService = analysisService;
+        this.submissionService = submissionService;
     }
 
     @Operation(
@@ -79,9 +93,11 @@ public class DocumentController {
             description = """
                     Answers up to `limit` documents (5 by default, at most 50), the most recently changed first;
                     a document never edited counts from its creation. Lists the same documents search can
-                    return -- indexed and not archived -- each with the fields a search result carries about
+                    return -- approved and indexed -- each with the fields a search result carries about
                     the document: `category`, the `responsible_name` of the user who uploaded it, and
-                    `updated_at`.""")
+                    `updated_at`.
+
+                    A document still under review, rejected or archived is never listed, even once indexed.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Documents, most recently changed first; the list may be empty."),
         @ApiResponse(responseCode = "400", description = "The limit is invalid.",
@@ -93,22 +109,143 @@ public class DocumentController {
     }
 
     @Operation(
-            summary = "Upload a document, convert it to PDF, and index it with akpedia-ml",
+            summary = "List the author's own submissions and where each one stands",
+            description = """
+                    Answers the documents uploaded by `creatorId`, most recently submitted first, each with
+                    a status derived for the author rather than the stored one:
+
+                    - `UNDER_REVIEW`: waiting on an approver, whatever the indexing is doing;
+                    - `PROCESSING`: approved and being indexed, so search does not reach it yet;
+                    - `PUBLISHED`: approved and indexed, so colleagues can find it;
+                    - `INDEXING_FAILED`: approved, but indexing failed, so search will not reach it;
+                    - `RETURNED`: sent back, with `review_comment` saying why.
+
+                    Unlike `GET /documents` and search, this route shows unapproved documents on purpose --
+                    they are the caller's own, and saying what is still under review is the point. It shows
+                    nobody else's.
+
+                    `review_comment` and `reviewed_at` are only present on a returned document; every other
+                    field is always present, null when it has no value. A document
+                    that is still a draft, or that was archived, is not a submission and is not listed.
+
+                    `categoryIds` narrows the listing to one or more categories; with none given, every
+                    category is listed.
+
+                    Without `creatorId` the configured default user is used, since this sprint has no
+                    login (see the README).""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "One page of submissions; the page may be empty."),
+        @ApiResponse(responseCode = "400", description = "page or size is out of bounds.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "No user exists with the given creatorId.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents/submissions")
+    public PageResponse<SubmissionSummary> submissions(
+            @RequestParam(required = false)
+            @Parameter(description = "Author whose submissions to list. Defaults to the configured user.")
+            Long creatorId,
+            @RequestParam(required = false)
+            @Parameter(description = "Zero-based page. Defaults to 0.")
+            Integer page,
+            @RequestParam(required = false)
+            @Parameter(description = "Results per page, from 1 to 50. Defaults to 10.")
+            Integer size,
+            @RequestParam(required = false)
+            @Parameter(description = "One or more category ids to filter by. Defaults to every category.")
+            List<Long> categoryIds) {
+
+        return submissionService.submissions(creatorId, page, size, categoryIds);
+    }
+
+    @Operation(
+            summary = "Suggest a title, description and category for a document, without storing it",
+            description = """
+                    Answers the title, description and category akpedia-ml reads from the file, so the upload
+                    screen can pre-fill the form before anything is sent. The screen never calls akpedia-ml
+                    itself: it posts the file here, and this server validates the format, converts it and asks
+                    akpedia-ml.
+
+                    `suggested_category_id` and `confidence` are `null` when akpedia-ml has no category to
+                    suggest; the screen then leaves the category for the user to pick. The title and
+                    description come back either way (`description` is `null` when the document has no
+                    paragraph long enough).
+
+                    **Nothing is persisted.** The file is read, converted in memory and discarded, so an
+                    analysis the user abandons leaves no document and no rows behind.
+
+                    Accepts PDF, DOC/DOCX and XLS/XLSX only -- a narrower list than the upload, which takes
+                    whatever Gotenberg converts. Non-PDF files are converted before being classified.
+
+                    The returned `suggested_category_id` is what `POST /api/v1/documents` takes as
+                    `suggestedCategoryId`, and `confidence` as `categoryConfidence`, so both can be handed
+                    straight back without a lookup.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200",
+                description = "The suggested title, description and category (null when there is no suggestion)."),
+        @ApiResponse(responseCode = "400", description = "Invalid request (empty file or missing part).",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "415", description = "Format is not one of PDF, DOC/DOCX or XLS/XLSX.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "422", description = "Gotenberg received the file but rejected the conversion.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "502", description = "The classifier suggested a category outside the catalog.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "503",
+                description = "The classifier is unavailable; the screen should let the user choose the category.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @PostMapping(path = "/documents/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public DocumentAnalysisResponse analyze(
+            @RequestPart("file")
+            @Schema(type = "string", format = "binary", description = "File to analyze: PDF, DOC/DOCX or XLS/XLSX.")
+            MultipartFile file) throws IOException {
+
+        return analysisService.analyze(file.getBytes(), file.getOriginalFilename(), file.getContentType());
+    }
+
+    @Operation(
+            summary = "List the documents awaiting approval",
+            description = """
+                    The review queue: every document in `PENDING_APPROVAL`, the oldest upload first, `size`
+                    per page (20 by default, at most 50) starting from `page` 0. Each document carries who
+                    uploaded it and from which sector, when, the `description` and `category` the author
+                    sent, and the category the classifier suggested with its `confidence` -- both null when
+                    the upload carried no suggestion. A pending document's
+                    file opens through `/documents/{id}/file`, which is how the approver reads it.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "One page of the queue; `content` is empty past the last page."),
+        @ApiResponse(responseCode = "400", description = "The page or the size is invalid.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/documents/pending")
+    public PageResponse<PendingDocument> pending(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return listService.pending(page, size);
+    }
+
+    @Operation(
+            summary = "Upload a document, convert it to PDF, and store it pending approval",
             description = """
                     Accepts any format Gotenberg can convert through LibreOffice (docx, xlsx, pptx, odt, rtf,
                     images, plain text...). Uploaded PDFs are stored directly without reconversion.
                     The stored binary is always the resulting PDF; the original format is not retained.
 
-                    After storage, the PDF is sent to akpedia-ml to generate embeddings, which are stored in
-                    `embeddings`. A failure at this stage does not undo the upload: the stored document keeps
-                    `processing_status: FAILED` and the reason in `processing_error` for a later retry.
-                    Only PDF conversion is required for a 201 response.""")
+                    The document is stored with `status: PENDING_APPROVAL` and `processing_status: PENDING`.
+                    Nothing is sent to akpedia-ml here: the document is only embedded for search once it is
+                    approved, so it has no rows in `embeddings` until then. It can be opened and previewed
+                    in the meantime, which is how the approver reads it.
+
+                    `suggestedCategoryId` and `categoryConfidence` record the category the classifier
+                    suggested and how sure it was, for the approver to confirm or correct.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "201",
-                description = "Document converted and stored; processing_status indicates whether akpedia-ml indexing succeeded."),
+        @ApiResponse(responseCode = "201", description = "Document converted and stored, awaiting approval."),
         @ApiResponse(responseCode = "400", description = "Invalid request (empty file, missing parameter, or invalid parameter).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "The specified category or user does not exist.",
+        @ApiResponse(responseCode = "404", description = "The specified category, suggested category or user does not exist.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -125,13 +262,22 @@ public class DocumentController {
             @Schema(type = "string", format = "binary", description = "File to upload in any supported format.")
             MultipartFile file,
             @RequestParam("categoryId") Long categoryId,
-            @RequestParam("creatorId") Long creatorId,
+            @RequestParam(value = "creatorId", required = false)
+            @Parameter(description = "Author of the document. Optional while there is no registration "
+                    + "or login: omitting it attributes the document to the configured default user.")
+            Long creatorId,
             @RequestParam(value = "name", required = false) String name,
-            @RequestParam(value = "description", required = false) String description) throws IOException {
+            @RequestParam(value = "description", required = false) String description,
+            @RequestParam(value = "suggestedCategoryId", required = false)
+            @Parameter(description = "Category the classifier suggested; one of the catalog's categories.")
+            Long suggestedCategoryId,
+            @RequestParam(value = "categoryConfidence", required = false)
+            @Parameter(description = "Confidence of the suggestion, from 0 to 1. Requires `suggestedCategoryId`.")
+            BigDecimal categoryConfidence) throws IOException {
 
         Document document = uploadService.upload(
                 file.getBytes(), file.getOriginalFilename(), file.getContentType(),
-                categoryId, creatorId, name, description);
+                categoryId, creatorId, name, description, suggestedCategoryId, categoryConfidence);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(DocumentUploadResponse.from(document));
     }
@@ -145,9 +291,9 @@ public class DocumentController {
                     name carries the `.pdf` extension even when the document was named without one.
 
                     Two documents are not openable: an archived one (403), which is out of circulation, and one
-                    whose indexing is still in flight (409) -- the same request works once the indexing lands.
-                    A document whose indexing *failed* does open: its PDF was stored before that step ran, so
-                    the bytes are intact and only search is missing them.
+                    akpedia-ml is indexing right now (409) -- the same request works once the indexing lands.
+                    A document awaiting approval opens, since the approver has to read it, and so does one
+                    whose indexing *failed*: the PDF is stored at upload, so only search is missing it.
 
                     The response is private and revalidated on every use, and carries an `ETag` and
                     `Last-Modified`: a browser that already holds the document asks again and gets a 304 with no

@@ -3,11 +3,11 @@ package com.akpedia.server.exception;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 
 /**
- * Thrown when the file of a document whose indexing has not settled yet is requested.
+ * Thrown when the file of a document akpedia-ml is indexing right now is requested.
  *
- * <p>Only for {@code PENDING} and {@code PROCESSING}: both become {@code COMPLETED} on their own,
- * so the caller can retry the same request. A {@code FAILED} indexing does not raise this -- its
- * PDF is intact and gets served.
+ * <p>Only for {@code PROCESSING}: it settles on its own, so the caller can retry the same request.
+ * A document still {@code PENDING} (awaiting approval) or whose indexing {@code FAILED} does not
+ * raise this -- its PDF is intact and gets served.
  *
  * <p>Carries the current status so the caller can tell how far along the document is.
  */

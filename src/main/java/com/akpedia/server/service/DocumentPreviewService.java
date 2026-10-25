@@ -26,7 +26,7 @@ import com.akpedia.server.exception.DocumentRenderException;
  * native PDF viewer offering its download and print buttons.
  *
  * <p>Access goes through {@link DocumentFileService#describe}, so a page is refused for exactly
- * the documents the file itself would be -- archived, or still being indexed.
+ * the documents the file itself would be -- archived, or being indexed right now.
  */
 @Service
 public class DocumentPreviewService {

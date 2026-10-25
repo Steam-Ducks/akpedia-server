@@ -16,6 +16,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis Streams carry the document processing queue between the server (producer)
+  # and the akpedia-ml worker (consumer). It also joins akpedia-net, the network the
+  # akpedia-ml compose attaches to, so the worker reaches it as akpedia-redis.
+  redis:
+    image: redis:7-alpine
+    container_name: akpedia-redis
+    # AOF on, so the queue of approved documents survives a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - akpedia-net
+
   gotenberg:
     image: gotenberg/gotenberg:8
     container_name: akpedia-gotenberg
@@ -30,11 +51,15 @@ services:
         condition: service_healthy
       gotenberg:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-akpedia}
       DB_USER: ${POSTGRES_USER:-akpedia}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-akpedia}
       SERVER_PORT: 8080
+      # Default user, temporary while there is no registration or login.
+      DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL:-aprovador@akpedia.local}
       # Embedding service (akpedia-ml). It comes up through its own repository's
       # compose, on a separate network: host-gateway reaches the port it publishes
       # on the developer's machine.
@@ -46,6 +71,13 @@ services:
       GOTENBERG_BASE_URL: ${GOTENBERG_BASE_URL:-http://gotenberg:3000}
       GOTENBERG_CONNECT_TIMEOUT: ${GOTENBERG_CONNECT_TIMEOUT:-5s}
       GOTENBERG_READ_TIMEOUT: ${GOTENBERG_READ_TIMEOUT:-90s}
+      # Redis (document processing queue). Sibling service above, reached by service name.
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Shared secret of the /internal routes; the akpedia-ml compose falls back to the same
+      # development value, so the worker can call back with no .env on either side.
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-akpedia-dev-internal-token}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -53,3 +85,10 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
+
+networks:
+  # Shared with the akpedia-ml compose, which declares it as external. Created here,
+  # with a fixed name, because this compose owns Redis: bring it up first.
+  akpedia-net:
+    name: akpedia-net

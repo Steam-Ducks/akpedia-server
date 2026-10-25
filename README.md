@@ -81,15 +81,35 @@ akpedia-server/
     │   │   │   ├── EmbeddingProperties.java
     │   │   │   ├── GotenbergClientConfig.java
     │   │   │   ├── GotenbergProperties.java
+    │   │   │   ├── DefaultUserProperties.java # akpedia.default-user-email
+    │   │   │   ├── DefaultUserConfig.java
+    │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
+    │   │   │   ├── ProcessingProperties.java # akpedia.processing.*: stream, grupo e reenvio
+    │   │   │   ├── ProcessingConfig.java
+    │   │   │   ├── InternalApiProperties.java # akpedia.internal.token: segredo das rotas /internal
+    │   │   │   ├── InternalApiConfig.java # registra o filtro só para /internal/*
+    │   │   │   ├── InternalTokenFilter.java # 401 sem o X-Internal-Token certo
     │   │   │   └── OpenApiConfig.java # título/descrição do Swagger
     │   │   ├── controller/
-    │   │   │   ├── DocumentController.java # upload de documentos
+    │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
+    │   │   │   ├── DocumentReviewController.java # aprovar ou devolver um documento da fila
+    │   │   │   ├── InternalDocumentController.java # rotas /internal chamadas pelo worker do akpedia-ml
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
     │   │   ├── dto/ # objetos de transporte
     │   │   │   ├── DocumentEmbeddingResponse.java
     │   │   │   ├── DocumentChunk.java
     │   │   │   ├── DocumentUploadResponse.java
+    │   │   │   ├── DocumentAnalysisResponse.java # sugestão devolvida ao /analyze
+    │   │   │   ├── DocumentClassification.java # o que o akpedia-ml responde ao classificar
+    │   │   │   ├── SubmissionSummary.java # um envio do autor, com status derivado
+    │   │   │   ├── SubmissionStatus.java # status do envio visto pelo autor (ver Minhas submissões)
+    │   │   │   ├── PageResponse.java # envelope de paginacao (content + totais)
+    │   │   │   ├── ApproveDocumentRequest.java # correções opcionais do aprovador
+    │   │   │   ├── RejectDocumentRequest.java # motivo da devolução
+    │   │   │   ├── DocumentReviewResponse.java # o documento depois da decisão
+    │   │   │   ├── IndexedDocumentRequest.java # resultado do worker: chunks, vetores e messageId
+    │   │   │   ├── ProcessingFailureRequest.java # falha do worker: code, message e messageId
     │   │   │   ├── QueryEmbeddingRequest.java
     │   │   │   ├── QueryEmbeddingResponse.java
     │   │   │   ├── EmbeddingModelInfo.java
@@ -102,18 +122,35 @@ akpedia-server/
     │   │   │   ├── EmbeddingRejectedException.java
     │   │   │   ├── CategoryNotFoundException.java
     │   │   │   ├── UserNotFoundException.java
+    │   │   │   ├── DocumentNotPendingApprovalException.java # 409: já decidido ou nunca enviado
+    │   │   │   ├── DocumentNotApprovedException.java # 409: embeddings de documento não aprovado
+    │   │   │   ├── InvalidEmbeddingsException.java # 400: vetor que não cabe no índice
+    │   │   │   ├── UnsupportedDocumentFormatException.java # 415 do /analyze
+    │   │   │   ├── CategorySuggestionUnavailableException.java # 503: liberar escolha manual
+    │   │   │   ├── UnknownSuggestedCategoryException.java # 502: categoria fora do catálogo
     │   │   │   ├── InvalidDocumentUploadException.java
     │   │   │   ├── PdfConversionException.java
     │   │   │   ├── PdfConversionUnavailableException.java
     │   │   │   └── PdfConversionRejectedException.java
     │   │   └── service/
-    │   │       └── DocumentUploadService.java # orquestra conversão + persistência + indexação
+    │   │       ├── DocumentUploadService.java # orquestra conversão + persistência (pendente de aprovação)
+    │   │       ├── DocumentAnalysisService.java # sugere categoria sem persistir nada
+    │   │       ├── DocumentFormats.java # formatos aceitos e detecção de PDF, compartilhados
+    │   │       ├── DocumentSubmissionService.java # lista os envios do autor
+    │   │       ├── DocumentReviewService.java # aprova (com correções) ou devolve
+    │   │       ├── DocumentApprovedEvent.java # publicado na aprovação, tratado após o commit
+    │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit, e o XACK
+    │   │       ├── DocumentIndexingService.java # grava o resultado ou a falha do worker e confirma a mensagem
+    │   │       └── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
     │           ├── V1__init.sql # migração inicial Flyway
     │           ├── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
-    │           └── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
+    │           ├── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
+    │           ├── V4__document_review_fields.sql # campos de revisão + catálogo de categorias
+    │           ├── V5__seed_default_approver.sql # usuário padrão temporário (ver Configuração)
+    │           └── V6__document_processing_enqueued_at.sql # quando o aprovado entrou na fila (outbox)
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
@@ -140,6 +177,57 @@ A aplicação lê as configurações de conexão a partir de variáveis de ambie
 | `DB_USER`      | `akpedia`                                        |
 | `DB_PASSWORD`  | `akpedia`                                        |
 | `SERVER_PORT`  | `8080`                                           |
+
+### Usuário padrão (temporário)
+
+> **Temporário.** Esta seção existe enquanto não houver CRUD de usuários nem autenticação.
+> Quando o cadastro e o login entrarem, o usuário abaixo e a migration que o cria devem sair,
+> junto com o `akpedia.default-user-email` e o `VITE_DEFAULT_USER_ID` do front.
+
+Todo documento precisa de um autor e toda aprovação precisa registrar quem aprovou. Como ainda
+não existe cadastro nem login, a migration `V5__seed_default_approver.sql` cria direto no banco
+um setor padrão (`Engenharia`) e um único usuário, que é ao mesmo tempo o autor dos uploads e o
+aprovador:
+
+| Campo           | Valor                                            |
+|-----------------|--------------------------------------------------|
+| `name`          | `Aprovador Padrao`                               |
+| `email`         | `aprovador@akpedia.local`                        |
+| `sector`        | `Engenharia`                                     |
+| `is_active`     | `true`                                           |
+| `password_hash` | placeholder — **não é uma credencial utilizável** |
+
+A migration é idempotente (`ON CONFLICT DO NOTHING` no nome do setor e no email do usuário),
+então rodar as migrations de novo não duplica nem sobrescreve nada.
+
+| Variável              | Default                   | Para que serve                        |
+|-----------------------|---------------------------|---------------------------------------|
+| `DEFAULT_USER_EMAIL`  | `aprovador@akpedia.local` | Email do usuário padrão (`akpedia.default-user-email`) |
+
+O servidor **resolve esse email para o id no startup**, uma vez, e guarda o id. Se nenhum usuário
+tiver o email configurado, a aplicação **não sobe** e o log aponta o problema:
+
+```
+Usuario padrao nao encontrado pelo email 'aprovador@akpedia.local'. A configuracao
+akpedia.default-user-email (variavel DEFAULT_USER_EMAIL) tem que apontar para um usuario que
+exista no banco. Confira se a migration V5__seed_default_approver.sql rodou e se o email
+configurado e o mesmo que ela insere.
+```
+
+Falhar no startup é proposital: é melhor do que descobrir o problema num 404 sem explicação no
+primeiro upload.
+
+É esse id que o `POST /api/v1/documents` usa quando o `creatorId` não vem na requisição (ver
+[Documentos](#documentos)), então o upload tem autor mesmo sem ninguém logado.
+
+**No front**, o id correspondente vai em `VITE_DEFAULT_USER_ID`, no `.env.example` do repositório
+do cliente — aqui não há código de cliente, e o `.env.example` deste repo serve só ao
+`docker-compose`. O id é valor de sequência e muda de banco para banco, então pegue o do seu:
+
+```bash
+docker compose exec db psql -U akpedia -d akpedia \
+  -c "SELECT id FROM users WHERE email = 'aprovador@akpedia.local'"
+```
 
 ### Serviço de embeddings
 
@@ -181,6 +269,48 @@ e o default já aponta para `http://gotenberg:3000`. Rodando fora do Docker, sub
 ```bash
 docker run --rm -p 3000:3000 gotenberg/gotenberg:8
 ```
+
+### Fila de indexação (Redis)
+
+| Variável                      | Default                | Para que serve                                                       |
+|-------------------------------|------------------------|----------------------------------------------------------------------|
+| `REDIS_HOST`                  | `localhost`            | Host do Redis                                                        |
+| `REDIS_PORT`                  | `6379`                 | Porta do Redis                                                       |
+| `REDIS_PASSWORD`              | (vazio)                | Senha do Redis, se houver                                            |
+| `REDIS_TIMEOUT`               | `2s`                   | Tempo máximo de um comando                                           |
+| `DOCUMENTS_STREAM`            | `documents:processing` | Stream onde entra o id de cada documento aprovado                    |
+| `WORKER_GROUP`                | `ml-workers`           | Consumer group dos workers do akpedia-ml                             |
+| `PROCESSING_RETRY_INTERVAL`   | `30s`                  | De quanto em quanto tempo reenviar aprovados que não chegaram à fila |
+| `PROCESSING_RETRY_GRACE`      | `1m`                   | Quanto esperar depois da aprovação antes de reenviar                 |
+| `PROCESSING_RETRY_BATCH_SIZE` | `50`                   | Quantos documentos uma rodada reenvia no máximo                      |
+
+`DOCUMENTS_STREAM` e `WORKER_GROUP` são um contrato com o worker do akpedia-ml, que usa as mesmas
+variáveis: mudar só de um lado deixa mensagens que ninguém lê.
+
+| Variável             | Default | Para que serve |
+|----------------------|---------|----------------|
+| `INTERNAL_API_TOKEN` | (vazio) | Segredo que o worker manda no header `X-Internal-Token` das [rotas internas](#indexação-pelo-worker-rotas-internas); o mesmo valor do `INTERNAL_API_TOKEN` do worker |
+
+Vazio, toda chamada a `/internal` responde 401 e nenhum documento aprovado é indexado; o servidor
+avisa disso no log ao subir. O `docker-compose.yml` e o `akpedia run` do dev container caem em
+`akpedia-dev-internal-token`, o mesmo valor que o lado do akpedia-ml usa; fora do ambiente local,
+defina um valor de verdade nos dois.
+
+Um documento aprovado é entregue ao worker de indexação do akpedia-ml por uma Redis Stream (ver
+[Aprovar ou devolver](#aprovar-ou-devolver)). No `docker-compose.yml` o Redis sobe como serviço
+`redis` (imagem `redis:7-alpine`, com AOF ligado para a fila sobreviver a um restart), publicado
+na porta 6379 e na rede `akpedia-net`, onde o compose do akpedia-ml o alcança como
+`akpedia-redis`. Suba este compose antes do akpedia-ml, porque é ele que cria a rede. Rodando fora
+do Docker:
+
+```bash
+docker run --rm -p 6379:6379 redis:7-alpine
+```
+
+**O servidor precisa do Redis para subir.** No startup ele cria a stream e o consumer group
+(`XGROUP CREATE ... MKSTREAM`, idempotente). Se o Redis não responder, a aplicação não sobe: um
+servidor que não consegue enfileirar documentos não deve parecer saudável. Se o Redis cair com o
+servidor já no ar, as aprovações continuam sendo gravadas e entram na fila quando ele voltar.
 
 ---
 
@@ -249,12 +379,9 @@ porta de saída para o serviço de embeddings:
 | `embedDocument(byte[] content, String filename, String contentType)` | extrai, divide em chunks e gera um vetor por chunk |
 | `embedQuery(String text)`                                           | gera o vetor do texto buscado                      |
 
-Quem usa o `EmbeddingClient` hoje é o
-[`DocumentUploadService`](src/main/java/com/akpedia/server/service/DocumentUploadService.java),
-logo depois de salvar o documento e o PDF: para cada `DocumentChunk` da resposta, salva um
-`Embedding`; se o cliente lançar `EmbeddingException` (fora do ar, recusado, ou algo ilegível),
-o `catch` marca o documento como `processing_status: FAILED` com o motivo em `processing_error`
-em vez de desfazer o upload — ver [Documentos](#documentos) para a rota completa.
+Quem usa o `EmbeddingClient` hoje é a busca, que chama `embedQuery` para vetorizar o texto
+pesquisado. O upload não o chama mais: o documento fica aguardando aprovação e só é indexado
+(`embedDocument`) depois de aprovado — ver [Documentos](#documentos).
 
 Toda falha sai como `EmbeddingException`, com mensagem que nomeia a rota e o que estava sendo feito:
 
@@ -315,26 +442,37 @@ ar, e não precisa de nada rodando. Para ver o **timeout** em vez da conexão re
 enviado passa direto, sem reconversão — o binário salvo é sempre o PDF resultante, o formato
 original não é retido.
 
-Depois de salvo, o PDF é enviado ao **akpedia-ml** (mesma rota que `POST /api/v1/documents/embed`
-chama) para virar chunks com vetores, que ficam em `embeddings`. Essa etapa não é obrigatória
-para a resposta ser 201: uma falha nela (akpedia-ml fora do ar, por exemplo) só deixa o
-documento com `processing_status: FAILED` e o motivo em `processing_error` — o documento e o
-PDF já estavam salvos antes dela rodar, então nada se perde e dá para reindexar depois. Só a
-conversão para PDF é obrigatória; se ela falhar, nada é salvo (ver status de erro abaixo).
+O documento é salvo **aguardando aprovação**: `status: PENDING_APPROVAL` e
+`processing_status: PENDING`. O upload não chama o akpedia-ml e não grava nada em `embeddings` —
+a indexação para busca só acontece depois que o documento é aprovado, para não gastar
+processamento com o que ainda pode ser rejeitado. Enquanto isso o documento já pode ser aberto e
+visualizado (é assim que o aprovador o lê), mas não aparece na busca nem na lista de recentes.
+Se a conversão para PDF falhar, nada é salvo (ver status de erro abaixo).
 
 | Campo (multipart) | Obrigatório | Descrição                                             |
 |--------------------|:-----------:|--------------------------------------------------------|
 | `file`             | sim         | arquivo a enviar                                        |
 | `categoryId`       | sim         | id de uma categoria existente                            |
-| `creatorId`        | sim         | id de um usuário existente                               |
+| `creatorId`        | não         | id de um usuário existente; omitido, cai no [usuário padrão](#usuário-padrão-temporário) |
 | `name`             | não         | nome do documento; default é o nome do arquivo com `.pdf` |
 | `description`      | não         | descrição livre                                          |
+| `suggestedCategoryId` | não      | id da categoria sugerida pelo classificador; precisa ser uma das categorias do catálogo |
+| `categoryConfidence`  | não      | confiança da sugestão, de 0 a 1; só é aceita junto com `suggestedCategoryId` |
 
 ```bash
 curl -X POST localhost:8080/api/v1/documents \
   -F "file=@relatorio.docx" \
   -F "categoryId=1" \
   -F "creatorId=1"
+```
+
+Enquanto não houver cadastro nem login, `creatorId` pode ser omitido: o documento fica atribuído
+ao [usuário padrão](#usuário-padrão-temporário) que o servidor resolveu no startup.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents \
+  -F "file=@relatorio.docx" \
+  -F "categoryId=1"
 ```
 
 A resposta traz só metadados — o PDF em si não volta no corpo:
@@ -348,28 +486,413 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
   "file_size": 48213,
   "category_id": 1,
   "creator_id": 1,
-  "status": "DRAFT",
-  "processing_status": "COMPLETED",
+  "status": "PENDING_APPROVAL",
+  "processing_status": "PENDING",
   "processing_error": null,
+  "suggested_category_id": 2,
+  "category_confidence": 0.87,
   "created_at": "2026-09-21T20:24:00Z"
 }
 ```
 
-`processing_status` vem `COMPLETED` quando a indexação no akpedia-ml deu certo, ou `FAILED`
-(com o motivo em `processing_error`) quando não deu — nos dois casos a resposta é 201, porque
-o documento e o PDF já foram salvos antes dessa etapa rodar.
+`suggested_category_id` e `category_confidence` vêm `null` quando o upload não trouxe sugestão.
 
 #### Status de erro
 
 | Situação                                  | Status | `code`                        |
 |--------------------------------------------|--------|-------------------------------|
 | arquivo vazio, ou parâmetro ausente/inválido | 400    | `invalid_request`             |
-| categoria informada não existe              | 404    | `category_not_found`          |
+| `categoryConfidence` fora de 0 a 1, ou sem `suggestedCategoryId` | 400 | `invalid_request` |
+| categoria informada ou sugerida não existe  | 404    | `category_not_found`          |
 | usuário informado não existe                | 404    | `user_not_found`               |
 | arquivo acima de 25 MB                      | 413    | `file_too_large`              |
 | Gotenberg recebeu mas recusou o arquivo     | 422    | `pdf_conversion_rejected`     |
 | Gotenberg respondeu algo ilegível           | 502    | `pdf_conversion_failed`       |
 | **Gotenberg fora do ar ou além do timeout** | 503    | `pdf_conversion_unavailable`  |
+
+### Minhas submissões
+
+`GET /api/v1/documents/submissions` devolve os documentos que a pessoa enviou, do mais recente
+para o mais antigo, cada um com um status **derivado** para o autor em vez do status armazenado:
+
+| `submission_status` | No banco                                          | O que significa para o autor                    |
+|---------------------|---------------------------------------------------|-------------------------------------------------|
+| `UNDER_REVIEW`      | `PENDING_APPROVAL`, em qualquer `processing_status` | esperando um aprovador                         |
+| `PROCESSING`        | `APPROVED` com `processing_status` `PENDING` ou `PROCESSING` | aprovado, mas a busca ainda não o encontra |
+| `PUBLISHED`         | `APPROVED` com `processing_status: COMPLETED`     | aprovado e indexado, os colegas já encontram    |
+| `INDEXING_FAILED`   | `APPROVED` com `processing_status: FAILED`        | aprovado, mas a indexação falhou e a busca não vai encontrá-lo |
+| `RETURNED`          | `REJECTED`                                        | devolvido; o `review_comment` diz o motivo      |
+
+Aprovar não basta para o documento aparecer na busca: a indexação só começa depois da aprovação.
+Por isso `APPROVED` se divide em três — chamar de `PUBLISHED` um documento que ainda está sendo
+indexado faria o autor avisar os colegas de algo que eles ainda não encontram. E a falha tem
+estado próprio porque `PROCESSING` prometeria uma coisa que não vai acontecer.
+
+Diferente da busca e da listagem de recentes, esta rota **mostra documento não aprovado de
+propósito** — são os do próprio autor, e dizer o que ainda está em revisão é o objetivo dela. O
+que ela não mostra é documento de outra pessoa.
+
+Documento em `DRAFT` nunca saiu das mãos do autor e `ARCHIVED` está fora de circulação: nenhum dos
+dois é uma submissão, então não aparecem aqui.
+
+| Parâmetro     | Obrigatório | Descrição                                                      |
+|---------------|:-----------:|-----------------------------------------------------------------|
+| `creatorId`   | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
+| `page`        | não         | página, começando em 0; default 0                               |
+| `size`        | não         | resultados por página, de 1 a 50; default 10                    |
+| `categoryIds` | não         | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); sem nenhum, lista todas as categorias |
+
+```bash
+curl "localhost:8080/api/v1/documents/submissions?page=0&size=10&categoryIds=1,3"
+```
+
+```json
+{
+  "content": [
+    {
+      "document_id": 7,
+      "name": "contrato.pdf",
+      "description": null,
+      "category": "Juridico",
+      "submission_status": "RETURNED",
+      "review_comment": "Falta a secao de revisao A.",
+      "reviewed_at": "2026-10-16T12:00:00Z",
+      "created_at": "2026-10-16T11:20:00Z",
+      "updated_at": null
+    },
+    {
+      "document_id": 5,
+      "name": "manual.pdf",
+      "description": "manual tecnico",
+      "category": "Manuais",
+      "submission_status": "PUBLISHED",
+      "created_at": "2026-10-15T09:00:00Z",
+      "updated_at": "2026-10-15T18:30:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 10,
+  "total_elements": 23,
+  "total_pages": 3
+}
+```
+
+O `review_comment` e o `reviewed_at` só aparecem em documento devolvido — **ausentes**, não nulos.
+Os outros campos vêm sempre, `null` quando não têm valor, então toda linha tem as mesmas chaves.
+Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem: ao lado de
+`PUBLISHED` ele se leria como se o documento ainda estivesse esperando correção.
+
+#### Status de erro
+
+| Situação                                  | Status | `code`            |
+|--------------------------------------------|--------|-------------------|
+| `page` negativo, ou `size` fora de 1 a 50  | 400    | `invalid_request` |
+| `creatorId` que nenhum usuário tem         | 404    | `user_not_found`  |
+
+> Um `creatorId` inexistente responde 404 em vez de página vazia: página vazia se leria como
+> "você não enviou nada", que é uma resposta diferente — e a que o autor acreditaria.
+
+### Sugerir título, descrição e categoria (antes de enviar)
+
+`POST /api/v1/documents/analyze` recebe o arquivo e devolve o título, a descrição e a categoria
+que o akpedia-ml leu do documento, para a tela de upload já vir preenchida. **Nada é persistido**: o arquivo é lido,
+convertido em memória e descartado, então uma análise abandonada não deixa documento nem linha
+nenhuma atrás.
+
+Pela arquitetura, a tela nunca fala com o akpedia-ml: ela posta aqui, e é o servidor que valida o
+formato, converte e chama o classificador.
+
+| Campo (multipart) | Obrigatório | Descrição                                   |
+|--------------------|:-----------:|----------------------------------------------|
+| `file`             | sim         | arquivo a analisar: PDF, DOC/DOCX ou XLS/XLSX |
+
+A lista de formatos é **mais estreita que a do upload**, que aceita tudo que o Gotenberg
+converte. Arquivos que não são PDF são convertidos antes de ir ao classificador.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents/analyze \
+  -F "file=@manual.docx"
+```
+
+```json
+{
+  "title": "Manual de Manutenção do Trem de Pouso",
+  "description": "Este manual descreve os procedimentos de inspeção...",
+  "suggested_category_id": 2,
+  "confidence": 0.873
+}
+```
+
+O `suggested_category_id` é exatamente o que o `POST /api/v1/documents` recebe como
+`suggestedCategoryId`, e o `confidence` como `categoryConfidence` — a tela devolve os dois sem
+precisar consultar nada.
+
+O `title` vem dos metadados do PDF, da linha de maior fonte da primeira página ou, na falta dos
+dois, do nome do arquivo. A `description` é o primeiro parágrafo com conteúdo do documento, ou
+`null` quando não há nenhum.
+
+**Sem sugestão de categoria** (o akpedia-ml ainda não tem a base de categorias), a resposta é
+`200` com `suggested_category_id` e `confidence` `null`. Não é erro: o título e a descrição vêm do
+mesmo jeito, e a tela deixa a categoria para o usuário escolher.
+
+```json
+{
+  "title": "manual",
+  "description": null,
+  "suggested_category_id": null,
+  "confidence": null
+}
+```
+
+#### Status de erro
+
+| Situação                                      | Status | `code`                            |
+|------------------------------------------------|--------|-----------------------------------|
+| arquivo vazio, ou parte `file` ausente          | 400    | `invalid_request`                 |
+| arquivo acima de 25 MB                          | 413    | `file_too_large`                  |
+| formato fora de PDF, DOC/DOCX e XLS/XLSX        | 415    | `unsupported_format`              |
+| Gotenberg recebeu mas recusou o arquivo         | 422    | `pdf_conversion_rejected`         |
+| categoria sugerida não existe no catálogo       | 502    | `unknown_suggested_category`      |
+| **classificador fora do ar ou além do timeout** | 503    | `category_suggestion_unavailable` |
+
+O 415 traz a lista aceita no corpo, para a tela não precisar manter uma cópia que divergiria da
+do servidor:
+
+```json
+{
+  "code": "unsupported_format",
+  "message": "O formato de 'apresentacao.pptx' nao e aceito. Envie um arquivo PDF, DOC, DOCX, XLS ou XLSX.",
+  "supported_extensions": ["pdf", "doc", "docx", "xls", "xlsx"]
+}
+```
+
+> O 503 tem `code` próprio, diferente do `embedding_service_unavailable` das outras rotas. É de
+> propósito: esse é o único caso em que a tela deve **liberar a escolha manual da categoria** e
+> seguir com o envio, em vez de mostrar erro e parar. Já o 502 significa que o classificador e o
+> catálogo divergiram — aí alguém precisa reconciliar os dois.
+
+### Fila de aprovação
+
+`GET /api/v1/documents/pending?page=&size=` lista os documentos em `PENDING_APPROVAL`, **o upload
+mais antigo primeiro** — a fila é atendida na ordem de chegada. Empates no `created_at` são
+desfeitos pelo `id`, para as páginas não trocarem itens entre si. `page` começa em 0 (padrão 0) e
+`size` vai de 1 a 50 (padrão 20); fora disso, 400 `invalid_request`.
+
+Cada documento leva quem enviou e de qual setor, quando, a `description` e a `category` que o
+autor mandou — o que o formulário de revisão mostra preenchido —, e a categoria sugerida pelo
+classificador com a confiança — os dois `null` quando o upload não trouxe sugestão. A
+`description` é `null` quando o upload não trouxe nenhuma, e a `category` pode ser diferente da
+sugestão, quando o autor a corrigiu. O arquivo
+de um documento da fila abre normalmente por `/documents/{id}/file` (ver abaixo).
+
+```bash
+curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
+```
+
+```json
+{
+  "content": [
+    {
+      "id": 12,
+      "name": "manual-vpn.pdf",
+      "description": "Como configurar a VPN da empresa",
+      "creator_name": "Mariana Costa",
+      "sector_name": "Engenharia",
+      "created_at": "2026-10-13T19:06:15.123Z",
+      "category": { "id": 1, "name": "Tecnico" },
+      "suggested_category": { "id": 1, "name": "Tecnico" },
+      "confidence": 0.870
+    },
+    {
+      "id": 15,
+      "name": "politica-ferias.pdf",
+      "description": null,
+      "creator_name": "Usuário padrão",
+      "sector_name": "Administrativo",
+      "created_at": "2026-10-14T11:20:02.481Z",
+      "category": { "id": 3, "name": "Juridico" },
+      "suggested_category": null,
+      "confidence": null
+    }
+  ],
+  "page": 0,
+  "size": 2,
+  "total_elements": 5,
+  "total_pages": 3
+}
+```
+
+### Aprovar ou devolver
+
+É a decisão do aprovador sobre um documento da fila. As duas rotas só valem para documento em
+`PENDING_APPROVAL`; em qualquer outro status respondem **409** `document_not_pending_approval` — na
+prática, alguém já decidiu. O documento fica travado (`SELECT … FOR UPDATE`) enquanto a decisão é
+gravada, então dois aprovadores ao mesmo tempo não aprovam duas vezes nem aprovam e devolvem o
+mesmo documento.
+
+O aprovador registrado é o [usuário padrão](#usuário-padrão-temporário), como o autor do upload,
+enquanto não houver login.
+
+#### Aprovar
+
+`POST /api/v1/documents/{id}/approve` aprova e, de quebra, deixa o aprovador corrigir o que o autor
+mandou. O corpo é opcional, e cada campo também: o que vier substitui, o que faltar fica como está.
+
+| Campo         | Descrição                                               |
+|---------------|---------------------------------------------------------|
+| `name`        | novo título; se vier, não pode ser em branco (até 255)  |
+| `description` | nova descrição; em branco, remove a descrição           |
+| `categoryId`  | categoria correta; precisa existir no catálogo          |
+
+O documento vira `status: APPROVED` com `processing_status: PROCESSING`, e grava `approver_id`,
+`approved_at` e `reviewed_at`. Depois que a transação **comita**, o id dele entra na Redis Stream
+`DOCUMENTS_STREAM` (`documents:processing`, via `XADD`), de onde o worker de indexação do
+akpedia-ml lê pelo consumer group `ml-workers`:
+
+```
+XADD documents:processing * documentId 7
+```
+
+Publicar só depois do commit é o que impede que o worker indexe uma aprovação que deu rollback.
+Mas abre o caso contrário: a aprovação é gravada e o envio não acontece — o Redis estava fora do
+ar, ou o servidor caiu entre o commit e o `XADD`. Para nenhum documento ficar preso em
+`PROCESSING` esperando uma mensagem que nunca foi enviada, **a própria tabela `documents` serve de
+outbox**:
+
+- `processing_enqueued_at` só é preenchido depois que o Redis aceitou o id;
+- a cada `PROCESSING_RETRY_INTERVAL` (30s), o servidor procura documentos `APPROVED` +
+  `PROCESSING` com essa coluna vazia, aprovados há mais de `PROCESSING_RETRY_GRACE` (1min), e os
+  reenvia, os mais antigos primeiro;
+- a carência existe para não reenviar um documento cujo envio logo após o commit ainda está em
+  andamento; e uma rodada para no primeiro documento que o Redis recusar, porque os outros seriam
+  recusados também.
+
+A aprovação nunca é desfeita por causa do Redis, e o aprovador recebe 200 mesmo que o envio
+falhe: ele acontece depois, sozinho.
+
+**A entrega é "pelo menos uma vez".** Se o servidor cair depois de o Redis aceitar o id e antes de
+gravar `processing_enqueued_at`, o documento é enviado de novo, e o worker o indexa outra vez.
+Por isso gravar o resultado da indexação é idempotente do lado do servidor (ver
+[Indexação pelo worker](#indexação-pelo-worker-rotas-internas)).
+
+> Enquanto está em `PROCESSING`, o `/file` do documento responde 409 (ver [Restrições](#restrições)),
+> até o worker terminar a indexação.
+
+```bash
+# sem correções
+curl -X POST localhost:8080/api/v1/documents/7/approve
+
+# corrigindo título e categoria
+curl -X POST localhost:8080/api/v1/documents/7/approve \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Manual de calibracao", "categoryId": 4}'
+```
+
+```json
+{
+  "id": 7,
+  "name": "Manual de calibracao",
+  "description": "manual tecnico",
+  "category_id": 4,
+  "status": "APPROVED",
+  "processing_status": "PROCESSING",
+  "approver_id": 1,
+  "approved_at": "2026-10-20T14:00:00Z",
+  "review_comment": null,
+  "reviewed_at": "2026-10-20T14:00:00Z"
+}
+```
+
+#### Devolver
+
+`POST /api/v1/documents/{id}/reject` devolve o documento ao autor. O `comment` é obrigatório: é o
+que o autor lê ao lado do documento em [Minhas submissões](#minhas-submissões).
+
+O documento vira `status: REJECTED` com `review_comment` e `reviewed_at`. O **PDF armazenado é
+apagado** (`document_files`), mas a linha do documento fica — é ela que mostra ao autor o que voltou
+e por quê.
+
+```bash
+curl -X POST localhost:8080/api/v1/documents/7/reject \
+  -H 'Content-Type: application/json' \
+  -d '{"comment": "Falta a secao de revisao A."}'
+```
+
+```json
+{
+  "id": 7,
+  "name": "manual.pdf",
+  "description": null,
+  "category_id": 3,
+  "status": "REJECTED",
+  "processing_status": "PENDING",
+  "approver_id": null,
+  "approved_at": null,
+  "review_comment": "Falta a secao de revisao A.",
+  "reviewed_at": "2026-10-20T14:00:00Z"
+}
+```
+
+#### Status de erro
+
+| Situação                                                     | Status | `code`                          |
+|---------------------------------------------------------------|--------|---------------------------------|
+| corpo malformado; `name` em branco ou longo demais            | 400    | `invalid_request`               |
+| devolução sem corpo, sem `comment` ou com `comment` em branco | 400    | `invalid_request`               |
+| documento não existe                                          | 404    | `document_not_found`            |
+| `categoryId` da correção não existe                           | 404    | `category_not_found`            |
+| documento não está em `PENDING_APPROVAL`                      | 409    | `document_not_pending_approval` |
+
+### Indexação pelo worker (rotas internas)
+
+O worker do akpedia-ml não acessa o banco: ele lê o id da Redis Stream, baixa o PDF daqui, gera os
+embeddings e devolve o resultado (ou a falha) para cá. Quem grava, libera o documento para a busca
+e confirma a mensagem (`XACK`) é o servidor.
+
+Todas as rotas abaixo exigem o header `X-Internal-Token` igual ao
+[`INTERNAL_API_TOKEN`](#fila-de-indexação-redis); sem ele, ou com outro valor, respondem **401**
+`invalid_internal_token` antes de chegar ao controller.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /internal/documents/{id}/file` | Devolve o PDF como anexo, com o nome no `Content-Disposition`. Diferente do `/api/v1/.../file`, responde com o documento em `PROCESSING`, que é justamente quando o worker o lê |
+| `POST /internal/documents/{id}/embeddings` | Numa transação, apaga os embeddings do documento e grava os novos; marca `processing_status: COMPLETED`, `processed_at` e limpa `processing_error`. Depois do commit, dá `XACK` no `messageId` |
+| `POST /internal/documents/{id}/processing-failure` | Marca `processing_status: FAILED` com `processing_error` = `code: message`, e dá `XACK` no `messageId` |
+
+O corpo de `/embeddings` é a resposta do `POST /api/v1/documents/process` do akpedia-ml mais o
+`messageId` da stream; o de `/processing-failure` é `{"code", "message", "messageId"}`.
+
+**O `XACK` vem só depois do commit.** Se viesse antes, um rollback perderia o resultado: a mensagem
+sumiria e o documento ficaria preso em `PROCESSING`. Ao contrário, um commit seguido de um `XACK`
+que falhou deixa a mensagem pendente, e o worker manda o mesmo resultado de novo depois de
+reiniciar. Por isso as duas rotas são **idempotentes**:
+
+- documento já `COMPLETED` responde **200 sem regravar nada** (nem embeddings, nem
+  `processed_at`), e confirma a mensagem de novo;
+- uma falha que chega depois de um sucesso também é ignorada: o documento continua `COMPLETED`;
+- um documento que deu `FAILED` e depois recebe embeddings passa para `COMPLETED`.
+
+O documento fica travado (`SELECT … FOR UPDATE`) enquanto o resultado é gravado, então dois
+callbacks ao mesmo tempo não gravam os embeddings duas vezes.
+
+| Situação | Status | `code` | `XACK`? |
+|----------|--------|--------|---------|
+| sem token, ou token errado | 401 | `invalid_internal_token` | não |
+| corpo malformado ou `messageId` fora do formato `<ms>-<seq>` | 400 | `invalid_request` | não |
+| vetor que não tem 384 números, ou chunk sem texto | 400 | `invalid_embeddings` | não |
+| documento não existe (mais) | 404 | `document_not_found` | sim: não há onde gravar, e pendente ela só voltaria a cada reinício do worker |
+| embeddings de documento que não está `APPROVED` | 409 | `document_not_approved` | não |
+
+Num 400 ou 409 o worker reporta a falha em seguida, e é essa chamada que marca `FAILED` e confirma
+a mensagem.
+
+```bash
+TOKEN=akpedia-dev-internal-token
+curl -H "X-Internal-Token: $TOKEN" -o doc.pdf localhost:8080/internal/documents/7/file
+curl -X POST localhost:8080/internal/documents/7/processing-failure \
+  -H "X-Internal-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"code": "no_extractable_text", "message": "O PDF nao tem texto.", "messageId": "1761234567890-0"}'
+```
 
 ### Abrir o arquivo
 
@@ -407,21 +930,30 @@ O que restringe é o estado do próprio documento:
 | Estado                                          | Resposta | Por quê                                                        |
 |--------------------------------------------------|----------|----------------------------------------------------------------|
 | `status: ARCHIVED`                               | 403      | documento fora de circulação; arquivar é definitivo             |
-| `processing_status: PENDING` ou `PROCESSING`     | 409      | a indexação no akpedia-ml ainda não terminou                    |
+| `processing_status: PROCESSING`                  | 409      | o akpedia-ml está indexando o documento neste momento           |
 
-Os outros `status` (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`) abrem normalmente.
+Os outros `status` (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`) abrem normalmente. Um documento
+`REJECTED` não tem mais arquivo — a [devolução](#aprovar-ou-devolver) apaga o PDF —, então
+responde 404 `document_file_not_found`.
 
-O 409 é conflito de estado, não recusa: os dois viram `COMPLETED` sozinhos, então a mesma
+O 409 é conflito de estado, não recusa: a indexação termina sozinha, então a mesma
 requisição passa a funcionar — é o que separa esse caso do 403, que não muda.
 
-**`processing_status: FAILED` abre.** O PDF é convertido e salvo *antes* da etapa de embeddings,
-que é justamente por isso que uma falha nela não desfaz o upload — então o binário está íntegro e
-só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
+**`processing_status: PENDING` abre.** É o estado em que o upload deixa o documento até ele ser
+aprovado, e o aprovador precisa ler o documento para decidir.
+
+**`processing_status: FAILED` abre.** O PDF é convertido e salvo no upload, bem antes da etapa
+de embeddings — então o binário está íntegro e só a busca não o alcança. Como não existe rota de reindexação, recusar esse documento o trancaria
 para sempre por causa de uma etapa que nem tocou no arquivo.
 
-A busca (`GET /api/v1/search`) usa o mesmo critério: a query já filtrava `processing_status =
-'COMPLETED'` e agora também deixa `ARCHIVED` de fora, senão um resultado da pesquisa levaria a um
-403 ao ser aberto.
+A busca (`GET /api/v1/search`) é mais restrita: além de `processing_status = 'COMPLETED'`, a query
+exige `status = 'APPROVED'`. Só documento aprovado é visível — um em revisão ou recusado tem
+vetores no banco, e sem esse filtro apareceria para qualquer um. Arquivado também fica de fora,
+senão um resultado da pesquisa levaria a um 403 ao ser aberto.
+
+A mesma regra vale para `GET /api/v1/documents`, a listagem recente. O status exigido está escrito
+dentro das duas queries, não é parâmetro: numa listagem pública, quem chama poder escolher o que
+aparece é exatamente como um documento em revisão chega a quem não devia vê-lo.
 
 ```bash
 # no navegador, basta abrir a URL
@@ -457,7 +989,7 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 | `id` não numérico                                  | 400    | `invalid_request`          |
 | documento arquivado                                | 403    | `document_archived`        |
 | documento não existe                               | 404    | `document_not_found`       |
-| documento existe, mas não há arquivo armazenado    | 404    | `document_file_not_found`  |
+| documento existe, mas não há arquivo armazenado (ex.: devolvido) | 404 | `document_file_not_found` |
 | indexação do akpedia-ml ainda não terminou         | 409    | `document_not_processed`   |
 | `Range` pedido não cabe no arquivo                 | 416    | — (sem corpo)              |
 
@@ -467,24 +999,45 @@ curl -i localhost:8080/api/v1/documents/1/file -H 'Range: bytes=0-1023'
 
 ### Endpoint
 
-`GET /api/v1/search?q=<texto>&limit=<n>` faz busca semântica nos documentos indexados. O texto da
-consulta é vetorizado pelo akpedia-ml e comparado por similaridade de cosseno com os `embeddings`
-salvos.
+`GET /api/v1/search?q=<texto>&categoryIds=<ids>&limit=<n>` faz busca semântica nos documentos
+**aprovados e indexados**, com filtro opcional por categoria. O texto da consulta é vetorizado pelo
+akpedia-ml e comparado por similaridade de cosseno com os `embeddings` salvos. Documento em revisão
+(`PENDING_APPROVAL`), recusado (`REJECTED`) ou arquivado não aparece, mesmo tendo vetores — nem na
+busca só por categoria.
 
-| Parâmetro | Obrigatório | Descrição                                                                 |
-|-----------|:-----------:|---------------------------------------------------------------------------|
-| `q`       | sim         | palavra, frase ou pergunta                                                 |
-| `limit`   | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
+| Parâmetro     | Obrigatório | Descrição                                                                 |
+|---------------|:-----------:|---------------------------------------------------------------------------|
+| `q`           | não\*       | palavra, frase ou pergunta                                                |
+| `categoryIds` | não\*       | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); filtra os resultados a essas categorias |
+| `limit`       | não         | quantos resultados no máximo; default `SEARCH_DEFAULT_LIMIT`, teto `SEARCH_MAX_LIMIT` |
 
-Só entram documentos com `processing_status: COMPLETED` — sem vetores não há o que comparar. Cada
-documento aparece **uma vez só**, representado pelo trecho que mais se aproximou da consulta, e os
-resultados vêm ordenados por relevância. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam, então
-uma busca sem nada parecido responde `200` com lista vazia — não 404.
+\* Pelo menos um dos dois precisa vir na requisição; sem nenhum, a rota responde `400`.
+
+Com `categoryIds` e sem `q`, a busca é só o filtro: os resultados vêm ordenados pela última
+alteração do documento (mais recente primeiro), e `score` volta `null`, já que não há texto para
+comparar. Com `q`, `categoryIds` só restringe quais documentos entram na comparação; os resultados
+continuam ordenados por relevância.
+
+Só entram documentos com `processing_status: COMPLETED` e `status: APPROVED` — sem vetores não há
+o que comparar. Cada documento aparece **uma vez só**, representado pelo trecho que mais se
+aproximou da consulta (ou, sem `q`, pelo primeiro trecho do documento, como excerto), e os
+resultados vêm ordenados por relevância ou por data, conforme acima. Trechos abaixo de `SEARCH_MINIMUM_SCORE` não voltam quando
+há `q`, então uma busca sem nada parecido responde `200` com lista vazia — não 404.
+
+A lista de categorias para montar o filtro vem de `GET /api/v1/categories`, que responde o
+catálogo inteiro, ordenado por nome:
+
+```json
+[
+  { "id": 1, "name": "Engenharia", "description": "Documentos de engenharia" },
+  { "id": 2, "name": "Normativa", "description": null }
+]
+```
 
 ### Formato do resultado
 
 Cada item da lista tem estes sete campos, sempre presentes (`description` vem `null` quando o
-documento foi enviado sem uma):
+documento foi enviado sem uma, e `score` vem `null` quando a busca não teve `q`):
 
 | Campo           | Tipo    | O que é                                                                    |
 |-----------------|---------|----------------------------------------------------------------------------|
@@ -492,8 +1045,8 @@ documento foi enviado sem uma):
 | `name`          | texto   | título do documento                                                        |
 | `description`   | texto   | descrição informada no upload, ou `null`                                   |
 | `mime_type`     | texto   | formato do arquivo armazenado; hoje sempre `application/pdf`                |
-| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico)         |
-| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo)                       |
+| `score`         | número  | similaridade entre a consulta e o trecho, de -1 a 1 (1 = idêntico); `null` sem `q` |
+| `matched_chunk` | texto   | o trecho que casou com a busca, aparado (ver abaixo); o primeiro trecho do documento quando a busca não teve `q` |
 | `chunk_index`   | número  | posição desse trecho no documento, contando de 0                           |
 
 ```bash
@@ -546,10 +1099,10 @@ de folga.
 
 #### Status de erro
 
-| Situação                                          | Status | `code`                          |
-|----------------------------------------------------|--------|---------------------------------|
-| `q` ausente ou em branco, ou `limit` fora do teto  | 400    | `invalid_request`               |
-| akpedia-ml respondeu algo que não dá para usar     | 502    | `embedding_service_error`       |
+| Situação                                                      | Status | `code`                     |
+|----------------------------------------------------------------|--------|---------------------------|
+| nem `q` nem `categoryIds`, ou `limit` fora do teto             | 400    | `invalid_request`          |
+| akpedia-ml respondeu algo que não dá para usar                 | 502    | `embedding_service_error`  |
 | akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
 
 ---

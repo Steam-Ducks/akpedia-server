@@ -4,6 +4,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -21,6 +22,13 @@ import com.akpedia.server.repository.EmbeddingRepository;
 /** Coordinates query embedding and document similarity search. */
 @Service
 public class SearchService {
+
+    /**
+     * Stands in for {@code categoryIds} when there is no category filter, since the native query
+     * still needs a non-empty list to bind -- an empty {@code IN ()} is invalid SQL, and
+     * {@code hasCategories = false} keeps it from ever being reached.
+     */
+    private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
 
     /** Column positions of the similarity query, in the order it selects them. */
     private static final int DOCUMENT_ID = 0;
@@ -47,9 +55,19 @@ public class SearchService {
         this.properties = properties;
     }
 
-    public List<SearchResult> search(String query, Integer requestedLimit) {
-        validateQuery(query);
+    public List<SearchResult> search(String query, Collection<Long> categoryIds, Integer requestedLimit) {
+        boolean hasQuery = query != null && !query.isBlank();
+        boolean hasCategories = categoryIds != null && !categoryIds.isEmpty();
+        validateRequest(hasQuery, hasCategories);
         int limit = normalizeLimit(requestedLimit);
+        Collection<Long> safeCategoryIds = hasCategories ? categoryIds : NO_CATEGORY_FILTER;
+
+        if (!hasQuery) {
+            return embeddings.searchRecentByCategory(hasCategories, safeCategoryIds, limit)
+                    .stream()
+                    .map(this::toResult)
+                    .toList();
+        }
 
         QueryEmbeddingResponse embedding = embeddingClient.embedQuery(query.trim());
         validateEmbedding(embedding);
@@ -59,6 +77,8 @@ public class SearchService {
                         embedding.model().name(),
                         embedding.model().dimensions(),
                         properties.minimumScore(),
+                        hasCategories,
+                        safeCategoryIds,
                         limit)
                 .stream()
                 .map(this::toResult)
@@ -74,9 +94,9 @@ public class SearchService {
         return limit;
     }
 
-    private static void validateQuery(String query) {
-        if (query == null || query.isBlank()) {
-            throw new InvalidSearchRequestException("q must not be blank.");
+    private static void validateRequest(boolean hasQuery, boolean hasCategories) {
+        if (!hasQuery && !hasCategories) {
+            throw new InvalidSearchRequestException("q or categoryIds must be present.");
         }
     }
 
@@ -113,7 +133,7 @@ public class SearchService {
                 (String) row[NAME],
                 (String) row[DESCRIPTION],
                 (String) row[MIME_TYPE],
-                ((Number) row[SCORE]).doubleValue(),
+                row[SCORE] == null ? null : ((Number) row[SCORE]).doubleValue(),
                 Snippets.of((String) row[MATCHED_CHUNK], properties.snippetLength()),
                 ((Number) row[CHUNK_INDEX]).intValue(),
                 (String) row[CATEGORY],

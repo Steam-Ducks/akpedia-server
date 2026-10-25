@@ -49,7 +49,7 @@ class RecentDocumentsQueryTest {
     private List<Long> recentIdsAmong(List<Document> created) {
         List<Long> ids = created.stream().map(Document::getId).toList();
         return documentRepository
-                .findRecent(ProcessingStatus.COMPLETED, DocumentStatus.ARCHIVED, PageRequest.of(0, 1000))
+                .findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, 1000))
                 .stream()
                 .map(Document::getId)
                 .filter(ids::contains)
@@ -57,18 +57,23 @@ class RecentDocumentsQueryTest {
     }
 
     @Test
-    @DisplayName("only indexed, not archived documents are listed, the most recent first")
+    @DisplayName("only indexed, approved documents are listed, the most recent first")
     void listsOpenableDocumentsMostRecentFirst() {
         category = entityManager.persist(TestFixtures.category());
         creator = entityManager.persist(TestFixtures.user(entityManager.persist(TestFixtures.sector())));
 
-        Document older = persist(ProcessingStatus.COMPLETED, DocumentStatus.DRAFT);
+        Document older = persist(ProcessingStatus.COMPLETED, DocumentStatus.APPROVED);
+        // Everything below is indexed and would have been listed before approval was required.
+        Document draft = persist(ProcessingStatus.COMPLETED, DocumentStatus.DRAFT);
+        Document underReview = persist(ProcessingStatus.COMPLETED, DocumentStatus.PENDING_APPROVAL);
+        Document rejected = persist(ProcessingStatus.COMPLETED, DocumentStatus.REJECTED);
         Document archived = persist(ProcessingStatus.COMPLETED, DocumentStatus.ARCHIVED);
-        Document pending = persist(ProcessingStatus.PENDING, DocumentStatus.DRAFT);
+        // Approved but not indexed yet: it has no chunks, so there is nothing to show of it.
+        Document notIndexed = persist(ProcessingStatus.PENDING, DocumentStatus.APPROVED);
         Document newer = persist(ProcessingStatus.COMPLETED, DocumentStatus.APPROVED);
         entityManager.clear();
 
-        assertThat(recentIdsAmong(List.of(older, archived, pending, newer)))
+        assertThat(recentIdsAmong(List.of(older, draft, underReview, rejected, archived, notIndexed, newer)))
                 .containsExactly(newer.getId(), older.getId());
     }
 
@@ -77,11 +82,11 @@ class RecentDocumentsQueryTest {
     void fetchesCategoryAndCreator() {
         category = entityManager.persist(TestFixtures.category());
         creator = entityManager.persist(TestFixtures.user(entityManager.persist(TestFixtures.sector())));
-        Document document = persist(ProcessingStatus.COMPLETED, DocumentStatus.DRAFT);
+        Document document = persist(ProcessingStatus.COMPLETED, DocumentStatus.APPROVED);
         entityManager.clear();
 
         Document found = documentRepository
-                .findRecent(ProcessingStatus.COMPLETED, DocumentStatus.ARCHIVED, PageRequest.of(0, 1000))
+                .findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, 1000))
                 .stream()
                 .filter(candidate -> candidate.getId().equals(document.getId()))
                 .findFirst()

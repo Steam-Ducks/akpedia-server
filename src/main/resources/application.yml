@@ -28,10 +28,24 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:2s}
+      # Redis only carries the processing stream; the JPA repositories are not Redis ones.
+      repositories:
+        enabled: false
+
 server:
   port: ${SERVER_PORT:8080}
 
 akpedia:
+  # TEMPORARY: with no registration or login, every upload and approval is attributed to the
+  # user seeded by V5__seed_default_approver.sql. Resolved to an id at startup, and the
+  # application refuses to start when no user has this email.
+  default-user-email: ${DEFAULT_USER_EMAIL:aprovador@akpedia.local}
   embedding:
     base-url: ${EMBEDDING_BASE_URL:http://localhost:8000}
     connect-timeout: ${EMBEDDING_CONNECT_TIMEOUT:2s}
@@ -42,6 +56,21 @@ akpedia:
     minimum-score: ${SEARCH_MINIMUM_SCORE:0.85}
     # Length agreed for the excerpt a result carries, ellipsis included.
     snippet-length: ${SEARCH_SNIPPET_LENGTH:300}
+  internal:
+    # Shared secret the akpedia-ml worker sends as X-Internal-Token on the /internal routes; the
+    # same value as its INTERNAL_API_TOKEN. Left empty, every /internal call answers 401.
+    token: ${INTERNAL_API_TOKEN:}
+  processing:
+    # Redis stream an approved document's id is added to, and the consumer group the
+    # akpedia-ml workers read it with. Both must match the worker's DOCUMENTS_STREAM and
+    # WORKER_GROUP.
+    stream: ${DOCUMENTS_STREAM:documents:processing}
+    group: ${WORKER_GROUP:ml-workers}
+    # Approved documents never enqueued (process died, or Redis was down, right after the
+    # approval) are looked for this often and sent again, once they are older than the grace.
+    retry-interval: ${PROCESSING_RETRY_INTERVAL:30s}
+    retry-grace: ${PROCESSING_RETRY_GRACE:1m}
+    retry-batch-size: ${PROCESSING_RETRY_BATCH_SIZE:50}
   gotenberg:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}

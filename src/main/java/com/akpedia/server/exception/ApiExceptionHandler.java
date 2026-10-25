@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -25,6 +26,38 @@ import com.akpedia.server.dto.EmbeddingErrorResponse;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    /**
+     * 415: the upload is in a format the analysis does not accept.
+     *
+     * <p>Carries the accepted list in the body so the screen can say what to send instead
+     * without hardcoding a list that would drift from the server's.
+     */
+    @ExceptionHandler(UnsupportedDocumentFormatException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnsupportedFormat(UnsupportedDocumentFormatException e) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(new ApiErrorResponse("unsupported_format", e.getMessage(), e.getSupportedExtensions()));
+    }
+
+    /**
+     * 503: the category could not be suggested because akpedia-ml never answered.
+     *
+     * <p>Its own code, distinct from {@code embedding_service_unavailable}: this is the failure
+     * the upload screen recovers from by letting the user pick the category by hand, and it can
+     * only do that if it can recognise it.
+     */
+    @ExceptionHandler(CategorySuggestionUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleSuggestionUnavailable(CategorySuggestionUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiErrorResponse("category_suggestion_unavailable", e.getMessage()));
+    }
+
+    /** 502: akpedia-ml suggested a category this server's catalog does not have. */
+    @ExceptionHandler(UnknownSuggestedCategoryException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnknownSuggestedCategory(UnknownSuggestedCategoryException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiErrorResponse("unknown_suggested_category", e.getMessage()));
+    }
 
     /** 503: the embedding service is down, unreachable, or past the read timeout. */
     @ExceptionHandler(EmbeddingUnavailableException.class)
@@ -77,6 +110,18 @@ public class ApiExceptionHandler {
                 .map(error -> "%s %s.".formatted(error.getField(), error.getDefaultMessage()))
                 .orElse("The request body is invalid.");
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", detail));
+    }
+
+    /**
+     * 400: the request body is missing, or is not JSON of the expected shape.
+     *
+     * <p>Without this, Spring answers its own error shape instead of {@code invalid_request}, and a
+     * reject with no body at all would read differently from one whose comment is blank.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnreadableBody(HttpMessageNotReadableException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse(
+                "invalid_request", "The request body is missing or is not valid JSON."));
     }
 
     /** 400: a required request parameter or multipart part is missing. */
@@ -159,7 +204,7 @@ public class ApiExceptionHandler {
     }
 
     /**
-     * 409: the document exists but akpedia-ml is still to index it.
+     * 409: the document exists but akpedia-ml is indexing it right now.
      *
      * <p>A conflict with the document's current state, not a refusal of the request: unlike the
      * 403 above, this one stops being an error as soon as the indexing completes, so the caller
@@ -170,6 +215,32 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiErrorResponse("document_not_processed", e.getMessage()));
+    }
+
+    /**
+     * 409: the document is not waiting on a decision, so it cannot be approved or returned.
+     *
+     * <p>A conflict with the document's state: most often someone already decided on it.
+     */
+    @ExceptionHandler(DocumentNotPendingApprovalException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotPendingApproval(DocumentNotPendingApprovalException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("document_not_pending_approval", e.getMessage()));
+    }
+
+    /**
+     * 409: the worker sent embeddings for a document that is not approved, so they are not stored.
+     */
+    @ExceptionHandler(DocumentNotApprovedException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotApproved(DocumentNotApprovedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("document_not_approved", e.getMessage()));
+    }
+
+    /** 400: the worker's vectors do not fit the index, so none of them is stored. */
+    @ExceptionHandler(InvalidEmbeddingsException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidEmbeddings(InvalidEmbeddingsException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_embeddings", e.getMessage()));
     }
 
     /**
