@@ -93,4 +93,26 @@ public class DocumentReviewController {
             @RequestBody @Valid RejectDocumentRequest request) {
         return reviewService.reject(id, request.comment());
     }
+
+    @Operation(
+            summary = "Try indexing a failed document again",
+            description = """
+                    Only for a document whose `processing_status` is `FAILED`. It goes back to `PROCESSING`,
+                    `processing_error` is cleared, and -- once the change is committed -- its id is added to
+                    the Redis Stream `documents:processing` again, the same way a fresh approval is.
+
+                    For a message stuck pending because its worker died, the recovery job already retries it
+                    on its own, up to a limit; this route is for trying by hand after that limit, or whenever
+                    someone wants to force it sooner.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Back to PROCESSING, and queued for indexing again."),
+        @ApiResponse(responseCode = "404", description = "No such document.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
+        @ApiResponse(responseCode = "409", description = "The document's indexing did not fail.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @PostMapping("/documents/{id}/reprocess")
+    public DocumentReviewResponse reprocess(@PathVariable("id") Long id) {
+        return reviewService.reprocess(id);
+    }
 }

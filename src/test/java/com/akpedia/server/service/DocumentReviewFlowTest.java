@@ -36,6 +36,7 @@ import com.akpedia.server.entity.DocumentFile;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.CategoryNotFoundException;
+import com.akpedia.server.exception.DocumentNotFailedException;
 import com.akpedia.server.repository.CategoryRepository;
 import com.akpedia.server.repository.DocumentFileRepository;
 import com.akpedia.server.repository.DocumentRepository;
@@ -50,7 +51,7 @@ import com.akpedia.server.repository.UserRepository;
  * The scheduled retry is pushed out of the way so it cannot send anything behind a test's back;
  * the tests that need it run it themselves.
  */
-@SpringBootTest(properties = "akpedia.processing.retry-interval=1h")
+@SpringBootTest(properties = {"akpedia.processing.retry-interval=1h", "akpedia.processing.recovery-interval=1h"})
 class DocumentReviewFlowTest {
 
     private static final String STREAM = "documents:processing";
@@ -208,6 +209,42 @@ class DocumentReviewFlowTest {
         assertThat(rejected.getReviewComment()).isEqualTo("Falta a secao de revisao A.");
         assertThat(rejected.getReviewedAt()).isNotNull();
         assertThat(documentFiles.findByDocumentId(id)).isEmpty();
+        verifyNoInteractions(stream);
+    }
+
+    @Test
+    @DisplayName("a failed document is reprocessed: back to PROCESSING, and sent to the stream again")
+    void reprocessSendsTheFailedDocumentAgain() {
+        Long id = pendingWithFile().getId();
+        reviewService.approve(id, ApproveDocumentRequest.NONE);
+        documents.findById(id).ifPresent(document -> {
+            document.setProcessingStatus(ProcessingStatus.FAILED);
+            document.setProcessingError("no_extractable_text");
+            documents.save(document);
+        });
+        clearInvocations(stream);
+
+        reviewService.reprocess(id);
+
+        Document reprocessed = reload(id);
+        assertThat(reprocessed.getProcessingStatus()).isEqualTo(ProcessingStatus.PROCESSING);
+        assertThat(reprocessed.getProcessingError()).isNull();
+        ArgumentCaptor<MapRecord<String, String, String>> record = ArgumentCaptor.captor();
+        verify(stream).add(record.capture());
+        assertThat(record.getValue().getValue()).isEqualTo(Map.of("documentId", id.toString()));
+    }
+
+    @Test
+    @DisplayName("reprocessing a document that did not fail is refused, and nothing is sent")
+    void reprocessRefusesADocumentThatDidNotFail() {
+        Long id = pendingWithFile().getId();
+        reviewService.approve(id, ApproveDocumentRequest.NONE);
+        clearInvocations(stream);
+
+        assertThatThrownBy(() -> reviewService.reprocess(id))
+                .isInstanceOf(DocumentNotFailedException.class);
+
+        assertThat(reload(id).getProcessingStatus()).isEqualTo(ProcessingStatus.PROCESSING);
         verifyNoInteractions(stream);
     }
 }

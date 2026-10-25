@@ -71,6 +71,11 @@ public class ProcessingQueue {
         publish(event.documentId());
     }
 
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onReprocessRequested(DocumentReprocessRequestedEvent event) {
+        publish(event.documentId());
+    }
+
     /**
      * Adds the document's id to the stream and records that it was sent.
      *

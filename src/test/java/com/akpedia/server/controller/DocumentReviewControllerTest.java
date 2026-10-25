@@ -29,6 +29,7 @@ import com.akpedia.server.dto.DocumentReviewResponse;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.CategoryNotFoundException;
+import com.akpedia.server.exception.DocumentNotFailedException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotPendingApprovalException;
 import com.akpedia.server.service.DocumentReviewService;
@@ -56,6 +57,11 @@ class DocumentReviewControllerTest {
     private static DocumentReviewResponse rejected(String comment) {
         return new DocumentReviewResponse(7L, "manual.pdf", null, 3L, DocumentStatus.REJECTED,
                 ProcessingStatus.PENDING, null, null, comment, DECIDED_AT);
+    }
+
+    private static DocumentReviewResponse reprocessing() {
+        return new DocumentReviewResponse(7L, "manual.pdf", null, 3L, DocumentStatus.APPROVED,
+                ProcessingStatus.PROCESSING, 1L, DECIDED_AT, null, DECIDED_AT);
     }
 
     // ------------------------------------------------------------------
@@ -236,5 +242,41 @@ class DocumentReviewControllerTest {
                         .content("{\"comment\": \"motivo\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("document_not_pending_approval"));
+    }
+
+    // ------------------------------------------------------------------
+    // POST /documents/{id}/reprocess
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("reprocess puts a failed document back to PROCESSING")
+    void reprocessFailedDocument() throws Exception {
+        given(reviewService.reprocess(7L)).willReturn(reprocessing());
+
+        mvc.perform(post("/api/v1/documents/7/reprocess"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.processing_status").value("PROCESSING"));
+    }
+
+    @Test
+    @DisplayName("reprocess on a document that did not fail answers 409")
+    void reprocessConflict() throws Exception {
+        given(reviewService.reprocess(7L))
+                .willThrow(new DocumentNotFailedException(7L, ProcessingStatus.PROCESSING));
+
+        mvc.perform(post("/api/v1/documents/7/reprocess"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("document_not_failed"));
+    }
+
+    @Test
+    @DisplayName("reprocess on a document that does not exist answers 404")
+    void reprocessUnknownDocument() throws Exception {
+        given(reviewService.reprocess(404L)).willThrow(new DocumentNotFoundException(404L));
+
+        mvc.perform(post("/api/v1/documents/404/reprocess"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("document_not_found"));
     }
 }

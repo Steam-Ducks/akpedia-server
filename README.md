@@ -124,6 +124,7 @@ akpedia-server/
     │   │   │   ├── UserNotFoundException.java
     │   │   │   ├── DocumentNotPendingApprovalException.java # 409: já decidido ou nunca enviado
     │   │   │   ├── DocumentNotApprovedException.java # 409: embeddings de documento não aprovado
+    │   │   │   ├── DocumentNotFailedException.java # 409: reprocessar um documento que não falhou
     │   │   │   ├── InvalidEmbeddingsException.java # 400: vetor que não cabe no índice
     │   │   │   ├── UnsupportedDocumentFormatException.java # 415 do /analyze
     │   │   │   ├── CategorySuggestionUnavailableException.java # 503: liberar escolha manual
@@ -139,9 +140,11 @@ akpedia-server/
     │   │       ├── DocumentSubmissionService.java # lista os envios do autor
     │   │       ├── DocumentReviewService.java # aprova (com correções) ou devolve
     │   │       ├── DocumentApprovedEvent.java # publicado na aprovação, tratado após o commit
+    │   │       ├── DocumentReprocessRequestedEvent.java # publicado no reprocessamento manual
     │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit, e o XACK
     │   │       ├── DocumentIndexingService.java # grava o resultado ou a falha do worker e confirma a mensagem
-    │   │       └── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
+    │   │       ├── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
+    │   │       └── ProcessingRecovery.java # reivindica (XPENDING/XCLAIM) mensagens paradas por um worker morto
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -283,9 +286,35 @@ docker run --rm -p 3000:3000 gotenberg/gotenberg:8
 | `PROCESSING_RETRY_INTERVAL`   | `30s`                  | De quanto em quanto tempo reenviar aprovados que não chegaram à fila |
 | `PROCESSING_RETRY_GRACE`      | `1m`                   | Quanto esperar depois da aprovação antes de reenviar                 |
 | `PROCESSING_RETRY_BATCH_SIZE` | `50`                   | Quantos documentos uma rodada reenvia no máximo                      |
+| `PROCESSING_RECOVERY_INTERVAL`   | `1m`                | De quanto em quanto tempo procurar mensagens paradas                 |
+| `PROCESSING_RECOVERY_IDLE`       | `10m`                  | Quanto tempo sem entrega antes de uma mensagem ser retomada          |
+| `PROCESSING_RECOVERY_BATCH_SIZE` | `50`                   | Quantas mensagens pendentes uma rodada examina no máximo             |
+| `PROCESSING_MAX_DELIVERIES`      | `3`                    | Entregas após as quais uma mensagem é desistida (`processing_status: FAILED`) em vez de reenviada |
 
 `DOCUMENTS_STREAM` e `WORKER_GROUP` são um contrato com o worker do akpedia-ml, que usa as mesmas
-variáveis: mudar só de um lado deixa mensagens que ninguém lê.
+variáveis: mudar só de um lado deixa mensagens que ninguém lê. `PROCESSING_MAX_DELIVERIES` é o
+mesmo limite que o worker usa para as mensagens pendentes que ele mesmo retoma (seu próprio
+`MAX_DELIVERIES`); os dois lados têm que concordar, ou um documento é desistido mais ou menos
+cedo dependendo de quem o pegou por último.
+
+**Mensagem parada porque o worker que a lia morreu e nunca voltou.** O worker só retoma, ao
+reiniciar, as mensagens pendentes do seu próprio nome de consumidor (ver `IndexingWorker` no
+akpedia-ml); se ele nunca voltar, nada além deste servidor olha de novo para essa mensagem. A
+cada `PROCESSING_RECOVERY_INTERVAL`, ele lista (`XPENDING`) as mensagens pendentes de qualquer
+consumidor, e para cada uma parada (sem entrega) há mais de `PROCESSING_RECOVERY_IDLE`:
+
+- se já foi entregue menos que `PROCESSING_MAX_DELIVERIES` vezes, ele a reivindica (`XCLAIM`) e
+  publica o documento como uma mensagem nova (`XADD`), do mesmo jeito que uma aprovação -- a
+  mensagem antiga é então confirmada (`XACK`), já que é a nova que passa a ser acompanhada;
+- se já foi entregue `PROCESSING_MAX_DELIVERIES` vezes, o documento é marcado
+  `processing_status: FAILED` (`processing_error: "retry_limit_exceeded: Retry limit exceeded"`)
+  e a mensagem é confirmada sem ser reivindicada -- o mesmo caminho que uma falha relatada pelo
+  próprio worker, pois é esse quem grava e confirma (ver [Indexação pelo
+  worker](#indexação-pelo-worker-rotas-internas)). Um documento assim pode ser tentado de novo à
+  mão (ver [Reprocessar](#reprocessar)).
+
+A versão do Spring Data Redis deste servidor (3.3) não tem `XAUTOCLAIM`; o mesmo resultado é
+obtido com os dois comandos que o compõem, `XPENDING` e `XCLAIM` por id.
 
 | Variável             | Default | Para que serve |
 |----------------------|---------|----------------|
@@ -833,6 +862,27 @@ curl -X POST localhost:8080/api/v1/documents/7/reject \
 }
 ```
 
+#### Reprocessar
+
+`POST /api/v1/documents/{id}/reprocess` tenta de novo a indexação de um documento com
+`processing_status: FAILED` -- por exemplo, depois de corrigir o que causou a falha. Só vale para
+um documento assim; em qualquer outro `processing_status` responde **409**
+`document_not_failed`.
+
+O documento volta a `processing_status: PROCESSING`, `processing_error` é limpo e, depois que a
+transação comita, o id entra na stream de novo, do mesmo jeito que uma aprovação:
+
+```bash
+curl -X POST localhost:8080/api/v1/documents/7/reprocess
+```
+
+A resposta é a mesma forma de [Aprovar](#aprovar), com `status: APPROVED` e
+`processing_status: PROCESSING`.
+
+> Uma mensagem parada porque o worker que a lia morreu já é retomada sozinha pelo [job de
+> recuperação](#fila-de-indexação-redis), até o limite de tentativas. Esta rota é para depois
+> desse limite, ou para forçar o reprocessamento antes dele.
+
 #### Status de erro
 
 | Situação                                                     | Status | `code`                          |
@@ -842,6 +892,7 @@ curl -X POST localhost:8080/api/v1/documents/7/reject \
 | documento não existe                                          | 404    | `document_not_found`            |
 | `categoryId` da correção não existe                           | 404    | `category_not_found`            |
 | documento não está em `PENDING_APPROVAL`                      | 409    | `document_not_pending_approval` |
+| reprocessar um documento cujo `processing_status` não é `FAILED` | 409 | `document_not_failed`           |
 
 ### Indexação pelo worker (rotas internas)
 

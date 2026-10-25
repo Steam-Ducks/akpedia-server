@@ -237,6 +237,15 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("document_not_approved", e.getMessage()));
     }
 
+    /**
+     * 409: a document was asked to be reprocessed while its indexing did not fail.
+     */
+    @ExceptionHandler(DocumentNotFailedException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentNotFailed(DocumentNotFailedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("document_not_failed", e.getMessage()));
+    }
+
     /** 400: the worker's vectors do not fit the index, so none of them is stored. */
     @ExceptionHandler(InvalidEmbeddingsException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidEmbeddings(InvalidEmbeddingsException e) {
