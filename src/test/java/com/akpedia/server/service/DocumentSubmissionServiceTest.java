@@ -3,6 +3,7 @@ package com.akpedia.server.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -86,7 +88,7 @@ class DocumentSubmissionServiceTest {
     /** Stubs the repository to answer one page holding exactly these documents. */
     private void givenSubmissions(Document... found) {
         given(users.existsById(AUTHOR_ID)).willReturn(true);
-        given(documents.findSubmissions(eq(AUTHOR_ID), any(), any()))
+        given(documents.findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), any()))
                 .willReturn(new PageImpl<>(List.of(found), PageRequest.of(0, 10), found.length));
     }
 
@@ -95,7 +97,7 @@ class DocumentSubmissionServiceTest {
     void pendingApprovalReadsAsUnderReview() {
         givenSubmissions(document(1L, DocumentStatus.PENDING_APPROVAL, null));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.UNDER_REVIEW);
         assertThat(summary.reviewComment()).isNull();
@@ -106,7 +108,7 @@ class DocumentSubmissionServiceTest {
     void approvedAndIndexedReadsAsPublished() {
         givenSubmissions(document(2L, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED, null));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.PUBLISHED);
         assertThat(summary.reviewComment()).isNull();
@@ -121,7 +123,7 @@ class DocumentSubmissionServiceTest {
                 document(5L, DocumentStatus.APPROVED, ProcessingStatus.PENDING, null),
                 document(6L, DocumentStatus.APPROVED, ProcessingStatus.PROCESSING, null));
 
-        List<SubmissionSummary> found = service.submissions(AUTHOR_ID, null, null).content();
+        List<SubmissionSummary> found = service.submissions(AUTHOR_ID, null, null, null).content();
 
         assertThat(found).extracting(SubmissionSummary::submissionStatus)
                 .containsOnly(SubmissionStatus.PROCESSING);
@@ -133,7 +135,7 @@ class DocumentSubmissionServiceTest {
         // PROCESSING would promise the document will show up in search, and it will not.
         givenSubmissions(document(7L, DocumentStatus.APPROVED, ProcessingStatus.FAILED, null));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.INDEXING_FAILED);
         assertThat(summary.reviewComment()).isNull();
@@ -144,7 +146,7 @@ class DocumentSubmissionServiceTest {
     void rejectedReadsAsReturnedWithTheComment() {
         givenSubmissions(document(3L, DocumentStatus.REJECTED, "Falta a secao de revisao A."));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.RETURNED);
         assertThat(summary.reviewComment()).isEqualTo("Falta a secao de revisao A.");
@@ -159,7 +161,7 @@ class DocumentSubmissionServiceTest {
         givenSubmissions(document(4L, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED,
                 "Ajuste o titulo na proxima versao."));
 
-        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null).content().get(0);
+        SubmissionSummary summary = service.submissions(AUTHOR_ID, null, null, null).content().get(0);
 
         assertThat(summary.submissionStatus()).isEqualTo(SubmissionStatus.PUBLISHED);
         assertThat(summary.reviewComment()).isNull();
@@ -171,10 +173,10 @@ class DocumentSubmissionServiceTest {
     void onlySubmittedStatusesAreQueried() {
         givenSubmissions();
 
-        service.submissions(AUTHOR_ID, null, null);
+        service.submissions(AUTHOR_ID, null, null, null);
 
         ArgumentCaptor<List<DocumentStatus>> statuses = ArgumentCaptor.captor();
-        verify(documents).findSubmissions(eq(AUTHOR_ID), statuses.capture(), any());
+        verify(documents).findSubmissions(eq(AUTHOR_ID), statuses.capture(), anyBoolean(), any(), any());
         assertThat(statuses.getValue())
                 .containsExactlyInAnyOrder(
                         DocumentStatus.PENDING_APPROVAL, DocumentStatus.APPROVED, DocumentStatus.REJECTED)
@@ -186,12 +188,12 @@ class DocumentSubmissionServiceTest {
     void noCreatorIdFallsBackToTheDefaultUser() {
         given(defaultUser.userId()).willReturn(99L);
         given(users.existsById(99L)).willReturn(true);
-        given(documents.findSubmissions(eq(99L), any(), any()))
+        given(documents.findSubmissions(eq(99L), any(), anyBoolean(), any(), any()))
                 .willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
 
-        service.submissions(null, null, null);
+        service.submissions(null, null, null, null);
 
-        verify(documents).findSubmissions(eq(99L), any(), any());
+        verify(documents).findSubmissions(eq(99L), any(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -199,7 +201,7 @@ class DocumentSubmissionServiceTest {
     void explicitCreatorIdIgnoresTheDefaultUser() {
         givenSubmissions();
 
-        service.submissions(AUTHOR_ID, null, null);
+        service.submissions(AUTHOR_ID, null, null, null);
 
         verifyNoInteractions(defaultUser);
     }
@@ -210,10 +212,10 @@ class DocumentSubmissionServiceTest {
         given(users.existsById(404L)).willReturn(false);
 
         // An empty page would read as "you have submitted nothing", which is a different answer.
-        assertThatThrownBy(() -> service.submissions(404L, null, null))
+        assertThatThrownBy(() -> service.submissions(404L, null, null, null))
                 .isInstanceOf(UserNotFoundException.class);
 
-        verify(documents, never()).findSubmissions(any(), any(), any());
+        verify(documents, never()).findSubmissions(any(), any(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -221,10 +223,10 @@ class DocumentSubmissionServiceTest {
     void pagingDefaults() {
         givenSubmissions();
 
-        service.submissions(AUTHOR_ID, null, null);
+        service.submissions(AUTHOR_ID, null, null, null);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.captor();
-        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), pageable.capture());
+        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), pageable.capture());
         assertThat(pageable.getValue().getPageNumber()).isZero();
         assertThat(pageable.getValue().getPageSize()).isEqualTo(DocumentSubmissionService.DEFAULT_SIZE);
     }
@@ -233,13 +235,13 @@ class DocumentSubmissionServiceTest {
     @DisplayName("the requested page and size reach the query")
     void pagingIsPassedThrough() {
         given(users.existsById(AUTHOR_ID)).willReturn(true);
-        given(documents.findSubmissions(eq(AUTHOR_ID), any(), any()))
+        given(documents.findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), any()))
                 .willReturn(new PageImpl<>(List.of(), PageRequest.of(2, 5), 0));
 
-        service.submissions(AUTHOR_ID, 2, 5);
+        service.submissions(AUTHOR_ID, 2, 5, null);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.captor();
-        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), pageable.capture());
+        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), pageable.capture());
         assertThat(pageable.getValue().getPageNumber()).isEqualTo(2);
         assertThat(pageable.getValue().getPageSize()).isEqualTo(5);
     }
@@ -248,10 +250,10 @@ class DocumentSubmissionServiceTest {
     @DisplayName("the response carries the totals a screen needs to page through")
     void responseCarriesTheTotals() {
         given(users.existsById(AUTHOR_ID)).willReturn(true);
-        given(documents.findSubmissions(eq(AUTHOR_ID), any(), any())).willReturn(
+        given(documents.findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), any())).willReturn(
                 new PageImpl<>(List.of(document(1L, DocumentStatus.APPROVED, null)), PageRequest.of(1, 10), 23));
 
-        PageResponse<SubmissionSummary> response = service.submissions(AUTHOR_ID, 1, 10);
+        PageResponse<SubmissionSummary> response = service.submissions(AUTHOR_ID, 1, 10, null);
 
         assertThat(response.page()).isEqualTo(1);
         assertThat(response.size()).isEqualTo(10);
@@ -263,13 +265,47 @@ class DocumentSubmissionServiceTest {
     @Test
     @DisplayName("a page or size outside its bounds is refused before reaching the database")
     void pagingMustStayWithinBounds() {
-        assertThatThrownBy(() -> service.submissions(AUTHOR_ID, -1, null))
+        assertThatThrownBy(() -> service.submissions(AUTHOR_ID, -1, null, null))
                 .isInstanceOf(InvalidDocumentListRequestException.class);
-        assertThatThrownBy(() -> service.submissions(AUTHOR_ID, null, 0))
+        assertThatThrownBy(() -> service.submissions(AUTHOR_ID, null, 0, null))
                 .isInstanceOf(InvalidDocumentListRequestException.class);
-        assertThatThrownBy(() -> service.submissions(AUTHOR_ID, null, DocumentSubmissionService.MAX_SIZE + 1))
+        assertThatThrownBy(() -> service.submissions(AUTHOR_ID, null, DocumentSubmissionService.MAX_SIZE + 1, null))
                 .isInstanceOf(InvalidDocumentListRequestException.class);
 
         verifyNoInteractions(documents, users, defaultUser);
+    }
+
+    @Test
+    @DisplayName("no categoryIds asks the query for every category")
+    void noCategoryIdsFiltersNothing() {
+        givenSubmissions();
+
+        service.submissions(AUTHOR_ID, null, null, null);
+
+        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), eq(false), any(), any());
+    }
+
+    @Test
+    @DisplayName("an empty categoryIds list is the same as none")
+    void emptyCategoryIdsFiltersNothing() {
+        givenSubmissions();
+
+        service.submissions(AUTHOR_ID, null, null, List.of());
+
+        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), eq(false), any(), any());
+    }
+
+    @Test
+    @DisplayName("categoryIds reaches the query, with hasCategories set")
+    void categoryIdsReachTheQuery() {
+        given(users.existsById(AUTHOR_ID)).willReturn(true);
+        given(documents.findSubmissions(eq(AUTHOR_ID), any(), eq(true), any(), any()))
+                .willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        service.submissions(AUTHOR_ID, null, null, List.of(1L, 3L));
+
+        ArgumentCaptor<Collection<Long>> categoryIds = ArgumentCaptor.captor();
+        verify(documents).findSubmissions(eq(AUTHOR_ID), any(), eq(true), categoryIds.capture(), any());
+        assertThat(categoryIds.getValue()).containsExactlyInAnyOrder(1L, 3L);
     }
 }

@@ -457,7 +457,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions answers UNDER_REVIEW without review fields")
     void submissionsUnderReview() throws Exception {
-        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+        given(submissionService.submissions(eq(20L), isNull(), isNull(), isNull())).willReturn(onePage(
                 new SubmissionSummary(1L, "manual.pdf", null, "Manuais",
                         SubmissionStatus.UNDER_REVIEW, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
@@ -480,7 +480,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions answers PROCESSING for an approved document not yet indexed")
     void submissionsProcessing() throws Exception {
-        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+        given(submissionService.submissions(eq(20L), isNull(), isNull(), isNull())).willReturn(onePage(
                 new SubmissionSummary(4L, "manual.pdf", null, "Manuais",
                         SubmissionStatus.PROCESSING, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
@@ -494,7 +494,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions answers INDEXING_FAILED for an approved document whose indexing failed")
     void submissionsIndexingFailed() throws Exception {
-        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+        given(submissionService.submissions(eq(20L), isNull(), isNull(), isNull())).willReturn(onePage(
                 new SubmissionSummary(5L, "manual.pdf", null, "Manuais",
                         SubmissionStatus.INDEXING_FAILED, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
@@ -508,7 +508,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions answers PUBLISHED for an approved, indexed document")
     void submissionsPublished() throws Exception {
-        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+        given(submissionService.submissions(eq(20L), isNull(), isNull(), isNull())).willReturn(onePage(
                 new SubmissionSummary(2L, "norma.pdf", "descricao", "Regulatorio",
                         SubmissionStatus.PUBLISHED, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"),
@@ -524,7 +524,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions answers RETURNED with the reason it came back")
     void submissionsReturned() throws Exception {
-        given(submissionService.submissions(eq(20L), isNull(), isNull())).willReturn(onePage(
+        given(submissionService.submissions(eq(20L), isNull(), isNull(), isNull())).willReturn(onePage(
                 new SubmissionSummary(3L, "contrato.pdf", null, "Juridico",
                         SubmissionStatus.RETURNED, "Falta a secao de revisao A.",
                         OffsetDateTime.parse("2026-10-16T12:00:00Z"),
@@ -540,7 +540,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions carries the paging totals and works without creatorId")
     void submissionsCarryPagingTotals() throws Exception {
-        given(submissionService.submissions(isNull(), eq(1), eq(10))).willReturn(
+        given(submissionService.submissions(isNull(), eq(1), eq(10), isNull())).willReturn(
                 new PageResponse<>(List.of(), 1, 10, 23, 3));
 
         mvc.perform(get("/api/v1/documents/submissions").param("page", "1").param("size", "10"))
@@ -556,7 +556,7 @@ class DocumentControllerTest {
     @DisplayName("GET /documents/submissions answers 404 for a creatorId no user has")
     void submissionsUnknownCreator() throws Exception {
         willThrow(new UserNotFoundException(404L))
-                .given(submissionService).submissions(eq(404L), isNull(), isNull());
+                .given(submissionService).submissions(eq(404L), isNull(), isNull(), isNull());
 
         mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "404"))
                 .andExpect(status().isNotFound())
@@ -567,11 +567,22 @@ class DocumentControllerTest {
     @DisplayName("GET /documents/submissions answers 400 for a size out of bounds")
     void submissionsSizeOutOfBounds() throws Exception {
         willThrow(new InvalidDocumentListRequestException("size must be between 1 and 50."))
-                .given(submissionService).submissions(isNull(), isNull(), eq(0));
+                .given(submissionService).submissions(isNull(), isNull(), eq(0), isNull());
 
         mvc.perform(get("/api/v1/documents/submissions").param("size", "0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
+    }
+
+    @Test
+    @DisplayName("GET /documents/submissions passes categoryIds through to the service")
+    void submissionsCategoryIdsReachTheService() throws Exception {
+        given(submissionService.submissions(isNull(), isNull(), isNull(), eq(List.of(1L, 3L))))
+                .willReturn(new PageResponse<>(List.of(), 0, 10, 0, 0));
+
+        mvc.perform(get("/api/v1/documents/submissions").param("categoryIds", "1", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     // ------------------------------------------------------------------

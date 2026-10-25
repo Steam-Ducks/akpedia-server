@@ -1,5 +1,6 @@
 package com.akpedia.server.service;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.domain.Page;
@@ -35,6 +36,12 @@ public class DocumentSubmissionService {
     static final int DEFAULT_SIZE = 10;
     static final int MAX_SIZE = 50;
 
+    /**
+     * Stands in for {@code categoryIds} when there is no category filter, the same placeholder
+     * {@link SearchService} uses: the query still needs a non-empty collection to bind.
+     */
+    private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
+
     private final DocumentRepository documents;
     private final UserRepository users;
     private final DefaultUserProvider defaultUser;
@@ -55,13 +62,15 @@ public class DocumentSubmissionService {
      *                           configured default user, the only author this sprint has
      * @param requestedPage      zero-based page; {@code null} means the first
      * @param requestedSize      results per page; {@code null} means {@value #DEFAULT_SIZE}
+     * @param categoryIds        one or more category ids to filter by; {@code null} or empty
+     *                           means every category
      * @return the page, with the totals a screen needs to page through it
      * @throws InvalidDocumentListRequestException if page or size are outside their bounds
      * @throws UserNotFoundException               if no user exists with the given id
      */
     @Transactional(readOnly = true)
     public PageResponse<SubmissionSummary> submissions(
-            Long requestedCreatorId, Integer requestedPage, Integer requestedSize) {
+            Long requestedCreatorId, Integer requestedPage, Integer requestedSize, Collection<Long> categoryIds) {
 
         int page = requestedPage == null ? 0 : requestedPage;
         int size = requestedSize == null ? DEFAULT_SIZE : requestedSize;
@@ -79,8 +88,11 @@ public class DocumentSubmissionService {
             throw new UserNotFoundException(creatorId);
         }
 
+        boolean hasCategories = categoryIds != null && !categoryIds.isEmpty();
+        Collection<Long> safeCategoryIds = hasCategories ? categoryIds : NO_CATEGORY_FILTER;
+
         Page<Document> found = documents.findSubmissions(
-                creatorId, SUBMITTED_STATUSES, PageRequest.of(page, size));
+                creatorId, SUBMITTED_STATUSES, hasCategories, safeCategoryIds, PageRequest.of(page, size));
 
         return PageResponse.from(found, SubmissionSummary::from);
     }

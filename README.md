@@ -535,14 +535,15 @@ que ela não mostra é documento de outra pessoa.
 Documento em `DRAFT` nunca saiu das mãos do autor e `ARCHIVED` está fora de circulação: nenhum dos
 dois é uma submissão, então não aparecem aqui.
 
-| Parâmetro   | Obrigatório | Descrição                                                      |
-|-------------|:-----------:|-----------------------------------------------------------------|
-| `creatorId` | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
-| `page`      | não         | página, começando em 0; default 0                               |
-| `size`      | não         | resultados por página, de 1 a 50; default 10                    |
+| Parâmetro     | Obrigatório | Descrição                                                      |
+|---------------|:-----------:|-----------------------------------------------------------------|
+| `creatorId`   | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
+| `page`        | não         | página, começando em 0; default 0                               |
+| `size`        | não         | resultados por página, de 1 a 50; default 10                    |
+| `categoryIds` | não         | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); sem nenhum, lista todas as categorias |
 
 ```bash
-curl "localhost:8080/api/v1/documents/submissions?page=0&size=10"
+curl "localhost:8080/api/v1/documents/submissions?page=0&size=10&categoryIds=1,3"
 ```
 
 ```json

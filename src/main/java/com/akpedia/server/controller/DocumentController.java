@@ -128,6 +128,9 @@ public class DocumentController {
                     field is always present, null when it has no value. A document
                     that is still a draft, or that was archived, is not a submission and is not listed.
 
+                    `categoryIds` narrows the listing to one or more categories; with none given, every
+                    category is listed.
+
                     Without `creatorId` the configured default user is used, since this sprint has no
                     login (see the README).""")
     @ApiResponses({
@@ -147,9 +150,12 @@ public class DocumentController {
             Integer page,
             @RequestParam(required = false)
             @Parameter(description = "Results per page, from 1 to 50. Defaults to 10.")
-            Integer size) {
+            Integer size,
+            @RequestParam(required = false)
+            @Parameter(description = "One or more category ids to filter by. Defaults to every category.")
+            List<Long> categoryIds) {
 
-        return submissionService.submissions(creatorId, page, size);
+        return submissionService.submissions(creatorId, page, size, categoryIds);
     }
 
     @Operation(
