@@ -677,8 +677,11 @@ mais antigo primeiro** — a fila é atendida na ordem de chegada. Empates no `c
 desfeitos pelo `id`, para as páginas não trocarem itens entre si. `page` começa em 0 (padrão 0) e
 `size` vai de 1 a 50 (padrão 20); fora disso, 400 `invalid_request`.
 
-Cada documento leva quem enviou e de qual setor, quando, e a categoria sugerida pelo
-classificador com a confiança — os dois `null` quando o upload não trouxe sugestão. O arquivo
+Cada documento leva quem enviou e de qual setor, quando, a `description` e a `category` que o
+autor mandou — o que o formulário de revisão mostra preenchido —, e a categoria sugerida pelo
+classificador com a confiança — os dois `null` quando o upload não trouxe sugestão. A
+`description` é `null` quando o upload não trouxe nenhuma, e a `category` pode ser diferente da
+sugestão, quando o autor a corrigiu. O arquivo
 de um documento da fila abre normalmente por `/documents/{id}/file` (ver abaixo).
 
 ```bash
@@ -691,18 +694,22 @@ curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
     {
       "id": 12,
       "name": "manual-vpn.pdf",
+      "description": "Como configurar a VPN da empresa",
       "creator_name": "Mariana Costa",
       "sector_name": "Engenharia",
       "created_at": "2026-10-13T19:06:15.123Z",
+      "category": { "id": 1, "name": "Tecnico" },
       "suggested_category": { "id": 1, "name": "Tecnico" },
       "confidence": 0.870
     },
     {
       "id": 15,
       "name": "politica-ferias.pdf",
+      "description": null,
       "creator_name": "Usuário padrão",
       "sector_name": "Administrativo",
       "created_at": "2026-10-14T11:20:02.481Z",
+      "category": { "id": 3, "name": "Juridico" },
       "suggested_category": null,
       "confidence": null
     }

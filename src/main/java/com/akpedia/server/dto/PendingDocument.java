@@ -14,9 +14,12 @@ import com.akpedia.server.entity.Document;
  * @param id                identifier the document is reached by on the other document routes,
  *                          its file included
  * @param name              document title
+ * @param description       description the author sent, often the one akpedia-ml suggested;
+ *                          null when the upload carried none
  * @param creatorName       name of the user who uploaded the document
  * @param sectorName        sector of that user
  * @param createdAt         when the document was uploaded, which is what orders the queue
+ * @param category          category the author chose, which may differ from the suggestion
  * @param suggestedCategory category the classifier suggested; null when the upload carried none
  * @param confidence        how sure the classifier was of that suggestion, from 0 to 1; null when
  *                          there is no suggestion
@@ -24,30 +27,37 @@ import com.akpedia.server.entity.Document;
 public record PendingDocument(
         Long id,
         String name,
+        String description,
         @JsonProperty("creator_name") String creatorName,
         @JsonProperty("sector_name") String sectorName,
         @JsonProperty("created_at") OffsetDateTime createdAt,
-        @JsonProperty("suggested_category") SuggestedCategory suggestedCategory,
+        CategoryRef category,
+        @JsonProperty("suggested_category") CategoryRef suggestedCategory,
         BigDecimal confidence) {
 
     /**
-     * The suggested category, carrying its id so the approver can confirm it as is.
+     * A category, carrying its id so the approver can confirm it as is.
      *
      * @param id   category identifier
      * @param name category name
      */
-    public record SuggestedCategory(Long id, String name) {
+    public record CategoryRef(Long id, String name) {
+
+        static CategoryRef of(Category category) {
+            return category != null ? new CategoryRef(category.getId(), category.getName()) : null;
+        }
     }
 
     public static PendingDocument from(Document document) {
-        Category suggested = document.getSuggestedCategory();
         return new PendingDocument(
                 document.getId(),
                 document.getName(),
+                document.getDescription(),
                 document.getCreator().getName(),
                 document.getCreator().getSector().getName(),
                 document.getCreatedAt(),
-                suggested != null ? new SuggestedCategory(suggested.getId(), suggested.getName()) : null,
+                CategoryRef.of(document.getCategory()),
+                CategoryRef.of(document.getSuggestedCategory()),
                 document.getCategoryConfidence());
     }
 }

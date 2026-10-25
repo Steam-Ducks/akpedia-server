@@ -205,8 +205,9 @@ public class DocumentController {
             description = """
                     The review queue: every document in `PENDING_APPROVAL`, the oldest upload first, `size`
                     per page (20 by default, at most 50) starting from `page` 0. Each document carries who
-                    uploaded it and from which sector, when, and the category the classifier suggested with
-                    its `confidence` -- both null when the upload carried no suggestion. A pending document's
+                    uploaded it and from which sector, when, the `description` and `category` the author
+                    sent, and the category the classifier suggested with its `confidence` -- both null when
+                    the upload carried no suggestion. A pending document's
                     file opens through `/documents/{id}/file`, which is how the approver reads it.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "One page of the queue; `content` is empty past the last page."),
