@@ -271,6 +271,7 @@ para ele (`akpedia-server` no `aud`).
 | `GET /health`, `/actuator/health`, Swagger (`/swagger-ui.html`, `/v3/api-docs`) | qualquer um, sem token |
 | `/internal/**` | só o worker do akpedia-ml, com o `X-Internal-Token` (ver [Indexação pelo worker](#indexação-pelo-worker-rotas-internas)) |
 | `GET /api/v1/documents/pending`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
+| `/api/v1/admin/**` (hoje, a publicação dos termos de uso) | papel `ADMIN`; os outros recebem **403** |
 | o resto de `/api` | qualquer usuário logado |
 
 Os exemplos de `curl` deste README omitem o header. Para rodá-los, entre no front, copie o token
@@ -295,6 +296,30 @@ campos) recebe **403** `incomplete_account` nessas rotas.
 O usuário `aprovador@akpedia.local`, criado pela migration `V5__seed_default_approver.sql` quando
 ainda não havia login, continua no banco como autor e aprovador dos documentos daquela época.
 Ninguém entra com ele, a não ser que se cadastre no Keycloak com esse email.
+
+#### Termos de uso
+
+Todo usuário aceita a versão atual dos termos de uso antes de usar a API, como na PoC do
+Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativo do Keycloak
+(*Terms and Conditions*) fica desligado.
+
+| Rota | Quem pode | O que faz |
+|------|-----------|-----------|
+| `GET /api/v1/terms` | qualquer usuário logado | `{current, accepted}`: os termos atuais (`version`, `title`, `content`, `published_at`, `published_by`) e a última versão que o usuário aceitou (`version`, `accepted_at`). Cada um é `null` se não houver |
+| `POST /api/v1/terms/accept` | qualquer usuário logado | `{"version": n}`, a versão que o usuário viu. **409** `terms_changed` se ela não for mais a atual |
+| `GET /api/v1/admin/terms` | `ADMIN` | todas as versões publicadas, da mais nova para a mais antiga |
+| `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**). `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
+
+- **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
+  duas primeiras acima, responde **403** `terms_not_accepted`, inclusive as de admin: quem
+  publica também aceita. A conferência vem depois do login e dos papéis, então sem token
+  continua sendo **401**, e sem o papel, **403** sem esse código. `/health`, Swagger e
+  `/internal` não passam por ela.
+- **Sem termos publicados, não há bloqueio**: até o admin publicar a primeira versão, ninguém
+  é perguntado.
+- **Histórico**: `terms_versions` e `terms_acceptances` (migration `V8__terms_of_use.sql`) só
+  recebem inserções. Uma versão publicada nunca muda (uma mudança é uma versão nova), e cada
+  aceite fica guardado com o usuário, a versão e quando, mesmo que ele aceite de novo.
 
 ### Serviço de embeddings
 

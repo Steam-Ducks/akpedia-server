@@ -271,6 +271,13 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("user_not_found", e.getMessage()));
     }
 
+    /** 409: the user accepted a version of the terms that is no longer the current one. */
+    @ExceptionHandler(TermsChangedException.class)
+    public ResponseEntity<ApiErrorResponse> handleTermsChanged(TermsChangedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("terms_changed", e.getMessage()));
+    }
+
     /**
      * 403: the user is logged in, but their Keycloak account has no email or no sector, so there
      * is no row to attribute their documents to. Logging in again will not change that.

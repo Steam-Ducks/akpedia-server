@@ -35,6 +35,11 @@ public class CurrentUser {
         }
     }
 
+    /** The Keycloak account id (the token's {@code sub}), without creating the user's row. */
+    public String keycloakId() {
+        return token().getSubject();
+    }
+
     private static Jwt token() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof Jwt jwt)) {
