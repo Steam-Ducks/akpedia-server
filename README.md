@@ -211,7 +211,7 @@ O que o realm `akpedia` traz:
 | Cadastro | Autocadastro ligado na tela de login; o email é o nome de usuário |
 | Atributos obrigatórios | Nome, sobrenome, email, `cpf` (11 dígitos, só números) e `sector` (lista com os 7 setores) |
 | Papéis | `STANDARD`, `APPROVER` e `ADMIN`. Toda conta nova recebe `STANDARD` (papel padrão do realm) |
-| `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` |
+| `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` e o setor do usuário na claim `sector` |
 | `akpedia-server` | Cliente confidencial do back, com service account (`view-users` e `manage-users` do `realm-management`) para usar a Admin API |
 | Idioma | Telas em português (`pt-BR`), com inglês como opção |
 
