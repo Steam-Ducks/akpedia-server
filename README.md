@@ -84,9 +84,7 @@ akpedia-server/
     │   │   │   ├── EmbeddingProperties.java
     │   │   │   ├── GotenbergClientConfig.java
     │   │   │   ├── GotenbergProperties.java
-    │   │   │   ├── DefaultUserProperties.java # akpedia.default-user-email
-    │   │   │   ├── DefaultUserConfig.java
-    │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
+    │   │   │   ├── SecurityConfig.java # token do Keycloak nas rotas /api, papéis da revisão
     │   │   │   ├── ProcessingProperties.java # akpedia.processing.*: stream, grupo e reenvio
     │   │   │   ├── ProcessingConfig.java
     │   │   │   ├── InternalApiProperties.java # akpedia.internal.token: segredo das rotas /internal
@@ -152,8 +150,9 @@ akpedia-server/
     │           ├── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
     │           ├── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
     │           ├── V4__document_review_fields.sql # campos de revisão + catálogo de categorias
-    │           ├── V5__seed_default_approver.sql # usuário padrão temporário (ver Configuração)
-    │           └── V6__document_processing_enqueued_at.sql # quando o aprovado entrou na fila (outbox)
+    │           ├── V5__seed_default_approver.sql # usuário de antes do login (ver Configuração)
+    │           ├── V6__document_processing_enqueued_at.sql # quando o aprovado entrou na fila (outbox)
+    │           └── V7__users_from_keycloak.sql # users.keycloak_id; password_hash deixa de ser obrigatório
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
@@ -246,56 +245,42 @@ administrador:
 Ele existe só para o ambiente local. Fora dele, não importe esse usuário: tire-o do arquivo ou
 apague-o depois do import, e crie os administradores de verdade pelo console.
 
-### Usuário padrão (temporário)
+### Login nas rotas da API
 
-> **Temporário.** Esta seção existe enquanto não houver CRUD de usuários nem autenticação.
-> Quando o cadastro e o login entrarem, o usuário abaixo e a migration que o cria devem sair,
-> junto com o `akpedia.default-user-email` e o `VITE_DEFAULT_USER_ID` do front.
+Toda rota em `/api` exige o access token do Keycloak no header `Authorization: Bearer <token>`;
+sem ele, ou com um token vencido, a resposta é **401**. O token vem do login no front
+(`akpedia-client`). O servidor confere a assinatura, o emissor (`iss`) e se o token foi emitido
+para ele (`akpedia-server` no `aud`).
 
-Todo documento precisa de um autor e toda aprovação precisa registrar quem aprovou. Como ainda
-não existe cadastro nem login, a migration `V5__seed_default_approver.sql` cria direto no banco
-um setor padrão (`Engenharia`) e um único usuário, que é ao mesmo tempo o autor dos uploads e o
-aprovador:
+| Rota | Quem pode |
+|------|-----------|
+| `GET /health`, `/actuator/health`, Swagger (`/swagger-ui.html`, `/v3/api-docs`) | qualquer um, sem token |
+| `/internal/**` | só o worker do akpedia-ml, com o `X-Internal-Token` (ver [Indexação pelo worker](#indexação-pelo-worker-rotas-internas)) |
+| `GET /api/v1/documents/pending`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
+| o resto de `/api` | qualquer usuário logado |
 
-| Campo           | Valor                                            |
-|-----------------|--------------------------------------------------|
-| `name`          | `Aprovador Padrao`                               |
-| `email`         | `aprovador@akpedia.local`                        |
-| `sector`        | `Engenharia`                                     |
-| `is_active`     | `true`                                           |
-| `password_hash` | placeholder — **não é uma credencial utilizável** |
+Os exemplos de `curl` deste README omitem o header. Para rodá-los, entre no front, copie o token
+de uma requisição à API (aba Rede do navegador) e acrescente `-H "Authorization: Bearer $TOKEN"`.
 
-A migration é idempotente (`ON CONFLICT DO NOTHING` no nome do setor e no email do usuário),
-então rodar as migrations de novo não duplica nem sobrescreve nada.
+| Variável               | Default                                                           | Para que serve |
+|------------------------|-------------------------------------------------------------------|----------------|
+| `KEYCLOAK_ISSUER_URI`  | `http://localhost:8180/realms/akpedia`                            | Emissor esperado no `iss` do token: a URL pública do Keycloak |
+| `KEYCLOAK_JWK_SET_URI` | `http://localhost:8180/realms/akpedia/protocol/openid-connect/certs` | De onde o servidor baixa as chaves que assinam os tokens. Dentro de um container, aponte para o Keycloak pela rede Docker (`http://keycloak:8080/...` no compose, `http://akpedia-keycloak:8080/...` no dev container) |
 
-| Variável              | Default                   | Para que serve                        |
-|-----------------------|---------------------------|---------------------------------------|
-| `DEFAULT_USER_EMAIL`  | `aprovador@akpedia.local` | Email do usuário padrão (`akpedia.default-user-email`) |
+#### Usuário no banco
 
-O servidor **resolve esse email para o id no startup**, uma vez, e guarda o id. Se nenhum usuário
-tiver o email configurado, a aplicação **não sobe** e o log aponta o problema:
+O usuário de uma requisição é o dono do token. Na primeira requisição que precisa dele (enviar um
+documento, listar as próprias submissões, aprovar), o servidor cria a linha em `users` a partir do
+token: nome, email e setor (claim `sector`), ligada à conta do Keycloak por `keycloak_id` (o `sub`
+do token). Nas seguintes, copia o que tiver mudado no Keycloak. Um setor que o banco ainda não tem
+é criado. Uma linha que já existia com o mesmo email é reaproveitada, e não duplicada.
 
-```
-Usuario padrao nao encontrado pelo email 'aprovador@akpedia.local'. A configuracao
-akpedia.default-user-email (variavel DEFAULT_USER_EMAIL) tem que apontar para um usuario que
-exista no banco. Confira se a migration V5__seed_default_approver.sql rodou e se o email
-configurado e o mesmo que ela insere.
-```
+Uma conta sem email ou sem setor (só acontece com usuário criado à mão no console, sem esses
+campos) recebe **403** `incomplete_account` nessas rotas.
 
-Falhar no startup é proposital: é melhor do que descobrir o problema num 404 sem explicação no
-primeiro upload.
-
-É esse id que o `POST /api/v1/documents` usa quando o `creatorId` não vem na requisição (ver
-[Documentos](#documentos)), então o upload tem autor mesmo sem ninguém logado.
-
-**No front**, o id correspondente vai em `VITE_DEFAULT_USER_ID`, no `.env.example` do repositório
-do cliente — aqui não há código de cliente, e o `.env.example` deste repo serve só ao
-`docker-compose`. O id é valor de sequência e muda de banco para banco, então pegue o do seu:
-
-```bash
-docker compose exec db psql -U akpedia -d akpedia \
-  -c "SELECT id FROM users WHERE email = 'aprovador@akpedia.local'"
-```
+O usuário `aprovador@akpedia.local`, criado pela migration `V5__seed_default_approver.sql` quando
+ainda não havia login, continua no banco como autor e aprovador dos documentos daquela época.
+Ninguém entra com ele, a não ser que se cadastre no Keycloak com esse email.
 
 ### Serviço de embeddings
 
@@ -515,27 +500,17 @@ O documento é salvo **aguardando aprovação**: `status: PENDING_APPROVAL` e
 a indexação para busca só acontece depois que o documento é aprovado, para não gastar
 processamento com o que ainda pode ser rejeitado. Enquanto isso o documento já pode ser aberto e
 visualizado (é assim que o aprovador o lê), mas não aparece na busca nem na lista de recentes.
-Se a conversão para PDF falhar, nada é salvo (ver status de erro abaixo).
+Se a conversão para PDF falhar, nada é salvo (ver status de erro abaixo). O autor é o usuário
+logado.
 
 | Campo (multipart) | Obrigatório | Descrição                                             |
 |--------------------|:-----------:|--------------------------------------------------------|
 | `file`             | sim         | arquivo a enviar                                        |
 | `categoryId`       | sim         | id de uma categoria existente                            |
-| `creatorId`        | não         | id de um usuário existente; omitido, cai no [usuário padrão](#usuário-padrão-temporário) |
 | `name`             | não         | nome do documento; default é o nome do arquivo com `.pdf` |
 | `description`      | não         | descrição livre                                          |
 | `suggestedCategoryId` | não      | id da categoria sugerida pelo classificador; precisa ser uma das categorias do catálogo |
 | `categoryConfidence`  | não      | confiança da sugestão, de 0 a 1; só é aceita junto com `suggestedCategoryId` |
-
-```bash
-curl -X POST localhost:8080/api/v1/documents \
-  -F "file=@relatorio.docx" \
-  -F "categoryId=1" \
-  -F "creatorId=1"
-```
-
-Enquanto não houver cadastro nem login, `creatorId` pode ser omitido: o documento fica atribuído
-ao [usuário padrão](#usuário-padrão-temporário) que o servidor resolveu no startup.
 
 ```bash
 curl -X POST localhost:8080/api/v1/documents \
@@ -580,7 +555,7 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 
 ### Minhas submissões
 
-`GET /api/v1/documents/submissions` devolve os documentos que a pessoa enviou, do mais recente
+`GET /api/v1/documents/submissions` devolve os documentos que o usuário logado enviou, do mais recente
 para o mais antigo, cada um com um status **derivado** para o autor em vez do status armazenado:
 
 | `submission_status` | No banco                                          | O que significa para o autor                    |
@@ -605,7 +580,6 @@ dois é uma submissão, então não aparecem aqui.
 
 | Parâmetro     | Obrigatório | Descrição                                                      |
 |---------------|:-----------:|-----------------------------------------------------------------|
-| `creatorId`   | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
 | `page`        | não         | página, começando em 0; default 0                               |
 | `size`        | não         | resultados por página, de 1 a 50; default 10                    |
 | `categoryIds` | não         | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); sem nenhum, lista todas as categorias |
@@ -655,10 +629,6 @@ Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem
 | Situação                                  | Status | `code`            |
 |--------------------------------------------|--------|-------------------|
 | `page` negativo, ou `size` fora de 1 a 50  | 400    | `invalid_request` |
-| `creatorId` que nenhum usuário tem         | 404    | `user_not_found`  |
-
-> Um `creatorId` inexistente responde 404 em vez de página vazia: página vazia se leria como
-> "você não enviou nada", que é uma resposta diferente — e a que o autor acreditaria.
 
 ### Sugerir título, descrição e categoria (antes de enviar)
 
@@ -775,7 +745,7 @@ curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
       "id": 15,
       "name": "politica-ferias.pdf",
       "description": null,
-      "creator_name": "Usuário padrão",
+      "creator_name": "Ana Souza",
       "sector_name": "Administrativo",
       "created_at": "2026-10-14T11:20:02.481Z",
       "category": { "id": 3, "name": "Juridico" },
@@ -798,8 +768,7 @@ prática, alguém já decidiu. O documento fica travado (`SELECT … FOR UPDATE`
 gravada, então dois aprovadores ao mesmo tempo não aprovam duas vezes nem aprovam e devolvem o
 mesmo documento.
 
-O aprovador registrado é o [usuário padrão](#usuário-padrão-temporário), como o autor do upload,
-enquanto não houver login.
+O aprovador registrado é o usuário logado, que precisa do papel `APPROVER` ou `ADMIN`.
 
 #### Aprovar
 
