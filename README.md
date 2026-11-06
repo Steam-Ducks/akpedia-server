@@ -23,6 +23,8 @@ docker compose up --build
 
 - API disponível em `http://localhost:8080`
 - Postgres exposto em `localhost:5432` (db `akpedia`, user/senha `akpedia`)
+- Keycloak em `http://localhost:8180` (ver [Autenticação (Keycloak)](#autenticação-keycloak)).
+  Ele **exige** o `KEYCLOAK_DEV_ADMIN_PASSWORD` no `.env`: sem ele, o container sai com erro.
 
 Para parar: `docker compose down` (ou `docker compose down -v` para apagar os dados do banco).
 
@@ -63,6 +65,7 @@ akpedia-server/
 ├── .dockerignore
 ├── .gitignore
 ├── .env.example
+├── keycloak/                      # imagem do Keycloak + realm akpedia (akpedia-realm.json)
 ├── mvnw / mvnw.cmd / .mvn/wrapper/ # Maven Wrapper
 ├── README.md
 └── src/
@@ -177,6 +180,71 @@ A aplicação lê as configurações de conexão a partir de variáveis de ambie
 | `DB_USER`      | `akpedia`                                        |
 | `DB_PASSWORD`  | `akpedia`                                        |
 | `SERVER_PORT`  | `8080`                                           |
+
+### Autenticação (Keycloak)
+
+O login, o cadastro e os papéis dos usuários ficam no [Keycloak](https://www.keycloak.org/), que
+sobe no `docker-compose.yml` como serviço `keycloak` (imagem `quay.io/keycloak/keycloak:26.7.4`,
+em modo dev), publicado em `http://localhost:8180`.
+
+```bash
+cp .env.example .env              # e preencha KEYCLOAK_DEV_ADMIN_PASSWORD
+docker compose up -d keycloak     # sobe também o db e cria o banco keycloak
+```
+
+- **Banco**: o Keycloak guarda os dados no mesmo Postgres, num banco à parte (`keycloak`). Quem
+  cria esse banco é o serviço `keycloak-db-init`, que roda uma vez a cada `up` e sai; ele funciona
+  também num volume do Postgres que já existia.
+- **Realm**: o realm `akpedia` é versionado em [`keycloak/akpedia-realm.json`](keycloak/akpedia-realm.json)
+  e importado com `--import-realm` **só na primeira subida**. Se o realm já existe, o arquivo é
+  ignorado. O arquivo vai copiado para dentro da imagem (`keycloak/Dockerfile`), e não montado
+  como volume, porque o dev container usa o Docker do host, que não enxerga os caminhos de
+  dentro dele. Para aplicar uma mudança no arquivo, apague o realm no console de administração
+  (ou o banco `keycloak`) e suba de novo com `docker compose up -d --build keycloak`.
+- **Console de administração**: `http://localhost:8180/admin`, com o admin do realm `master`
+  (`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`, `admin` / `admin` por padrão).
+
+O que o realm `akpedia` traz:
+
+| Item | Configuração |
+|------|--------------|
+| Cadastro | Autocadastro ligado na tela de login; o email é o nome de usuário |
+| Atributos obrigatórios | Nome, sobrenome, email, `cpf` (11 dígitos, só números) e `sector` (lista com os 7 setores) |
+| Papéis | `STANDARD`, `APPROVER` e `ADMIN`. Toda conta nova recebe `STANDARD` (papel padrão do realm) |
+| `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` |
+| `akpedia-server` | Cliente confidencial do back, com service account (`view-users` e `manage-users` do `realm-management`) para usar a Admin API |
+| Idioma | Telas em português (`pt-BR`), com inglês como opção |
+
+Os setores e as regras do CPF estão no User Profile do realm (no arquivo, dentro de
+`components` → `kc.user.profile.config`; no console, em *Realm settings* → *User profile*).
+
+| Variável                        | Default                     | Para que serve |
+|---------------------------------|-----------------------------|----------------|
+| `KEYCLOAK_URL`                  | `http://localhost:8180`     | URL pública do Keycloak, que é também o emissor (`iss`) dos tokens. Entre containers ele responde em `keycloak:8080` |
+| `KEYCLOAK_ADMIN`                | `admin`                     | Admin do realm `master` (console de administração) |
+| `KEYCLOAK_ADMIN_PASSWORD`       | `admin`                     | Senha desse admin |
+| `KEYCLOAK_DB`                   | `keycloak`                  | Banco do Keycloak no Postgres |
+| `AKPEDIA_CLIENT_URL`            | `http://localhost:5173`     | URL do front, para onde o login e o logout podem voltar |
+| `KEYCLOAK_SERVER_CLIENT_SECRET` | `akpedia-dev-server-secret` | Secret do cliente `akpedia-server` |
+| `KEYCLOAK_DEV_ADMIN_EMAIL`      | `admin@akpedia.local`       | Email (e login) do usuário `ADMIN` inicial |
+| `KEYCLOAK_DEV_ADMIN_PASSWORD`   | (sem default)               | Senha desse usuário. **Obrigatória**: sem ela o Keycloak não sobe |
+
+As quatro últimas só são lidas quando o realm é importado, ou seja, na primeira subida.
+
+#### Usuário ADMIN inicial (só para desenvolvimento)
+
+O import cria um usuário com o papel `ADMIN`, para entrar no app antes de existir qualquer outro
+administrador:
+
+| Campo  | Valor |
+|--------|-------|
+| Login  | `KEYCLOAK_DEV_ADMIN_EMAIL` (`admin@akpedia.local` por padrão) |
+| Senha  | `KEYCLOAK_DEV_ADMIN_PASSWORD`, do `.env` |
+| Papéis | `ADMIN` e `STANDARD` |
+| CPF / setor | `00000000000` / o primeiro setor da lista |
+
+Ele existe só para o ambiente local. Fora dele, não importe esse usuário: tire-o do arquivo ou
+apague-o depois do import, e crie os administradores de verdade pelo console.
 
 ### Usuário padrão (temporário)
 
