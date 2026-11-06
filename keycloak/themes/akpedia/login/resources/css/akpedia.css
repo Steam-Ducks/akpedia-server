@@ -1,0 +1,187 @@
+/* Same palette, font and shapes as akpedia-client (src/assets/css/pallete.css and main.css). */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --ak-white: #f7f7f6;
+  --ak-white-lightest: #fbfbfa;
+  --ak-grey-lightest: #e3e5e5;
+  --ak-grey: #68747a;
+  --ak-black: #212123;
+  --ak-wine: #711d3c;
+  --ak-wine-lightest: #f5e8ed;
+  --ak-round-lg: 14px;
+  --ak-elevation: 0 2px 8px 3px rgb(33 33 35 / 0.1);
+  --ak-font: 'Manrope', system-ui, sans-serif;
+
+  /* PatternFly globals that Keycloak's components read */
+  --pf-v5-global--FontFamily--text: var(--ak-font);
+  --pf-v5-global--FontFamily--heading: var(--ak-font);
+  --pf-v5-global--Color--100: var(--ak-black);
+  --pf-v5-global--Color--200: var(--ak-grey);
+  --pf-v5-global--primary-color--100: var(--ak-black);
+  --pf-v5-global--primary-color--200: var(--ak-black);
+  --pf-v5-global--link--Color: var(--ak-wine);
+  --pf-v5-global--link--Color--hover: var(--ak-wine);
+  --pf-v5-global--BorderColor--100: var(--ak-grey-lightest);
+  --pf-v5-global--active-color--100: var(--ak-wine);
+  --keycloak-card-top-color: transparent;
+}
+
+/* Plain app background instead of Keycloak's artwork */
+.login-pf body,
+.pf-v5-c-login {
+  background: var(--ak-white);
+  font-family: var(--ak-font);
+  color: var(--ak-black);
+}
+
+/* Header: the Akpedia logo and the app's tagline in place of the realm name */
+#kc-header-wrapper {
+  /* keycloak.v2 forces white text (meant for its dark artwork) with !important */
+  color: transparent !important;
+  font-size: 0;
+  letter-spacing: 0;
+  width: 220px;
+  height: 77px;
+  margin: 0 auto;
+  background: url('../img/akpedia-logo.png') no-repeat center / contain;
+}
+#kc-header {
+  margin-bottom: 32px;
+}
+#kc-header::after {
+  content: 'Documentos técnicos, normativas e informações em um só lugar.';
+  display: block;
+  margin-top: 12px;
+  color: var(--ak-grey);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* Card: same look as the app's panels */
+.pf-v5-c-login__main {
+  background: var(--ak-white-lightest);
+  border: 1px solid var(--ak-grey-lightest);
+  border-radius: var(--ak-round-lg);
+  box-shadow: var(--ak-elevation);
+  overflow: hidden;
+}
+.pf-v5-c-login__main-header {
+  border-top: 0;
+}
+#kc-page-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.pf-v5-c-form__label-text {
+  font-weight: 600;
+}
+
+/* Inputs: like AkInput (rounded, light border, wine on focus). PatternFly draws the border with
+   ::before and an underline with ::after; both are replaced by a plain border. */
+.pf-v5-c-form-control,
+.pf-v5-c-input-group {
+  border: 1px solid var(--ak-grey-lightest);
+  border-radius: var(--ak-round-lg);
+  background-color: var(--ak-white);
+  transition: border-color 0.2s ease;
+}
+.pf-v5-c-form-control::before,
+.pf-v5-c-form-control::after,
+.pf-v5-c-input-group .pf-v5-c-button::after {
+  display: none;
+}
+.pf-v5-c-form-control:focus-within,
+.pf-v5-c-input-group:focus-within {
+  border-color: var(--ak-wine);
+}
+.pf-v5-c-form-control.pf-m-error,
+.pf-v5-c-input-group:has(.pf-m-error) {
+  border-color: var(--ak-wine);
+  background-color: var(--ak-wine-lightest);
+}
+.pf-v5-c-form-control input,
+.pf-v5-c-form-control select {
+  padding-block: 12px;
+  outline: none;
+  background: transparent;
+}
+.pf-v5-c-form__label-required {
+  color: var(--ak-wine);
+}
+/* The password field and its show/hide button read as one input */
+.pf-v5-c-input-group {
+  overflow: hidden;
+}
+.pf-v5-c-input-group .pf-v5-c-form-control {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control {
+  background: transparent;
+  color: var(--ak-grey);
+}
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control:hover {
+  color: var(--ak-black);
+}
+.pf-v5-c-helper-text__item.pf-m-error .kc-feedback-text,
+.pf-v5-c-form-control__icon.pf-m-status {
+  color: var(--ak-wine);
+}
+
+/* Language picker: a small pill like the app's chips */
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control {
+  border-radius: 9999px;
+}
+.pf-v5-c-login__main-header-utilities select {
+  padding: 8px 36px 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Buttons: like AkButton (black, bold, rounded) */
+.pf-v5-c-button {
+  --pf-v5-c-button--BorderRadius: var(--ak-round-lg);
+  font-weight: 800;
+}
+.pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--ak-black);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: rgb(33 33 35 / 0.7);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: rgb(33 33 35 / 0.7);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--ak-black);
+  --pf-v5-c-button--m-primary--Color: var(--ak-white);
+  padding-block: 12px;
+}
+.pf-v5-c-button.pf-m-secondary {
+  --pf-v5-c-button--m-secondary--Color: var(--ak-black);
+  --pf-v5-c-button--m-secondary--after--BorderColor: var(--ak-grey-lightest);
+  --pf-v5-c-button--m-secondary--hover--after--BorderColor: var(--ak-black);
+}
+.pf-v5-c-button.pf-m-link {
+  --pf-v5-c-button--m-link--Color: var(--ak-wine);
+  --pf-v5-c-button--m-link--hover--Color: var(--ak-wine);
+}
+
+/* Error and info messages in the app's tones */
+.pf-v5-c-alert.pf-m-danger,
+.pf-v5-c-alert.pf-m-warning,
+.pf-v5-c-alert.pf-m-info,
+.pf-v5-c-alert.pf-m-success {
+  border-radius: var(--ak-round-lg);
+  box-shadow: none;
+  border: 1px solid var(--ak-grey-lightest);
+}
+.pf-v5-c-alert.pf-m-danger {
+  background: var(--ak-wine-lightest);
+  border-color: #cfa8b5;
+}
+
+/* Phones: full-width card with a small gutter */
+@media (max-width: 600px) {
+  .pf-v5-c-login__container {
+    grid-template-columns: 1fr;
+    padding: 0 16px;
+  }
+}

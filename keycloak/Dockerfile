@@ -3,3 +3,5 @@
 # see paths inside the dev container.
 FROM quay.io/keycloak/keycloak:26.7.4
 COPY akpedia-realm.json /opt/keycloak/data/import/akpedia-realm.json
+# Login pages in Akpedia's look (realm loginTheme "akpedia").
+COPY themes/akpedia /opt/keycloak/themes/akpedia

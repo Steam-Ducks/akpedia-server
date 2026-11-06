@@ -65,7 +65,7 @@ akpedia-server/
 ├── .dockerignore
 ├── .gitignore
 ├── .env.example
-├── keycloak/                      # imagem do Keycloak + realm akpedia (akpedia-realm.json)
+├── keycloak/                      # imagem do Keycloak + realm akpedia (akpedia-realm.json) + tema de login (themes/akpedia)
 ├── mvnw / mvnw.cmd / .mvn/wrapper/ # Maven Wrapper
 ├── README.md
 └── src/
@@ -213,6 +213,7 @@ O que o realm `akpedia` traz:
 | `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` e o setor do usuário na claim `sector` |
 | `akpedia-server` | Cliente confidencial do back, com service account (`view-users` e `manage-users` do `realm-management`) para usar a Admin API |
 | Idioma | Telas em português (`pt-BR`), com inglês como opção |
+| Tema | `akpedia` nas telas de login, cadastro e senha (ver abaixo) |
 
 Os setores e as regras do CPF estão no User Profile do realm (no arquivo, dentro de
 `components` → `kc.user.profile.config`; no console, em *Realm settings* → *User profile*).
@@ -229,6 +230,19 @@ Os setores e as regras do CPF estão no User Profile do realm (no arquivo, dentr
 | `KEYCLOAK_DEV_ADMIN_PASSWORD`   | (sem default)               | Senha desse usuário. **Obrigatória**: sem ela o Keycloak não sobe |
 
 As quatro últimas só são lidas quando o realm é importado, ou seja, na primeira subida.
+
+#### Tema das telas de login
+
+As telas do Keycloak (login, cadastro, erros, troca de senha) usam o tema `akpedia`, em
+[`keycloak/themes/akpedia`](keycloak/themes/akpedia), com as cores, a fonte (Manrope), o logo e os
+campos e botões do akpedia-client. Ele herda o `keycloak.v2` e só troca o CSS
+(`login/resources/css/akpedia.css`), então todos os fluxos do Keycloak continuam funcionando.
+
+- Vai copiado para a imagem (`keycloak/Dockerfile`): depois de mudar o CSS, rode
+  `docker compose up -d --build keycloak`. Em modo dev o Keycloak não guarda cache de tema, então
+  basta recarregar a página.
+- Realm novo já vem com `loginTheme: akpedia`. Num realm que já existia, escolha o tema em
+  **Realm settings → Themes → Login theme** no console de administração.
 
 #### Usuário ADMIN inicial (só para desenvolvimento)
 
