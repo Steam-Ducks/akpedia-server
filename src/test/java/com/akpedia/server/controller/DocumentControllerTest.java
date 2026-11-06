@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -73,6 +74,8 @@ import com.akpedia.server.service.DocumentUploadService;
  * 201 with the stored metadata.
  */
 @WebMvcTest(controllers = DocumentController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 @Import(ApiExceptionHandler.class)
 class DocumentControllerTest {
 

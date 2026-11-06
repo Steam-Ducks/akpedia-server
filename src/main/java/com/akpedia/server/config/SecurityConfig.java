@@ -1,0 +1,72 @@
+package com.akpedia.server.config;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.web.SecurityFilterChain;
+
+/**
+ * Every {@code /api} route needs a Keycloak access token; reviewing documents also needs the
+ * {@code APPROVER} or {@code ADMIN} realm role.
+ *
+ * <p>The {@code /internal} routes are left to {@link InternalTokenFilter}: only the akpedia-ml
+ * worker calls them, with its shared token, never with a user's.
+ */
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    /** Realm roles that may see the review queue and approve or return documents. */
+    static final String[] REVIEWER_ROLES = {"APPROVER", "ADMIN"};
+
+    @Bean
+    public SecurityFilterChain apiSecurity(HttpSecurity http) throws Exception {
+        http
+                // Bearer tokens only, no cookies: there is no session for a forged request to ride on.
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/health", "/actuator/health/**", "/actuator/info", "/error").permitAll()
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/internal/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/documents/pending").hasAnyRole(REVIEWER_ROLES)
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/documents/*/approve", "/api/v1/documents/*/reject").hasAnyRole(REVIEWER_ROLES)
+                        .anyRequest().authenticated())
+                .oauth2ResourceServer(server -> server.jwt(jwt -> jwt.jwtAuthenticationConverter(realmRoles())));
+        return http.build();
+    }
+
+    /** Turns the token's realm roles ({@code realm_access.roles}) into {@code ROLE_*} authorities. */
+    static JwtAuthenticationConverter realmRoles() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(new RealmRolesConverter());
+        return converter;
+    }
+
+    static final class RealmRolesConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
+
+        @Override
+        public Collection<GrantedAuthority> convert(Jwt jwt) {
+            Map<String, Object> realmAccess = jwt.getClaimAsMap("realm_access");
+            if (realmAccess == null || !(realmAccess.get("roles") instanceof Collection<?> roles)) {
+                return List.of();
+            }
+            return roles.stream()
+                    .map(role -> (GrantedAuthority) new SimpleGrantedAuthority("ROLE_" + role))
+                    .toList();
+        }
+    }
+}

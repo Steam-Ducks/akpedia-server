@@ -19,6 +19,7 @@ import java.time.OffsetDateTime;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -38,6 +39,8 @@ import com.akpedia.server.service.DocumentReviewService;
  * each refusal is answered.
  */
 @WebMvcTest(controllers = DocumentReviewController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 class DocumentReviewControllerTest {
 
     private static final OffsetDateTime DECIDED_AT = OffsetDateTime.parse("2026-10-20T14:00:00Z");
