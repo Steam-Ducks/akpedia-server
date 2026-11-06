@@ -36,6 +36,7 @@ import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -74,18 +75,21 @@ public class DocumentController {
     private final DocumentListService listService;
     private final DocumentAnalysisService analysisService;
     private final DocumentSubmissionService submissionService;
+    private final CurrentUser currentUser;
 
     public DocumentController(
             DocumentUploadService uploadService,
             DocumentFileService fileService,
             DocumentListService listService,
             DocumentAnalysisService analysisService,
-            DocumentSubmissionService submissionService) {
+            DocumentSubmissionService submissionService,
+            CurrentUser currentUser) {
         this.uploadService = uploadService;
         this.fileService = fileService;
         this.listService = listService;
         this.analysisService = analysisService;
         this.submissionService = submissionService;
+        this.currentUser = currentUser;
     }
 
     @Operation(
@@ -109,9 +113,9 @@ public class DocumentController {
     }
 
     @Operation(
-            summary = "List the author's own submissions and where each one stands",
+            summary = "List the logged-in user's own submissions and where each one stands",
             description = """
-                    Answers the documents uploaded by `creatorId`, most recently submitted first, each with
+                    Answers the documents the logged-in user uploaded, most recently submitted first, each with
                     a status derived for the author rather than the stored one:
 
                     - `UNDER_REVIEW`: waiting on an approver, whatever the indexing is doing;
@@ -129,22 +133,14 @@ public class DocumentController {
                     that is still a draft, or that was archived, is not a submission and is not listed.
 
                     `categoryIds` narrows the listing to one or more categories; with none given, every
-                    category is listed.
-
-                    Without `creatorId` the configured default user is used, since this sprint has no
-                    login (see the README).""")
+                    category is listed.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "One page of submissions; the page may be empty."),
         @ApiResponse(responseCode = "400", description = "page or size is out of bounds.",
-                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "No user exists with the given creatorId.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @GetMapping("/documents/submissions")
     public PageResponse<SubmissionSummary> submissions(
-            @RequestParam(required = false)
-            @Parameter(description = "Author whose submissions to list. Defaults to the configured user.")
-            Long creatorId,
             @RequestParam(required = false)
             @Parameter(description = "Zero-based page. Defaults to 0.")
             Integer page,
@@ -155,7 +151,7 @@ public class DocumentController {
             @Parameter(description = "One or more category ids to filter by. Defaults to every category.")
             List<Long> categoryIds) {
 
-        return submissionService.submissions(creatorId, page, size, categoryIds);
+        return submissionService.submissions(currentUser.id(), page, size, categoryIds);
     }
 
     @Operation(
@@ -240,12 +236,14 @@ public class DocumentController {
                     in the meantime, which is how the approver reads it.
 
                     `suggestedCategoryId` and `categoryConfidence` record the category the classifier
-                    suggested and how sure it was, for the approver to confirm or correct.""")
+                    suggested and how sure it was, for the approver to confirm or correct.
+
+                    The document is attributed to the logged-in user.""")
     @ApiResponses({
         @ApiResponse(responseCode = "201", description = "Document converted and stored, awaiting approval."),
         @ApiResponse(responseCode = "400", description = "Invalid request (empty file, missing parameter, or invalid parameter).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "The specified category, suggested category or user does not exist.",
+        @ApiResponse(responseCode = "404", description = "The specified category or suggested category does not exist.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -262,10 +260,6 @@ public class DocumentController {
             @Schema(type = "string", format = "binary", description = "File to upload in any supported format.")
             MultipartFile file,
             @RequestParam("categoryId") Long categoryId,
-            @RequestParam(value = "creatorId", required = false)
-            @Parameter(description = "Author of the document. Optional while there is no registration "
-                    + "or login: omitting it attributes the document to the configured default user.")
-            Long creatorId,
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "description", required = false) String description,
             @RequestParam(value = "suggestedCategoryId", required = false)
@@ -277,7 +271,7 @@ public class DocumentController {
 
         Document document = uploadService.upload(
                 file.getBytes(), file.getOriginalFilename(), file.getContentType(),
-                categoryId, creatorId, name, description, suggestedCategoryId, categoryConfidence);
+                categoryId, currentUser.id(), name, description, suggestedCategoryId, categoryConfidence);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(DocumentUploadResponse.from(document));
     }

@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.akpedia.server.client.GotenbergClient;
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.DocumentFile;
@@ -41,21 +40,18 @@ public class DocumentUploadService {
     private final CategoryRepository categories;
     private final UserRepository users;
     private final GotenbergClient gotenberg;
-    private final DefaultUserProvider defaultUser;
 
     public DocumentUploadService(
             DocumentRepository documents,
             DocumentFileRepository documentFiles,
             CategoryRepository categories,
             UserRepository users,
-            GotenbergClient gotenberg,
-            DefaultUserProvider defaultUser) {
+            GotenbergClient gotenberg) {
         this.documents = documents;
         this.documentFiles = documentFiles;
         this.categories = categories;
         this.users = users;
         this.gotenberg = gotenberg;
-        this.defaultUser = defaultUser;
     }
 
     /**
@@ -65,9 +61,7 @@ public class DocumentUploadService {
      * @param filename    original file name, used to derive the stored name and pick the LibreOffice filter
      * @param contentType media type the caller sent for the upload
      * @param categoryId  category the document is filed under
-     * @param creatorId   user the document is attributed to; when {@code null}, the document falls
-     *                    back to the configured default user, which is the only author this sprint
-     *                    has while there is no registration or login
+     * @param creatorId   user the document is attributed to: the logged-in user
      * @param name        display name; falls back to {@code filename} with a {@code .pdf} extension when blank
      * @param description optional description
      * @param suggestedCategoryId category the classifier suggested for the document, if any; like
@@ -97,12 +91,8 @@ public class DocumentUploadService {
                 ? null
                 : categories.findById(suggestedCategoryId)
                         .orElseThrow(() -> new CategoryNotFoundException(suggestedCategoryId));
-        // No registration or login yet, so an upload that names no creator is attributed to the
-        // seeded default user instead of being refused. The id was resolved at startup, so this
-        // cannot be the reason the lookup below fails.
-        Long authorId = creatorId != null ? creatorId : defaultUser.userId();
-        User creator = users.findById(authorId)
-                .orElseThrow(() -> new UserNotFoundException(authorId));
+        User creator = users.findById(creatorId)
+                .orElseThrow(() -> new UserNotFoundException(creatorId));
 
         byte[] pdf = DocumentFormats.isAlreadyPdf(filename, contentType, content)
                 ? content

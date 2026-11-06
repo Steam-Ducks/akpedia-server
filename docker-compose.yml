@@ -135,8 +135,6 @@ services:
       # stays the public URL the browser logs in at.
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_URL:-http://localhost:8180}/realms/akpedia
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/akpedia/protocol/openid-connect/certs
-      # Default user, temporary while there is no registration or login.
-      DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL:-aprovador@akpedia.local}
       # Embedding service (akpedia-ml). It comes up through its own repository's
       # compose, on a separate network: host-gateway reaches the port it publishes
       # on the developer's machine.

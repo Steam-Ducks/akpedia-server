@@ -38,6 +38,7 @@ import org.springframework.http.MediaType;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.DocumentArchivedException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -98,6 +99,9 @@ class DocumentFileHttpTest {
 
     @MockBean
     private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private CurrentUser currentUser;
 
     private final HttpClient http = HttpClient.newHttpClient();
     private byte[] pdf;

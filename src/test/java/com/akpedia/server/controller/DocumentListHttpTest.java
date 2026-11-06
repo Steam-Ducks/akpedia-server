@@ -28,6 +28,7 @@ import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.dto.PendingDocument.CategoryRef;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -59,6 +60,9 @@ class DocumentListHttpTest {
 
     @MockBean
     private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private CurrentUser currentUser;
 
     @Test
     @DisplayName("GET /api/v1/documents answers each document with the eight agreed fields")

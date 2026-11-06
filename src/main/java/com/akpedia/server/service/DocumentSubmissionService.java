@@ -8,15 +8,12 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
-import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.repository.DocumentRepository;
-import com.akpedia.server.repository.UserRepository;
 
 /**
  * Lists an author's own documents, so they can tell what is already available to colleagues and
@@ -43,34 +40,25 @@ public class DocumentSubmissionService {
     private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
 
     private final DocumentRepository documents;
-    private final UserRepository users;
-    private final DefaultUserProvider defaultUser;
 
-    public DocumentSubmissionService(
-            DocumentRepository documents,
-            UserRepository users,
-            DefaultUserProvider defaultUser) {
+    public DocumentSubmissionService(DocumentRepository documents) {
         this.documents = documents;
-        this.users = users;
-        this.defaultUser = defaultUser;
     }
 
     /**
      * One page of the author's submissions, most recently submitted first.
      *
-     * @param requestedCreatorId whose submissions to list; {@code null} falls back to the
-     *                           configured default user, the only author this sprint has
+     * @param creatorId          whose submissions to list: the logged-in user
      * @param requestedPage      zero-based page; {@code null} means the first
      * @param requestedSize      results per page; {@code null} means {@value #DEFAULT_SIZE}
      * @param categoryIds        one or more category ids to filter by; {@code null} or empty
      *                           means every category
      * @return the page, with the totals a screen needs to page through it
      * @throws InvalidDocumentListRequestException if page or size are outside their bounds
-     * @throws UserNotFoundException               if no user exists with the given id
      */
     @Transactional(readOnly = true)
     public PageResponse<SubmissionSummary> submissions(
-            Long requestedCreatorId, Integer requestedPage, Integer requestedSize, Collection<Long> categoryIds) {
+            Long creatorId, Integer requestedPage, Integer requestedSize, Collection<Long> categoryIds) {
 
         int page = requestedPage == null ? 0 : requestedPage;
         int size = requestedSize == null ? DEFAULT_SIZE : requestedSize;
@@ -81,12 +69,6 @@ public class DocumentSubmissionService {
             throw new InvalidDocumentListRequestException("size must be between 1 and %d.".formatted(MAX_SIZE));
         }
 
-        Long creatorId = requestedCreatorId == null ? defaultUser.userId() : requestedCreatorId;
-        // Checked so that a mistyped id answers 404 instead of an empty page, which would read as
-        // "you have submitted nothing" -- a different thing, and the one the author would believe.
-        if (!users.existsById(creatorId)) {
-            throw new UserNotFoundException(creatorId);
-        }
 
         boolean hasCategories = categoryIds != null && !categoryIds.isEmpty();
         Collection<Long> safeCategoryIds = hasCategories ? categoryIds : NO_CATEGORY_FILTER;

@@ -28,7 +28,6 @@ import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
@@ -66,8 +65,6 @@ class DocumentReviewFlowTest {
     @Autowired
     private UserRepository users;
     @Autowired
-    private DefaultUserProvider defaultUser;
-    @Autowired
     private ProcessingRetry retry;
 
     @MockBean
@@ -93,7 +90,7 @@ class DocumentReviewFlowTest {
     private Document pendingWithFile() {
         Category category = categories.findByName("Tecnico").orElseThrow();
         Document document = documents.save(new Document("manual-de-fluxo.pdf", "application/pdf", 8L,
-                category, users.findById(defaultUser.userId()).orElseThrow(), DocumentStatus.PENDING_APPROVAL));
+                category, users.findById(seededUserId()).orElseThrow(), DocumentStatus.PENDING_APPROVAL));
         created.add(document.getId());
         documentFiles.save(new DocumentFile(document, "%PDF-1.4".getBytes()));
         return document;
@@ -109,7 +106,7 @@ class DocumentReviewFlowTest {
         Long id = pendingWithFile().getId();
         Category corrected = categories.findByName("Qualidade").orElseThrow();
 
-        reviewService.approve(id, new ApproveDocumentRequest("Manual revisado", null, corrected.getId()));
+        reviewService.approve(id, seededUserId(), new ApproveDocumentRequest("Manual revisado", null, corrected.getId()));
 
         Document approved = reload(id);
         assertThat(approved.getStatus()).isEqualTo(DocumentStatus.APPROVED);
@@ -119,7 +116,7 @@ class DocumentReviewFlowTest {
         assertThat(approved.getReviewedAt()).isNotNull();
         // Reading the id of a lazy association does not need the session that loaded it.
         assertThat(approved.getCategory().getId()).isEqualTo(corrected.getId());
-        assertThat(approved.getApprover().getId()).isEqualTo(defaultUser.userId());
+        assertThat(approved.getApprover().getId()).isEqualTo(seededUserId());
 
         ArgumentCaptor<MapRecord<String, String, String>> record = ArgumentCaptor.captor();
         verify(stream).add(record.capture());
@@ -133,7 +130,7 @@ class DocumentReviewFlowTest {
     void failedApprovalPublishesNothing() {
         Long id = pendingWithFile().getId();
 
-        assertThatThrownBy(() -> reviewService.approve(id, new ApproveDocumentRequest("novo nome", null, -1L)))
+        assertThatThrownBy(() -> reviewService.approve(id, seededUserId(), new ApproveDocumentRequest("novo nome", null, -1L)))
                 .isInstanceOf(CategoryNotFoundException.class);
 
         Document untouched = reload(id);
@@ -150,7 +147,7 @@ class DocumentReviewFlowTest {
         given(stream.add(any(MapRecord.class)))
                 .willThrow(new RedisConnectionFailureException("Unable to connect to Redis"));
 
-        reviewService.approve(id, ApproveDocumentRequest.NONE);
+        reviewService.approve(id, seededUserId(), ApproveDocumentRequest.NONE);
 
         Document approved = reload(id);
         assertThat(approved.getStatus()).isEqualTo(DocumentStatus.APPROVED);
@@ -168,7 +165,7 @@ class DocumentReviewFlowTest {
         given(stream.add(any(MapRecord.class)))
                 .willThrow(new RedisConnectionFailureException("Unable to connect to Redis"))
                 .willReturn(null);
-        reviewService.approve(id, ApproveDocumentRequest.NONE);
+        reviewService.approve(id, seededUserId(), ApproveDocumentRequest.NONE);
 
         // Redis is back. A cutoff in the future stands in for the grace period having passed.
         int sent = retry.retry(OffsetDateTime.now().plusMinutes(1));
@@ -185,7 +182,7 @@ class DocumentReviewFlowTest {
     @DisplayName("a document already sent is not sent again by the retry")
     void retryLeavesWhatWasAlreadySent() {
         Long id = pendingWithFile().getId();
-        reviewService.approve(id, ApproveDocumentRequest.NONE);
+        reviewService.approve(id, seededUserId(), ApproveDocumentRequest.NONE);
         clearInvocations(stream);
 
         retry.retry(OffsetDateTime.now().plusMinutes(1));
@@ -209,5 +206,10 @@ class DocumentReviewFlowTest {
         assertThat(rejected.getReviewedAt()).isNotNull();
         assertThat(documentFiles.findByDocumentId(id)).isEmpty();
         verifyNoInteractions(stream);
+    }
+
+    /** Author and approver of these documents: the user seeded by V5, there on every database. */
+    private Long seededUserId() {
+        return users.findByEmail("aprovador@akpedia.local").orElseThrow().getId();
     }
 }

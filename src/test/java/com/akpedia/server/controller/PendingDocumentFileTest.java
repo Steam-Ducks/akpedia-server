@@ -28,6 +28,7 @@ import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.repository.DocumentFileRepository;
 import com.akpedia.server.repository.DocumentRepository;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -69,6 +70,9 @@ class PendingDocumentFileTest {
 
     @MockBean
     private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private CurrentUser currentUser;
 
     private void stored(DocumentStatus status, ProcessingStatus processingStatus) {
         User creator = new User("Ana", "ana@akpedia.test", new Sector("TI", null));

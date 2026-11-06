@@ -10,6 +10,7 @@ import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.dto.DocumentReviewResponse;
 import com.akpedia.server.dto.RejectDocumentRequest;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentReviewService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,9 +36,11 @@ public class DocumentReviewController {
     private static final String ERROR_SCHEMA = "application/json";
 
     private final DocumentReviewService reviewService;
+    private final CurrentUser currentUser;
 
-    public DocumentReviewController(DocumentReviewService reviewService) {
+    public DocumentReviewController(DocumentReviewService reviewService, CurrentUser currentUser) {
         this.reviewService = reviewService;
+        this.currentUser = currentUser;
     }
 
     @Operation(
@@ -53,7 +56,7 @@ public class DocumentReviewController {
                     server stopping right after the commit -- the approval stands and the document is sent
                     again by a retry that runs in the background.
 
-                    The approver is the configured default user while there is no login (see the README).""")
+                    The approver recorded is the logged-in user, who needs the APPROVER or ADMIN role.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Approved, and queued for indexing."),
         @ApiResponse(responseCode = "400", description = "The body is malformed, or `name` is blank or too long.",
@@ -67,7 +70,8 @@ public class DocumentReviewController {
     public DocumentReviewResponse approve(
             @PathVariable("id") Long id,
             @RequestBody(required = false) @Valid ApproveDocumentRequest corrections) {
-        return reviewService.approve(id, corrections != null ? corrections : ApproveDocumentRequest.NONE);
+        return reviewService.approve(
+                id, currentUser.id(), corrections != null ? corrections : ApproveDocumentRequest.NONE);
     }
 
     @Operation(
