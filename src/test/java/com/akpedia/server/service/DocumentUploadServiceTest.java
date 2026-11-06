@@ -69,7 +69,7 @@ class DocumentUploadServiceTest {
     void setUp() {
         service = new DocumentUploadService(documents, documentFiles, categories, users, gotenberg, defaultUser);
         category = new Category("Manuais", "manuais tecnicos");
-        creator = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", "setor de TI"));
+        creator = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
     }
 
     @Test

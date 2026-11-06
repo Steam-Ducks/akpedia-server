@@ -86,7 +86,7 @@ class DefaultUserProviderTest {
     }
 
     private User seededUser(Long id) {
-        User user = new User("Aprovador Padrao", EMAIL, "placeholder-sem-login",
+        User user = new User("Aprovador Padrao", EMAIL,
                 new Sector("Engenharia", "setor padrao"));
         ReflectionTestUtils.setField(user, "id", id);
         return user;

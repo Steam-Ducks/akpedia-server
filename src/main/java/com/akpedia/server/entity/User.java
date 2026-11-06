@@ -15,6 +15,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 /**
  * System user. The sector indirectly determines their permissions per category.
+ *
+ * <p>The account itself, password included, lives in Keycloak; this row mirrors it, linked by
+ * {@link #getKeycloakId()}, so documents and approvals can point at a user.
  */
 @Entity
 @Table(name = "users")
@@ -30,8 +33,8 @@ public class User {
     @Column(name = "email", nullable = false, length = 255, unique = true)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 255)
-    private String passwordHash;
+    @Column(name = "keycloak_id", length = 36, unique = true)
+    private String keycloakId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "sector_id", nullable = false)
@@ -51,10 +54,9 @@ public class User {
     protected User() {
     }
 
-    public User(String name, String email, String passwordHash, Sector sector) {
+    public User(String name, String email, Sector sector) {
         this.name = name;
         this.email = email;
-        this.passwordHash = passwordHash;
         this.sector = sector;
     }
 
@@ -78,12 +80,13 @@ public class User {
         this.email = email;
     }
 
-    public String getPasswordHash() {
-        return passwordHash;
+    /** Id of the Keycloak account (the token's {@code sub}); {@code null} for a user never logged in. */
+    public String getKeycloakId() {
+        return keycloakId;
     }
 
-    public void setPasswordHash(String passwordHash) {
-        this.passwordHash = passwordHash;
+    public void setKeycloakId(String keycloakId) {
+        this.keycloakId = keycloakId;
     }
 
     public Sector getSector() {

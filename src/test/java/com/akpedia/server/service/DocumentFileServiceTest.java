@@ -63,7 +63,7 @@ class DocumentFileServiceTest {
 
     private static Document document(String name, String mimeType, DocumentStatus status, ProcessingStatus processingStatus) {
         Category category = new Category("Manuais", "manuais tecnicos");
-        User creator = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", "setor de TI"));
+        User creator = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
         Document document = new Document(name, mimeType, (long) PDF_BYTES.length, category, creator, status);
         document.setProcessingStatus(processingStatus);
         ReflectionTestUtils.setField(document, "id", 7L);

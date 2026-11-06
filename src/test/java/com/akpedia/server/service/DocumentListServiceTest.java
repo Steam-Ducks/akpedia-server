@@ -55,7 +55,7 @@ class DocumentListServiceTest {
     }
 
     private static Document document(long id) {
-        User creator = new User("Mariana Costa", "mariana@akpedia.test", "hash", new Sector("Engenharia", null));
+        User creator = new User("Mariana Costa", "mariana@akpedia.test", new Sector("Engenharia", null));
         Document document = new Document(
                 "manual.pdf", "application/pdf", 1024L, new Category("Manuais", null), creator, DocumentStatus.DRAFT);
         ReflectionTestUtils.setField(document, "id", id);

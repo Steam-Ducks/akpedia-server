@@ -105,7 +105,7 @@ class DocumentControllerTest {
     private static Document document() {
         Sector sector = new Sector("TI", "setor de TI");
         Category category = new Category("Manuais", "manuais tecnicos");
-        User creator = new User("Ana", "ana@akpedia.test", "hash", sector);
+        User creator = new User("Ana", "ana@akpedia.test", sector);
         Document document = new Document(
                 "relatorio.pdf", "application/pdf", 2048L, category, creator, DocumentStatus.PENDING_APPROVAL);
         ReflectionTestUtils.setField(category, "id", 10L);

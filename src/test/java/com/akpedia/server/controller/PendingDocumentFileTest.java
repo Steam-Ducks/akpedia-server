@@ -71,7 +71,7 @@ class PendingDocumentFileTest {
     private DocumentAnalysisService analysisService;
 
     private void stored(DocumentStatus status, ProcessingStatus processingStatus) {
-        User creator = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", null));
+        User creator = new User("Ana", "ana@akpedia.test", new Sector("TI", null));
         Document document = new Document(
                 "relatorio.pdf", MediaType.APPLICATION_PDF_VALUE, (long) PDF_BYTES.length,
                 new Category("Manuais", null), creator, status);

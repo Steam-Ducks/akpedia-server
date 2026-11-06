@@ -70,7 +70,7 @@ class DocumentReviewServiceTest {
     void setUp() {
         service = new DocumentReviewService(documents, documentFiles, categories, users, defaultUser, events);
         original = category(3L, "Tecnico");
-        approver = new User("Aprovador", "aprovador@akpedia.local", "hash", new Sector("Engenharia", null));
+        approver = new User("Aprovador", "aprovador@akpedia.local", new Sector("Engenharia", null));
         ReflectionTestUtils.setField(approver, "id", APPROVER_ID);
     }
 
@@ -81,7 +81,7 @@ class DocumentReviewServiceTest {
     }
 
     private Document stored(DocumentStatus status) {
-        User author = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", null));
+        User author = new User("Ana", "ana@akpedia.test", new Sector("TI", null));
         Document document = new Document("manual.pdf", "application/pdf", 1024L, original, author, status);
         document.setDescription("descricao do autor");
         ReflectionTestUtils.setField(document, "id", DOCUMENT_ID);

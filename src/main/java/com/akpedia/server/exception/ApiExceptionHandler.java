@@ -271,6 +271,16 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("user_not_found", e.getMessage()));
     }
 
+    /**
+     * 403: the user is logged in, but their Keycloak account has no email or no sector, so there
+     * is no row to attribute their documents to. Logging in again will not change that.
+     */
+    @ExceptionHandler(IncompleteAccountException.class)
+    public ResponseEntity<ApiErrorResponse> handleIncompleteAccount(IncompleteAccountException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiErrorResponse("incomplete_account", e.getMessage()));
+    }
+
     /** 503: Gotenberg is down, unreachable, or past the read timeout. */
     @ExceptionHandler(PdfConversionUnavailableException.class)
     public ResponseEntity<ApiErrorResponse> handlePdfConversionUnavailable(PdfConversionUnavailableException e) {

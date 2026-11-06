@@ -65,7 +65,7 @@ class DocumentSubmissionServiceTest {
     void setUp() {
         service = new DocumentSubmissionService(documents, users, defaultUser);
         category = new Category("Manuais", "manuais tecnicos");
-        author = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", "setor de TI"));
+        author = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
         ReflectionTestUtils.setField(author, "id", AUTHOR_ID);
     }
 
