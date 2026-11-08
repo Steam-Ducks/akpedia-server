@@ -279,6 +279,22 @@ public class ApiExceptionHandler {
     }
 
     /**
+     * 400: the admin's new version of the terms has a field the server does not take. Same code
+     * as a blank title or content, which bean validation refuses.
+     */
+    @ExceptionHandler(InvalidTermsException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidTerms(InvalidTermsException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
+    /** 409: the admin's new version of the terms repeats one published before. */
+    @ExceptionHandler(TermsVersionExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleTermsVersionExists(TermsVersionExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("terms_version_exists", e.getMessage()));
+    }
+
+    /**
      * 403: the user is logged in, but their Keycloak account has no email or no sector, so there
      * is no row to attribute their documents to. Logging in again will not change that.
      */

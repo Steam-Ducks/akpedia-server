@@ -21,7 +21,9 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Answers 403 {@code terms_not_accepted} on every {@code /api} route until the user accepted the
- * current terms of use. The two routes the terms screen needs stay open.
+ * current terms of use. The routes the terms screen needs stay open: reading the terms, and
+ * accepting or declining them. So does deleting one's account: a user may leave without
+ * accepting.
  *
  * <p>Runs inside the security chain, after the token was checked, so a request without one still
  * gets its 401. Not a bean on purpose: as one, Spring Boot would also register it as a filter of
@@ -31,6 +33,8 @@ public class TermsGateFilter extends OncePerRequestFilter {
 
     static final String TERMS_PATH = "/api/v1/terms";
     static final String ACCEPT_PATH = "/api/v1/terms/accept";
+    static final String DECLINE_PATH = "/api/v1/terms/decline";
+    static final String ME_PATH = "/api/v1/me";
 
     private final TermsService terms;
     private final ObjectMapper json;
@@ -48,7 +52,8 @@ public class TermsGateFilter extends OncePerRequestFilter {
         }
         String method = request.getMethod();
         return (HttpMethod.GET.matches(method) && path.equals(TERMS_PATH))
-                || (HttpMethod.POST.matches(method) && path.equals(ACCEPT_PATH));
+                || (HttpMethod.POST.matches(method) && (path.equals(ACCEPT_PATH) || path.equals(DECLINE_PATH)))
+                || (HttpMethod.DELETE.matches(method) && path.equals(ME_PATH));
     }
 
     @Override

@@ -24,8 +24,9 @@ public class TermsVersion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "version", nullable = false, unique = true, updatable = false)
-    private Integer version;
+    /** What the admin called it, such as {@code 1.0}; unique in any case. Not an order: see {@code publishedAt}. */
+    @Column(name = "version", nullable = false, unique = true, length = 20, updatable = false)
+    private String version;
 
     @Column(name = "title", nullable = false, length = 200, updatable = false)
     private String title;
@@ -38,6 +39,7 @@ public class TermsVersion {
     @JoinColumn(name = "published_by_id", updatable = false)
     private User publishedBy;
 
+    /** The newest published version is the current one. */
     @CreationTimestamp
     @Column(name = "published_at", nullable = false, updatable = false)
     private OffsetDateTime publishedAt;
@@ -45,7 +47,7 @@ public class TermsVersion {
     protected TermsVersion() {
     }
 
-    public TermsVersion(int version, String title, String content, User publishedBy) {
+    public TermsVersion(String version, String title, String content, User publishedBy) {
         this.version = version;
         this.title = title;
         this.content = content;
@@ -56,7 +58,7 @@ public class TermsVersion {
         return id;
     }
 
-    public int getVersion() {
+    public String getVersion() {
         return version;
     }
 

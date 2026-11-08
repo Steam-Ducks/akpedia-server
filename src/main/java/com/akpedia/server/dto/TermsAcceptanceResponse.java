@@ -6,6 +6,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 /** Which version of the terms a user accepted, and when. */
 public record TermsAcceptanceResponse(
-        int version,
+        String version,
         @JsonProperty("accepted_at") OffsetDateTime acceptedAt) {
 }

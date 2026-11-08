@@ -8,11 +8,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * A published version of the terms of use.
  *
+ * @param version     what the admin called this version, such as {@code 1.0}
  * @param content     plain text, paragraphs separated by blank lines; never HTML
  * @param publishedBy name of the admin who published it, or {@code null}
  */
 public record TermsVersionResponse(
-        int version,
+        String version,
         String title,
         String content,
         @JsonProperty("published_at") OffsetDateTime publishedAt,

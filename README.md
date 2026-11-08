@@ -327,11 +327,12 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 |------|-----------|-----------|
 | `GET /api/v1/terms` | qualquer usuário logado | `{current, accepted}`: os termos atuais (`version`, `title`, `content`, `published_at`, `published_by`) e a última versão que o usuário aceitou (`version`, `accepted_at`). Cada um é `null` se não houver |
 | `POST /api/v1/terms/accept` | qualquer usuário logado | `{"version": n}`, a versão que o usuário viu. **409** `terms_changed` se ela não for mais a atual |
+| `POST /api/v1/terms/decline` | qualquer usuário logado | `{"version": n}`: registra na auditoria que o usuário recusou (**204**). Sem aceitar a versão atual ninguém usa o sistema (um aceite antigo não vale), então o front oferece só aceitar ou recusar e excluir a conta: depois desta rota, chama `DELETE /api/v1/me` e faz o logout |
 | `GET /api/v1/admin/terms` | `ADMIN` | todas as versões publicadas, da mais nova para a mais antiga |
 | `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**). `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
 
 - **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
-  duas primeiras acima, responde **403** `terms_not_accepted`, inclusive as de admin: quem
+  três primeiras acima e `DELETE /api/v1/me` (excluir a conta), responde **403** `terms_not_accepted`, inclusive as de admin: quem
   publica também aceita. A conferência vem depois do login e dos papéis, então sem token
   continua sendo **401**, e sem o papel, **403** sem esse código. `/health`, Swagger e
   `/internal` não passam por ela.
@@ -340,6 +341,8 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 - **Histórico**: `terms_versions` e `terms_acceptances` (migration `V8__terms_of_use.sql`) só
   recebem inserções. Uma versão publicada nunca muda (uma mudança é uma versão nova), e cada
   aceite fica guardado com o usuário, a versão e quando, mesmo que ele aceite de novo.
+  Aceite, recusa e publicação também vão para a [auditoria](#auditoria).
+
 #### Auditoria
 
 `audit_logs` guarda dois tipos de registro, com o usuário (id do Keycloak, email e a linha em
