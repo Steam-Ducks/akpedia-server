@@ -19,8 +19,10 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 
+import com.akpedia.server.security.DeletedAccountFilter;
 import com.akpedia.server.security.RequestAuditFilter;
 import com.akpedia.server.security.TermsGateFilter;
+import com.akpedia.server.service.AccountDeletionLog;
 import com.akpedia.server.service.AuditService;
 import com.akpedia.server.service.TermsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,6 +62,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(server -> server.jwt(jwt -> jwt.jwtAuthenticationConverter(realmRoles())))
+                // Right after the token check: a deleted account's token is refused before anything else.
+                .addFilterAfter(new DeletedAccountFilter(deletions, json), BearerTokenAuthenticationFilter.class)
                 // After the role checks: someone without the role gets 403 for that, not for the terms.
                 .addFilterAfter(new TermsGateFilter(terms, json), AuthorizationFilter.class)
                 // Before the token check, so it sees the 401s too, and the user once it returns.

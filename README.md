@@ -374,6 +374,65 @@ guardado até perto de vencer.
 | `KEYCLOAK_SERVER_CLIENT_ID`     | `akpedia-server`            | Cliente confidencial cuja service account é usada |
 | `KEYCLOAK_SERVER_CLIENT_SECRET` | `akpedia-dev-server-secret` | Secret desse cliente; o mesmo do import do realm |
 
+#### Excluir a conta
+
+`DELETE /api/v1/me` (**204**) exclui a conta de quem chama, mesmo sem ter aceitado os termos.
+Nesta ordem:
+
+1. Grava a exclusão no **log de exclusões**, antes de tudo, para ela nunca se perder.
+2. Apaga a conta no Keycloak (se ela já não existe, segue).
+3. Anonimiza a linha em `users` em vez de apagá-la (os documentos e os aceites dos termos
+   apontam para ela): nome `Usuário removido`, e-mail `removido-<id>@removido.invalid`, sem
+   `keycloak_id`, inativa, com `deleted_at`. O `id` da linha fica: é o identificador interno,
+   imutável, do usuário excluído.
+4. Pseudonimiza a auditoria: o que ele fez continua lá (a ação, o que foi afetado, as datas, o id
+   do Keycloak e a linha em `users`), sem dado pessoal. Os registros dele perdem e-mail, IP e user
+   agent; os que outros gravaram sobre ele (`USER_CREATED`, `USER_ROLES_CHANGED`, `USER_ENABLED`,
+   `USER_DISABLED`) perdem o `target_email` e ficam com o `target_keycloak_id`; e as requisições
+   que buscaram o e-mail dele (como `GET /api/v1/admin/users?search=`) perdem a query string. A
+   tela de auditoria mostra `user_pseudonym` (`Usuário removido #<id>`) no lugar do nome.
+5. Registra `ACCOUNT_DELETED`, também sem e-mail nem IP.
+
+A conta some como se nunca tivesse existido: para voltar, um admin cadastra o usuário de novo
+(o mesmo e-mail funciona), e ele ganha outra conta no Keycloak e outra linha em `users`.
+
+**409** `last_admin` se ele é o único `ADMIN` ativo; **502** `keycloak_unavailable` se o Keycloak
+falha (a exclusão já está no log: tentar de novo, ou o próximo replay, termina). O token do
+usuário excluído ainda vale por alguns minutos: até vencer, toda rota responde **401**
+`account_deleted`, e nada pessoal dele é gravado.
+
+O log é um arquivo, uma linha JSON por exclusão, só com ids (é guardado para sempre):
+
+```json
+{"time":"2026-11-08T12:00:00Z","keycloak_id":"0db3d7d8-...","user_id":42,"deleted_by":"self"}
+```
+
+| Variável | Default | Para que serve |
+|----------|---------|----------------|
+| `ACCOUNT_DELETION_LOG_FILE` | `./data/account-deletions.jsonl` | O arquivo. No compose, `/app/data/account-deletions.jsonl`, no volume `account_deletions` |
+| `ACCOUNT_DELETION_REPLAY_ON_STARTUP` | `true` | Refaz as exclusões a cada start |
+| `ACCOUNT_DELETION_REPLAY_RETRY_DELAY` | `15s` | Espera entre tentativas, enquanto o Keycloak sobe (até 10) |
+
+##### Restaurando um backup
+
+O realm do Keycloak e o banco do app estão no mesmo Postgres, então restaurar um backup traz de
+volta as contas excluídas depois dele. Por isso o log fica **fora do banco** (e fora dos backups
+dele): não restaure o volume `account_deletions` junto com o Postgres.
+
+Depois de restaurar, o servidor refaz o log sozinho ao subir, em segundo plano e tentando de novo
+enquanto o Keycloak não responde: apaga no Keycloak cada conta que voltou e anonimiza de novo a
+linha em `users` (a que ainda tem aquele `keycloak_id`, ou a mesma linha ainda não excluída), e
+pseudonimiza de novo a auditoria. Contas que continuam excluídas ficam como estão. No log do
+servidor sai um resumo: `N deletions replayed, M restored accounts deleted again`.
+
+Para rodar na hora, sem reiniciar:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/account-deletions/replay -H "Authorization: Bearer $TOKEN"
+# {"entries": 3, "deleted_again": 1}
+```
+
+`entries` é quantas exclusões o log tem; `deleted_again`, quantas tinham voltado (só `ADMIN`).
 
 #### Auditoria
 

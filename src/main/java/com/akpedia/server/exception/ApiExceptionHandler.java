@@ -334,6 +334,20 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("cannot_disable_self", e.getMessage()));
     }
 
+    /** 409: the only enabled admin would delete their own account. */
+    @ExceptionHandler(LastAdminException.class)
+    public ResponseEntity<ApiErrorResponse> handleLastAdmin(LastAdminException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("last_admin", e.getMessage()));
+    }
+
+    /** 500: the deletion log could not be written, so nothing was deleted. */
+    @ExceptionHandler(AccountDeletionLogException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccountDeletionLog(AccountDeletionLogException e) {
+        log.error("Could not write the account deletion log", e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiErrorResponse("account_deletion_failed", e.getMessage()));
+    }
+
     /** 400: the admin's new user is missing a field, or has one Keycloak refused. */
     @ExceptionHandler(InvalidUserException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidUser(InvalidUserException e) {

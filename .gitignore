@@ -24,3 +24,6 @@ target/
 # SO
 .DS_Store
 Thumbs.db
+
+# Account deletion log (akpedia.account-deletion.log-file)
+data/

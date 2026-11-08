@@ -178,6 +178,11 @@ services:
       # Shared secret of the /internal routes; the akpedia-ml compose falls back to the same
       # development value, so the worker can call back with no .env on either side.
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-akpedia-dev-internal-token}
+      # Log of deleted accounts, replayed after a database restore. On its own volume, so it
+      # survives the container and is not part of the Postgres backups.
+      ACCOUNT_DELETION_LOG_FILE: /app/data/account-deletions.jsonl
+    volumes:
+      - account_deletions:/app/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -186,6 +191,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  account_deletions:
 
 networks:
   # Shared with the akpedia-ml compose, which declares it as external. Created here,

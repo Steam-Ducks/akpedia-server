@@ -23,6 +23,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 @Table(name = "users")
 public class User {
 
+    /** The name a deleted user's row is left with. */
+    public static final String DELETED_NAME = "Usuário removido";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -50,6 +53,9 @@ public class User {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
+
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
 
     protected User() {
     }
@@ -111,5 +117,24 @@ public class User {
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    /** When the user deleted their account; {@code null} while it exists. */
+    public OffsetDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    /**
+     * What is left once the user deleted their account: no name, email or Keycloak link. The row
+     * stays, since documents and terms acceptances point at it.
+     */
+    public void anonymize(OffsetDateTime when) {
+        this.name = DELETED_NAME;
+        this.email = "removido-%d@removido.invalid".formatted(id);
+        this.keycloakId = null;
+        this.active = false;
+        if (deletedAt == null) {
+            this.deletedAt = when;
+        }
     }
 }

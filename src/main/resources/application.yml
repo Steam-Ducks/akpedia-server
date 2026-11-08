@@ -87,6 +87,14 @@ akpedia:
       realm: ${KEYCLOAK_REALM:akpedia}
       client-id: ${KEYCLOAK_SERVER_CLIENT_ID:akpedia-server}
       client-secret: ${KEYCLOAK_SERVER_CLIENT_SECRET:akpedia-dev-server-secret}
+  account-deletion:
+    # Every deleted account, one JSON line each (ids only, kept forever). Outside the database on
+    # purpose: a restored backup brings deleted accounts back, and this file deletes them again.
+    # Keep it out of the database backups.
+    log-file: ${ACCOUNT_DELETION_LOG_FILE:./data/account-deletions.jsonl}
+    # Replays the file on every start, in the background, retrying while Keycloak comes up.
+    replay-on-startup: ${ACCOUNT_DELETION_REPLAY_ON_STARTUP:true}
+    replay-retry-delay: ${ACCOUNT_DELETION_REPLAY_RETRY_DELAY:15s}
   gotenberg:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}

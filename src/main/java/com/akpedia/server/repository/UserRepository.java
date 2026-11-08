@@ -1,6 +1,7 @@
 package com.akpedia.server.repository;
 
 import com.akpedia.server.entity.User;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -18,4 +19,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT u.id FROM User u WHERE u.keycloakId = :keycloakId")
     Optional<Long> findIdByKeycloakId(@Param("keycloakId") String keycloakId);
 
+    /**
+     * The row of an account deleted from the log: still linked to it, or, after a backup was
+     * restored over the deletion, the same row not yet deleted and linked to no other account.
+     */
+    @Query("""
+            SELECT u FROM User u WHERE u.keycloakId = :keycloakId
+            OR (u.id = :userId AND u.deletedAt IS NULL AND (u.keycloakId IS NULL OR u.keycloakId = :keycloakId))""")
+    List<User> findDeletedAccountRows(@Param("keycloakId") String keycloakId, @Param("userId") Long userId);
 }
