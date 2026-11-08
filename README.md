@@ -23,7 +23,9 @@ docker compose up --build
 
 - API disponível em `http://localhost:8080`
 - Postgres exposto em `localhost:5432` (db `akpedia`, user/senha `akpedia`)
-- Keycloak em `http://localhost:8180` (ver [Autenticação (Keycloak)](#autenticação-keycloak)).
+- Keycloak em `http://localhost/auth`, atrás do nginx (ver [Autenticação (Keycloak)](#autenticação-keycloak)).
+- nginx em `http://localhost`: o endereço único do app (ver [Entrada única (nginx)](#entrada-única-nginx)).
+  Para ele mandar a API para o serviço `app` em vez do dev container, defina `SERVER_UPSTREAM=app:8080`.
   Ele **exige** o `KEYCLOAK_DEV_ADMIN_PASSWORD` no `.env`: sem ele, o container sai com erro.
 
 Para parar: `docker compose down` (ou `docker compose down -v` para apagar os dados do banco).
@@ -182,9 +184,26 @@ A aplicação lê as configurações de conexão a partir de variáveis de ambie
 
 ### Autenticação (Keycloak)
 
-O login, o cadastro e os papéis dos usuários ficam no [Keycloak](https://www.keycloak.org/), que
+O login, as contas e os papéis dos usuários ficam no [Keycloak](https://www.keycloak.org/), que
 sobe no `docker-compose.yml` como serviço `keycloak` (imagem `quay.io/keycloak/keycloak:26.7.4`,
-em modo dev), publicado em `http://localhost:8180`.
+em modo dev), servido em `/auth` (`KC_HTTP_RELATIVE_PATH`) atrás do nginx: `http://localhost/auth`.
+Ele não publica porta própria; entre containers, responde em `keycloak:8080/auth`.
+
+#### Entrada única (nginx)
+
+O serviço `nginx` ([`nginx/`](nginx/)) deixa o front, a API e o Keycloak no mesmo endereço,
+`http://localhost` (porta em `AKPEDIA_HTTP_PORT`), como na POC do Keycloak:
+
+| Caminho              | Vai para                                | Variável            | Default                     |
+|----------------------|-----------------------------------------|---------------------|-----------------------------|
+| `/auth/`             | Keycloak                                | `KEYCLOAK_UPSTREAM` | `keycloak:8080`             |
+| `/api/`, `/health`   | `akpedia-server`                        | `SERVER_UPSTREAM`   | `akpedia-devcontainer:8080` |
+| `/`                  | `akpedia-client` (Vite, com HMR, em dev) | `CLIENT_UPSTREAM`   | `akpedia-devcontainer:5173` |
+
+Os defaults servem para o dev container (`akpedia run`). O nginx resolve os nomes a cada
+requisição, então sobe mesmo com o dev container parado (e responde 502 até ele subir). A
+configuração vai copiada para a imagem, como a do Keycloak: depois de editá-la, rode
+`docker compose up -d --build nginx`.
 
 ```bash
 cp .env.example .env              # e preencha KEYCLOAK_DEV_ADMIN_PASSWORD
@@ -200,7 +219,7 @@ docker compose up -d keycloak     # sobe também o db e cria o banco keycloak
   como volume, porque o dev container usa o Docker do host, que não enxerga os caminhos de
   dentro dele. Para aplicar uma mudança no arquivo, apague o realm no console de administração
   (ou o banco `keycloak`) e suba de novo com `docker compose up -d --build keycloak`.
-- **Console de administração**: `http://localhost:8180/admin`, com o admin do realm `master`
+- **Console de administração**: `http://localhost/auth/admin`, com o admin do realm `master`
   (`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`, `admin` / `admin` por padrão).
 
 O que o realm `akpedia` traz:
@@ -213,18 +232,18 @@ O que o realm `akpedia` traz:
 | `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` e o setor do usuário na claim `sector` |
 | `akpedia-server` | Cliente confidencial do back, com service account (`view-users` e `manage-users` do `realm-management`) para usar a Admin API |
 | Idioma | Telas em português (`pt-BR`), com inglês como opção |
-| Tema | `akpedia` nas telas de login, cadastro e senha (ver abaixo) |
+| Tema | `akpedia` nas telas de login e senha (ver abaixo) |
 
 Os setores e as regras do CPF estão no User Profile do realm (no arquivo, dentro de
 `components` → `kc.user.profile.config`; no console, em *Realm settings* → *User profile*).
 
 | Variável                        | Default                     | Para que serve |
 |---------------------------------|-----------------------------|----------------|
-| `KEYCLOAK_URL`                  | `http://localhost:8180`     | URL pública do Keycloak, que é também o emissor (`iss`) dos tokens. Entre containers ele responde em `keycloak:8080` |
+| `KEYCLOAK_URL`                  | `http://localhost/auth`     | URL pública do Keycloak, que é também o emissor (`iss`) dos tokens. Entre containers ele responde em `keycloak:8080/auth` |
 | `KEYCLOAK_ADMIN`                | `admin`                     | Admin do realm `master` (console de administração) |
 | `KEYCLOAK_ADMIN_PASSWORD`       | `admin`                     | Senha desse admin |
 | `KEYCLOAK_DB`                   | `keycloak`                  | Banco do Keycloak no Postgres |
-| `AKPEDIA_CLIENT_URL`            | `http://localhost:5173`     | URL do front, para onde o login e o logout podem voltar |
+| `AKPEDIA_CLIENT_URL`            | `http://localhost`          | URL do front, para onde o login e o logout podem voltar |
 | `KEYCLOAK_SERVER_CLIENT_SECRET` | `akpedia-dev-server-secret` | Secret do cliente `akpedia-server` |
 | `KEYCLOAK_DEV_ADMIN_EMAIL`      | `admin@akpedia.local`       | Email (e login) do usuário `ADMIN` inicial |
 | `KEYCLOAK_DEV_ADMIN_PASSWORD`   | (sem default)               | Senha desse usuário. **Obrigatória**: sem ela o Keycloak não sobe |
@@ -233,7 +252,7 @@ As quatro últimas só são lidas quando o realm é importado, ou seja, na prime
 
 #### Tema das telas de login
 
-As telas do Keycloak (login, cadastro, erros, troca de senha) usam o tema `akpedia`, em
+As telas do Keycloak (login, erros, troca de senha) usam o tema `akpedia`, em
 [`keycloak/themes/akpedia`](keycloak/themes/akpedia), com as cores, a fonte (Manrope), o logo e os
 campos e botões do akpedia-client. Ele herda o `keycloak.v2` e só troca o CSS
 (`login/resources/css/akpedia.css`), então todos os fluxos do Keycloak continuam funcionando.
@@ -279,8 +298,8 @@ de uma requisição à API (aba Rede do navegador) e acrescente `-H "Authorizati
 
 | Variável               | Default                                                           | Para que serve |
 |------------------------|-------------------------------------------------------------------|----------------|
-| `KEYCLOAK_ISSUER_URI`  | `http://localhost:8180/realms/akpedia`                            | Emissor esperado no `iss` do token: a URL pública do Keycloak |
-| `KEYCLOAK_JWK_SET_URI` | `http://localhost:8180/realms/akpedia/protocol/openid-connect/certs` | De onde o servidor baixa as chaves que assinam os tokens. Dentro de um container, aponte para o Keycloak pela rede Docker (`http://keycloak:8080/...` no compose, `http://akpedia-keycloak:8080/...` no dev container) |
+| `KEYCLOAK_ISSUER_URI`  | `http://localhost/auth/realms/akpedia`                            | Emissor esperado no `iss` do token: a URL pública do Keycloak |
+| `KEYCLOAK_JWK_SET_URI` | `http://localhost/auth/realms/akpedia/protocol/openid-connect/certs` | De onde o servidor baixa as chaves que assinam os tokens. Dentro de um container, aponte para o Keycloak pela rede Docker (`http://keycloak:8080/auth/...` no compose, `http://akpedia-keycloak:8080/auth/...` no dev container) |
 
 #### Usuário no banco
 

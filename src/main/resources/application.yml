@@ -30,8 +30,8 @@ spring:
           # Tokens are issued by the akpedia realm. The issuer is the public URL the browser logs in
           # at; the keys are fetched from wherever this server reaches Keycloak, which is not
           # localhost inside a container (KEYCLOAK_JWK_SET_URI).
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/akpedia}
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/akpedia/protocol/openid-connect/certs}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost/auth/realms/akpedia}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost/auth/realms/akpedia/protocol/openid-connect/certs}
           # Only tokens meant for this API: akpedia-client puts akpedia-server in their aud.
           audiences: akpedia-server
 

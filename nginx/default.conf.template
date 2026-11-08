@@ -1,0 +1,59 @@
+# Everything is served from one address (http://localhost by default):
+#   /auth/            -> Keycloak (runs with KC_HTTP_RELATIVE_PATH=/auth)
+#   /api/, /health    -> akpedia-server
+#   /                 -> akpedia-client (in development the Vite dev server, HMR included)
+# The upstreams come from the environment (see docker-compose.yml). They are resolved per request
+# through Docker's DNS, so nginx starts even when the dev container isn't running yet.
+
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+server {
+  listen 80;
+  server_name _;
+
+  # Uploads: the API accepts files up to 25 MB.
+  client_max_body_size 26m;
+
+  proxy_http_version 1.1;
+  proxy_set_header Host              $http_host;
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host  $http_host;
+  proxy_set_header X-Forwarded-Port  $server_port;
+  # WebSocket upgrade (Vite HMR). Kept at server level on purpose: a location that sets any
+  # proxy_set_header stops inheriting these, which would drop Host.
+  proxy_set_header Upgrade           $http_upgrade;
+  proxy_set_header Connection        $connection_upgrade;
+
+  location /auth/ {
+    set $keycloak ${KEYCLOAK_UPSTREAM};
+    proxy_pass http://$keycloak;
+    # Keycloak sends large headers and cookies (tokens); the default buffers are too small.
+    proxy_buffer_size 128k;
+    proxy_buffers 4 256k;
+    proxy_busy_buffers_size 256k;
+  }
+
+  location /api/ {
+    set $server ${SERVER_UPSTREAM};
+    proxy_pass http://$server;
+    # Document processing and uploads can take a while.
+    proxy_read_timeout 120s;
+  }
+
+  location ^~ /health {
+    set $server ${SERVER_UPSTREAM};
+    proxy_pass http://$server;
+  }
+
+  location / {
+    set $client ${CLIENT_UPSTREAM};
+    proxy_pass http://$client;
+  }
+}

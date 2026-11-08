@@ -92,29 +92,50 @@ services:
       # Master realm admin, for the admin console. Only created on the first start.
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-      # Public URL, the token issuer (iss). Containers can still reach it as keycloak:8080.
-      KC_HOSTNAME: ${KEYCLOAK_URL:-http://localhost:8180}
+      # Public URL, through nginx, and the token issuer (iss). Containers can still reach it
+      # directly as keycloak:8080/auth.
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${KEYCLOAK_URL:-http://localhost/auth}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # nginx tells Keycloak the browser's address and scheme in X-Forwarded-* headers.
+      KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       # Placeholders read by keycloak/akpedia-realm.json on import.
-      AKPEDIA_CLIENT_URL: ${AKPEDIA_CLIENT_URL:-http://localhost:5173}
+      AKPEDIA_CLIENT_URL: ${AKPEDIA_CLIENT_URL:-http://localhost}
       KEYCLOAK_SERVER_CLIENT_SECRET: ${KEYCLOAK_SERVER_CLIENT_SECRET:-akpedia-dev-server-secret}
       KEYCLOAK_DEV_ADMIN_EMAIL: ${KEYCLOAK_DEV_ADMIN_EMAIL:-admin@akpedia.local}
       KEYCLOAK_DEV_ADMIN_PASSWORD: ${KEYCLOAK_DEV_ADMIN_PASSWORD:-}
-    ports:
-      - "8180:8080"
+    # No published port: the browser reaches Keycloak through nginx, at /auth.
     healthcheck:
-      # The image has no curl: ask the management port for /health/ready over bash's /dev/tcp.
+      # The image has no curl: ask the management port for /auth/health/ready over bash's
+      # /dev/tcp (the management port follows KC_HTTP_RELATIVE_PATH).
       test:
         - CMD-SHELL
         - >-
           exec 3<>/dev/tcp/localhost/9000 &&
-          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
           grep -q '"UP"' <&3
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 30s
+
+  # Single entry point: the front-end, the API and Keycloak on one address, so the login and the
+  # app share an origin. By default it forwards to the dev container (`akpedia run` serves the
+  # client on 5173 and the server on 8080); point the upstreams elsewhere to run without it, e.g.
+  # SERVER_UPSTREAM=app:8080 for the `app` service below.
+  nginx:
+    build: ./nginx
+    image: akpedia-nginx
+    container_name: akpedia-nginx
+    depends_on:
+      - keycloak
+    environment:
+      KEYCLOAK_UPSTREAM: ${KEYCLOAK_UPSTREAM:-keycloak:8080}
+      SERVER_UPSTREAM: ${SERVER_UPSTREAM:-akpedia-devcontainer:8080}
+      CLIENT_UPSTREAM: ${CLIENT_UPSTREAM:-akpedia-devcontainer:5173}
+    ports:
+      - "${AKPEDIA_HTTP_PORT:-80}:80"
 
   app:
     build: .
@@ -133,8 +154,8 @@ services:
       SERVER_PORT: 8080
       # Keycloak signs the tokens; its keys are fetched over the compose network, while the issuer
       # stays the public URL the browser logs in at.
-      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_URL:-http://localhost:8180}/realms/akpedia
-      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/akpedia/protocol/openid-connect/certs
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_URL:-http://localhost/auth}/realms/akpedia
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/auth/realms/akpedia/protocol/openid-connect/certs
       # Embedding service (akpedia-ml). It comes up through its own repository's
       # compose, on a separate network: host-gateway reaches the port it publishes
       # on the developer's machine.
