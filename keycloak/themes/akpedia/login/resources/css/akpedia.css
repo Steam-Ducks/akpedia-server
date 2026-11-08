@@ -86,6 +86,9 @@
   border-radius: var(--ak-round-lg);
   background-color: var(--ak-white);
   transition: border-color 0.2s ease;
+  /* The input fills the whole field with square corners: anything painted on it (Chrome's
+     autofill background) would cover the rounded border. Clip it to the field's shape. */
+  overflow: hidden;
 }
 .pf-v5-c-form-control::before,
 .pf-v5-c-form-control::after,
@@ -106,6 +109,22 @@
   padding-block: 12px;
   outline: none;
   background: transparent;
+}
+/* Chrome paints autofilled (and hover-previewed) inputs with its own background, which flickers
+   as the suggestions are hovered. An inset shadow in the field's own color covers it, and the long
+   transition keeps Chrome's color from fading in. */
+.pf-v5-c-form-control input:-webkit-autofill,
+.pf-v5-c-form-control input:-webkit-autofill:hover,
+.pf-v5-c-form-control input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--ak-white) inset;
+  -webkit-text-fill-color: var(--ak-black);
+  caret-color: var(--ak-black);
+  transition: background-color 600000s 0s, color 600000s 0s;
+}
+.pf-v5-c-form-control.pf-m-error input:-webkit-autofill,
+.pf-v5-c-form-control.pf-m-error input:-webkit-autofill:hover,
+.pf-v5-c-form-control.pf-m-error input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--ak-wine-lightest) inset;
 }
 .pf-v5-c-form__label-required {
   color: var(--ak-wine);
