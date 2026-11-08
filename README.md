@@ -80,12 +80,15 @@ akpedia-server/
     │   │   └── repository/ # interfaces Spring Data JPA
     │   │   ├── client/ # clientes HTTP de serviços externos
     │   │   │   ├── EmbeddingClient.java
-    │   │   │   └── GotenbergClient.java # conversão de documentos para PDF
+    │   │   │   ├── GotenbergClient.java # conversão de documentos para PDF
+    │   │   │   └── KeycloakAdminClient.java # Admin API do Keycloak, para a tela de usuários
     │   │   ├── config/ # beans de configuração e @ConfigurationProperties
     │   │   │   ├── EmbeddingClientConfig.java
     │   │   │   ├── EmbeddingProperties.java
     │   │   │   ├── GotenbergClientConfig.java
     │   │   │   ├── GotenbergProperties.java
+    │   │   │   ├── KeycloakAdminClientConfig.java
+    │   │   │   ├── KeycloakAdminProperties.java # akpedia.keycloak.admin.*: URL, realm e service account
     │   │   │   ├── SecurityConfig.java # token do Keycloak nas rotas /api, papéis da revisão
     │   │   │   ├── ProcessingProperties.java # akpedia.processing.*: stream, grupo e reenvio
     │   │   │   ├── ProcessingConfig.java
@@ -96,6 +99,7 @@ akpedia-server/
     │   │   ├── controller/
     │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
     │   │   │   ├── DocumentReviewController.java # aprovar ou devolver um documento da fila
+    │   │   │   ├── AdminUserController.java # usuários, papéis e ativação (ADMIN)
     │   │   │   ├── AuditController.java # auditoria (ADMIN)
     │   │   │   ├── InternalDocumentController.java # rotas /internal chamadas pelo worker do akpedia-ml
     │   │   │   ├── EmbeddingController.java # rotas de embedding
@@ -227,7 +231,7 @@ O que o realm `akpedia` traz:
 
 | Item | Configuração |
 |------|--------------|
-| Cadastro | Autocadastro ligado na tela de login; o email é o nome de usuário |
+| Cadastro | Só o admin cadastra usuários (tela Usuários do app, `POST /api/v1/admin/users`): o autocadastro fica desligado (`registrationAllowed: false`) e a tela de login não tem link de cadastro; o email é o nome de usuário |
 | Atributos obrigatórios | Nome, sobrenome, email, `cpf` (11 dígitos, só números) e `sector` (lista com os 7 setores) |
 | Papéis | `STANDARD`, `APPROVER` e `ADMIN`. Toda conta nova recebe `STANDARD` (papel padrão do realm) |
 | `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` e o setor do usuário na claim `sector` |
@@ -291,7 +295,7 @@ para ele (`akpedia-server` no `aud`).
 | `GET /health`, `/actuator/health`, Swagger (`/swagger-ui.html`, `/v3/api-docs`) | qualquer um, sem token |
 | `/internal/**` | só o worker do akpedia-ml, com o `X-Internal-Token` (ver [Indexação pelo worker](#indexação-pelo-worker-rotas-internas)) |
 | `GET /api/v1/documents/pending`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
-| `/api/v1/admin/**` (hoje, a publicação dos termos de uso) | papel `ADMIN`; os outros recebem **403** |
+| `/api/v1/admin/**` (termos de uso, usuários e auditoria) | papel `ADMIN`; os outros recebem **403** |
 | o resto de `/api` | qualquer usuário logado |
 
 Os exemplos de `curl` deste README omitem o header. Para rodá-los, entre no front, copie o token
@@ -315,7 +319,7 @@ campos) recebe **403** `incomplete_account` nessas rotas.
 
 O usuário `aprovador@akpedia.local`, criado pela migration `V5__seed_default_approver.sql` quando
 ainda não havia login, continua no banco como autor e aprovador dos documentos daquela época.
-Ninguém entra com ele, a não ser que se cadastre no Keycloak com esse email.
+Ninguém entra com ele, a não ser que um admin cadastre uma conta com esse email.
 
 #### Termos de uso
 
@@ -342,6 +346,34 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
   recebem inserções. Uma versão publicada nunca muda (uma mudança é uma versão nova), e cada
   aceite fica guardado com o usuário, a versão e quando, mesmo que ele aceite de novo.
   Aceite, recusa e publicação também vão para a [auditoria](#auditoria).
+
+#### Usuários (admin)
+
+A tela de usuários do admin lê e altera as contas no próprio Keycloak, pela Admin API, com a
+service account do cliente `akpedia-server` (`view-users` e `manage-users`). O token dela fica
+guardado até perto de vencer.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/users?search=&page=0&size=20` | Página de usuários na ordem do Keycloak (pelo username, que é o email). `search` procura no email e no nome. Cada um traz `id` (do Keycloak), `name`, `email`, `sector`, `enabled`, `roles` (entre `STANDARD`, `APPROVER` e `ADMIN`), `terms_accepted_version`, `current_terms_version` e `created_at` |
+| `POST /api/v1/admin/users` | `{"first_name", "last_name", "email", "password", "cpf", "sector", "roles": []}` cria a conta no Keycloak (**201**, o usuário como na lista), com o e-mail já verificado, a senha definitiva e os papéis (`APPROVER`, `ADMIN`). `cpf` tem 11 dígitos (pontos e traço são ignorados) e `sector` é um dos setores do realm (`Setor 1` a `Setor 7`). **400** `invalid_user` diz o que falta ou está errado (inclusive o que o Keycloak recusar, como a política de senha); **409** `user_exists` se o e-mail já tem conta. Se um passo falha depois de a conta ser criada, ela é apagada de novo. A senha nunca vai para log nem auditoria |
+| `GET /api/v1/admin/roles` | Os três papéis, com nome na tela, descrição, se é `assignable` e as permissões de cada um |
+| `PUT /api/v1/admin/users/{id}/roles` | `{"roles": ["APPROVER", "ADMIN"]}`: o usuário fica com exatamente esses papéis atribuíveis. `STANDARD` vem com toda conta e não é mexido. **400** `invalid_role` para outro papel |
+| `PUT /api/v1/admin/users/{id}/status` | `{"enabled": false}` desativa a conta (não entra mais); `true` reativa. Espelhado em `users.is_active` quando o usuário já tem linha |
+
+- A mudança de papel chega ao usuário no próximo refresh do token (uns 5 minutos) ou no próximo login.
+- O admin não tira o próprio `ADMIN` (**409** `cannot_change_own_admin`) nem desativa a própria
+  conta (**409** `cannot_disable_self`).
+- **404** `user_not_found` para um id que o Keycloak não conhece; **502** `keycloak_unavailable`
+  quando o Keycloak não responde ou recusa a service account.
+
+| Variável                        | Default                     | Para que serve |
+|---------------------------------|-----------------------------|----------------|
+| `KEYCLOAK_ADMIN_BASE_URL`       | `http://localhost/auth`     | Onde o servidor chama a Admin API. Dentro de um container, pela rede Docker (`http://keycloak:8080/auth` no compose, `http://akpedia-keycloak:8080/auth` no dev container) |
+| `KEYCLOAK_REALM`                | `akpedia`                   | Realm dos usuários |
+| `KEYCLOAK_SERVER_CLIENT_ID`     | `akpedia-server`            | Cliente confidencial cuja service account é usada |
+| `KEYCLOAK_SERVER_CLIENT_SECRET` | `akpedia-dev-server-secret` | Secret desse cliente; o mesmo do import do realm |
+
 
 #### Auditoria
 

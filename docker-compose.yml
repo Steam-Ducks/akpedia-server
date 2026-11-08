@@ -65,7 +65,8 @@ services:
         || psql -c "CREATE DATABASE \"$$KEYCLOAK_DB\""
     restart: "no"
 
-  # Identity provider: login, self-registration and the STANDARD/APPROVER/ADMIN roles.
+  # Identity provider: login and the STANDARD/APPROVER/ADMIN roles (users are created by an admin).
+  # Served under /auth, behind nginx (below), on the same address as the app.
   # The akpedia realm is imported from keycloak/akpedia-realm.json on the first start only
   # (--import-realm skips a realm that already exists). The file is copied into the image
   # (keycloak/Dockerfile): after editing it, rebuild with `up -d --build keycloak`.
@@ -156,6 +157,9 @@ services:
       # stays the public URL the browser logs in at.
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_URL:-http://localhost/auth}/realms/akpedia
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/auth/realms/akpedia/protocol/openid-connect/certs
+      # The admin's users screen: Keycloak's Admin API, as the akpedia-server service account.
+      KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080/auth
+      KEYCLOAK_SERVER_CLIENT_SECRET: ${KEYCLOAK_SERVER_CLIENT_SECRET:-akpedia-dev-server-secret}
       # Embedding service (akpedia-ml). It comes up through its own repository's
       # compose, on a separate network: host-gateway reaches the port it publishes
       # on the developer's machine.

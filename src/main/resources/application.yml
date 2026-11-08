@@ -79,6 +79,14 @@ akpedia:
     retry-interval: ${PROCESSING_RETRY_INTERVAL:30s}
     retry-grace: ${PROCESSING_RETRY_GRACE:1m}
     retry-batch-size: ${PROCESSING_RETRY_BATCH_SIZE:50}
+  keycloak:
+    # The Admin API, for the admin's users screen, through the akpedia-server client's service
+    # account. Inside a container, Keycloak is reached by its container name, not localhost.
+    admin:
+      base-url: ${KEYCLOAK_ADMIN_BASE_URL:http://localhost/auth}
+      realm: ${KEYCLOAK_REALM:akpedia}
+      client-id: ${KEYCLOAK_SERVER_CLIENT_ID:akpedia-server}
+      client-secret: ${KEYCLOAK_SERVER_CLIENT_SECRET:akpedia-dev-server-secret}
   gotenberg:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}

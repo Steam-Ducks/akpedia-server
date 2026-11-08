@@ -1,5 +1,7 @@
 package com.akpedia.server.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -26,6 +28,8 @@ import com.akpedia.server.dto.EmbeddingErrorResponse;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     /**
      * 415: the upload is in a format the analysis does not accept.
@@ -264,7 +268,7 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("document_unreadable", e.getMessage()));
     }
 
-    /** 404: the creator named in a document upload does not exist. */
+    /** 404: the creator named in a document upload, or the Keycloak account the admin named, does not exist. */
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleUserNotFound(UserNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -308,6 +312,47 @@ public class ApiExceptionHandler {
     @ExceptionHandler(InvalidPageRequestException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidPage(InvalidPageRequestException e) {
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
+    /** 400: the admin named a role that does not exist or is not given by hand. */
+    @ExceptionHandler(InvalidRoleException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidRole(InvalidRoleException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_role", e.getMessage()));
+    }
+
+    /** 409: the admin would take ADMIN from themself. */
+    @ExceptionHandler(CannotChangeOwnAdminException.class)
+    public ResponseEntity<ApiErrorResponse> handleCannotChangeOwnAdmin(CannotChangeOwnAdminException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("cannot_change_own_admin", e.getMessage()));
+    }
+
+    /** 409: the admin would disable their own account. */
+    @ExceptionHandler(CannotDisableSelfException.class)
+    public ResponseEntity<ApiErrorResponse> handleCannotDisableSelf(CannotDisableSelfException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("cannot_disable_self", e.getMessage()));
+    }
+
+    /** 400: the admin's new user is missing a field, or has one Keycloak refused. */
+    @ExceptionHandler(InvalidUserException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidUser(InvalidUserException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_user", e.getMessage()));
+    }
+
+    /** 409: the realm already has a user with that email. */
+    @ExceptionHandler(UserExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleUserExists(UserExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("user_exists", e.getMessage()));
+    }
+
+    /** 502: Keycloak's Admin API is down, refused this server's service account, or failed. */
+    @ExceptionHandler(KeycloakUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleKeycloakUnavailable(KeycloakUnavailableException e) {
+        // The answer only says Keycloak failed; why is for the server's log.
+        log.warn("Keycloak Admin API call failed", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiErrorResponse("keycloak_unavailable", e.getMessage()));
     }
 
     /** 503: Gotenberg is down, unreachable, or past the read timeout. */
