@@ -346,6 +346,45 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("user_exists", e.getMessage()));
     }
 
+    /** 400: the profile edit is missing a field or has an invalid one, the message says which. */
+    @ExceptionHandler(InvalidProfileException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidProfile(InvalidProfileException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_profile", e.getMessage()));
+    }
+
+    /** 400: the edit would leave everything as it is. */
+    @ExceptionHandler(NothingChangedException.class)
+    public ResponseEntity<ApiErrorResponse> handleNothingChanged(NothingChangedException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("nothing_changed", e.getMessage()));
+    }
+
+    /** 400: the e-mail or CPF change request is invalid, the message says why. */
+    @ExceptionHandler(InvalidChangeRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidChangeRequest(InvalidChangeRequestException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_change_request", e.getMessage()));
+    }
+
+    /** 409: the user already asked to change that field, and it was not decided yet. */
+    @ExceptionHandler(ChangeRequestPendingException.class)
+    public ResponseEntity<ApiErrorResponse> handleChangeRequestPending(ChangeRequestPendingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("change_request_pending", e.getMessage()));
+    }
+
+    /** 404: no such change request, or not the caller's. */
+    @ExceptionHandler(ChangeRequestNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleChangeRequestNotFound(ChangeRequestNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("change_request_not_found", e.getMessage()));
+    }
+
+    /** 409: the change request was already decided (or cancelled meanwhile). */
+    @ExceptionHandler(ChangeRequestNotPendingException.class)
+    public ResponseEntity<ApiErrorResponse> handleChangeRequestNotPending(ChangeRequestNotPendingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("change_request_not_pending", e.getMessage()));
+    }
+
     /** 502: Keycloak's Admin API is down, refused this server's service account, or failed. */
     @ExceptionHandler(KeycloakUnavailableException.class)
     public ResponseEntity<ApiErrorResponse> handleKeycloakUnavailable(KeycloakUnavailableException e) {
