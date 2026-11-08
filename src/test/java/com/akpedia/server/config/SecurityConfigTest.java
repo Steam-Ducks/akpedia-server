@@ -1,13 +1,23 @@
 package com.akpedia.server.config;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -17,13 +27,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.akpedia.server.service.AccountDeletionLog;
+import com.akpedia.server.service.AuditService;
 import com.akpedia.server.service.TermsService;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * Who may call which route. The routes are stand-ins with the real paths, so what is under test is
@@ -76,8 +93,38 @@ class SecurityConfigTest {
             return "ok";
         }
 
+        @PostMapping("/api/v1/terms/decline")
+        String declineTerms() {
+            return "ok";
+        }
+
         @GetMapping("/api/v1/admin/terms")
         String adminTerms() {
+            return "ok";
+        }
+
+        @GetMapping("/api/v1/admin/users")
+        String adminUsers() {
+            return "ok";
+        }
+
+        @GetMapping("/api/v1/admin/audit")
+        String adminAudit() {
+            return "ok";
+        }
+
+        @DeleteMapping("/api/v1/me")
+        String deleteMe() {
+            return "ok";
+        }
+
+        @GetMapping("/api/v1/me/profile")
+        String profile() {
+            return "ok";
+        }
+
+        @GetMapping("/api/v1/admin/profile-requests")
+        String profileRequests() {
             return "ok";
         }
     }
@@ -88,6 +135,13 @@ class SecurityConfigTest {
     /** Says nobody has terms to accept, unless a test says otherwise. */
     @MockBean
     private TermsService terms;
+
+    @MockBean
+    private AuditService audit;
+
+    /** Says no account was deleted, unless a test says otherwise. */
+    @MockBean
+    private AccountDeletionLog deletions;
 
     /** A token as Keycloak issues it, with the given realm roles in {@code realm_access.roles}. */
     private static JwtRequestPostProcessor tokenWithRoles(String... roles) {
@@ -162,6 +216,16 @@ class SecurityConfigTest {
                 .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/admin/terms").with(tokenWithRoles("ADMIN")))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/users").with(tokenWithRoles("STANDARD", "APPROVER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/audit").with(tokenWithRoles("APPROVER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/users").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/profile-requests").with(tokenWithRoles("APPROVER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/profile-requests").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/me/profile").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/audit").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
     }
 
     @Test
@@ -176,6 +240,10 @@ class SecurityConfigTest {
         mvc.perform(get("/api/v1/admin/terms").with(tokenWithRoles("ADMIN")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("terms_not_accepted"));
+        // The profile too: only deleting the account is open before accepting.
+        mvc.perform(get("/api/v1/me/profile").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("terms_not_accepted"));
     }
 
     @Test
@@ -185,8 +253,25 @@ class SecurityConfigTest {
 
         mvc.perform(get("/api/v1/terms").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
         mvc.perform(post("/api/v1/terms/accept").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/terms/decline").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        // A user may delete their account without accepting.
+        mvc.perform(delete("/api/v1/me").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
         mvc.perform(get("/health")).andExpect(status().isOk());
         mvc.perform(get("/internal/documents/1/file")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("a deleted account's token is refused with 401 account_deleted, except to delete it again")
+    void deletedAccountIsRefused() throws Exception {
+        given(deletions.isDeleted("gone")).willReturn(true);
+
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD").jwt(token -> token.subject("gone"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("account_deleted"));
+        mvc.perform(delete("/api/v1/me").with(tokenWithRoles("STANDARD").jwt(token -> token.subject("gone"))))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD").jwt(token -> token.subject("here"))))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -199,5 +284,48 @@ class SecurityConfigTest {
         mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("every /api request is recorded with its final status, a 401 included")
+    void requestsAreAudited() throws Exception {
+        mvc.perform(get("/api/v1/categories")).andExpect(status().isUnauthorized());
+        verify(audit).recordRequest(any(HttpServletRequest.class), eq(401), anyLong());
+
+        mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isForbidden());
+        verify(audit).recordRequest(any(HttpServletRequest.class), eq(403), anyLong());
+    }
+
+    @Test
+    @DisplayName("the request is recorded while the token's user is still known")
+    void requestAuditSeesTheUser() throws Exception {
+        List<Authentication> seen = new ArrayList<>();
+        willAnswer(invocation -> seen.add(SecurityContextHolder.getContext().getAuthentication()))
+                .given(audit).recordRequest(any(), eq(200), anyLong());
+
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+
+        assertThat(seen).singleElement().satisfies(authentication -> assertThat(authentication).isNotNull());
+    }
+
+    @Test
+    @DisplayName("health, /internal and reading the audit itself are not recorded")
+    void excludedRoutesAreNotAudited() throws Exception {
+        mvc.perform(get("/health")).andExpect(status().isOk());
+        mvc.perform(get("/internal/documents/1/file")).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/audit").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
+
+        verify(audit, never()).recordRequest(any(), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("a failure to record never reaches the response")
+    void auditFailureIsSwallowed() throws Exception {
+        willAnswer(invocation -> {
+            throw new IllegalStateException("database down");
+        }).given(audit).recordRequest(any(), anyInt(), anyLong());
+
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
     }
 }

@@ -95,6 +95,6 @@ public class DocumentReviewController {
     public DocumentReviewResponse reject(
             @PathVariable("id") Long id,
             @RequestBody @Valid RejectDocumentRequest request) {
-        return reviewService.reject(id, request.comment());
+        return reviewService.reject(id, currentUser.id(), request.comment());
     }
 }

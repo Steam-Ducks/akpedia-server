@@ -96,6 +96,7 @@ akpedia-server/
     │   │   ├── controller/
     │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
     │   │   │   ├── DocumentReviewController.java # aprovar ou devolver um documento da fila
+    │   │   │   ├── AuditController.java # auditoria (ADMIN)
     │   │   │   ├── InternalDocumentController.java # rotas /internal chamadas pelo worker do akpedia-ml
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
@@ -339,6 +340,26 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 - **Histórico**: `terms_versions` e `terms_acceptances` (migration `V8__terms_of_use.sql`) só
   recebem inserções. Uma versão publicada nunca muda (uma mudança é uma versão nova), e cada
   aceite fica guardado com o usuário, a versão e quando, mesmo que ele aceite de novo.
+#### Auditoria
+
+`audit_logs` guarda dois tipos de registro, com o usuário (id do Keycloak, email e a linha em
+`users`, se houver), IP (o primeiro do `X-Forwarded-For`, se houver), user agent, método e caminho:
+
+- **Requisições** (`action = HTTP_REQUEST`): uma por requisição a `/api`, gravada quando a resposta
+  sai, com o status (inclusive **401** e **403**, sem usuário quando não há token válido), a
+  duração e a query string em `details`. O corpo nunca é gravado. Ficam de fora `/internal`,
+  `/health`, `/actuator`, o Swagger e a leitura da própria auditoria. Uma falha ao gravar só vai
+  para o log, nunca para a resposta.
+- **Eventos**: `TERMS_ACCEPTED`, `TERMS_DECLINED`, `TERMS_PUBLISHED`, `DOCUMENT_UPLOADED`,
+  `DOCUMENT_APPROVED`, `DOCUMENT_REJECTED`, `USER_ROLES_CHANGED`, `USER_ENABLED`, `USER_DISABLED`,
+  `USER_CREATED` e `ACCOUNT_DELETED`,
+  com o que foi afetado (`entity_type`, `entity_id`) e os detalhes. São gravados na mesma transação
+  da ação: se ela falha, o evento não fica.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/audit?kind=EVENT&action=&user=&from=&to=&page=0&size=50` | Página da auditoria, da mais nova para a mais antiga. `kind` é `EVENT` (padrão), `REQUEST` ou `ALL`; `user` é parte do email; `from` e `to` são data e hora ISO-8601, inclusivos. `size` até 200. Cada registro traz `user_email` e `user_name`, ou, se a conta foi excluída, os dois `null` e `user_pseudonym` (`Usuário removido #<id>`, o mesmo em todos os registros dela) |
+| `GET /api/v1/admin/audit/actions` | Os eventos já registrados, em ordem alfabética, para o filtro |
 
 ### Serviço de embeddings
 

@@ -38,18 +38,21 @@ public class DocumentReviewService {
     private final CategoryRepository categories;
     private final UserRepository users;
     private final ApplicationEventPublisher events;
+    private final AuditService audit;
 
     public DocumentReviewService(
             DocumentRepository documents,
             DocumentFileRepository documentFiles,
             CategoryRepository categories,
             UserRepository users,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            AuditService audit) {
         this.documents = documents;
         this.documentFiles = documentFiles;
         this.categories = categories;
         this.users = users;
         this.events = events;
+        this.audit = audit;
     }
 
     /**
@@ -93,6 +96,8 @@ public class DocumentReviewService {
         document.setProcessingStatus(ProcessingStatus.PROCESSING);
 
         events.publishEvent(new DocumentApprovedEvent(document.getId()));
+        audit.record(approverId, AuditService.DOCUMENT_APPROVED, AuditService.DOCUMENT, document.getId(),
+                AuditService.details("category_id", document.getCategory().getId()));
         return DocumentReviewResponse.from(document);
     }
 
@@ -104,19 +109,22 @@ public class DocumentReviewService {
      * has already read it, and the author still holds the original they uploaded it from.
      *
      * @param documentId the document to return
+     * @param reviewerId the user returning it, recorded in the audit trail
      * @param comment    why it is being returned; already validated as not blank
      * @return the document as returned
      * @throws DocumentNotFoundException           if there is no such document
      * @throws DocumentNotPendingApprovalException if it is not waiting on a decision
      */
     @Transactional
-    public DocumentReviewResponse reject(Long documentId, String comment) {
+    public DocumentReviewResponse reject(Long documentId, Long reviewerId, String comment) {
         Document document = pendingDocument(documentId);
 
         document.setStatus(DocumentStatus.REJECTED);
         document.setReviewComment(comment.strip());
         document.setReviewedAt(OffsetDateTime.now());
         documentFiles.deleteByDocumentId(documentId);
+        audit.record(reviewerId, AuditService.DOCUMENT_REJECTED, AuditService.DOCUMENT, documentId,
+                AuditService.details("comment", document.getReviewComment()));
 
         return DocumentReviewResponse.from(document);
     }

@@ -57,6 +57,8 @@ class DocumentUploadServiceTest {
     private UserRepository users;
     @Mock
     private GotenbergClient gotenberg;
+    @Mock
+    private AuditService audit;
 
     private DocumentUploadService service;
     private Category category;
@@ -64,7 +66,7 @@ class DocumentUploadServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DocumentUploadService(documents, documentFiles, categories, users, gotenberg);
+        service = new DocumentUploadService(documents, documentFiles, categories, users, gotenberg, audit);
         category = new Category("Manuais", "manuais tecnicos");
         creator = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
     }

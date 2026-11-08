@@ -288,6 +288,12 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("incomplete_account", e.getMessage()));
     }
 
+    /** 400: a page of a list was asked for out of bounds. */
+    @ExceptionHandler(InvalidPageRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidPage(InvalidPageRequestException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
     /** 503: Gotenberg is down, unreachable, or past the read timeout. */
     @ExceptionHandler(PdfConversionUnavailableException.class)
     public ResponseEntity<ApiErrorResponse> handlePdfConversionUnavailable(PdfConversionUnavailableException e) {

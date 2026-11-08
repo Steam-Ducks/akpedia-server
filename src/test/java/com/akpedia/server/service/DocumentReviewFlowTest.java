@@ -27,6 +27,7 @@ import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.entity.Category;
@@ -67,6 +68,9 @@ class DocumentReviewFlowTest {
     @Autowired
     private ProcessingRetry retry;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @MockBean
     private StringRedisTemplate redis;
 
@@ -82,8 +86,10 @@ class DocumentReviewFlowTest {
 
     @AfterEach
     void cleanUp() {
-        // The file goes with the document (ON DELETE CASCADE).
+        // The file goes with the document (ON DELETE CASCADE); the audit trail has no FK to it.
         documents.deleteAllById(created);
+        created.forEach(id -> jdbc.update(
+                "DELETE FROM audit_logs WHERE entity_type = 'DOCUMENT' AND entity_id = ?", id));
     }
 
     /** A document waiting on a decision, with its file, both already committed. */
@@ -198,7 +204,7 @@ class DocumentReviewFlowTest {
     void rejectionDeletesTheFileAndKeepsTheDocument() {
         Long id = pendingWithFile().getId();
 
-        reviewService.reject(id, "Falta a secao de revisao A.");
+        reviewService.reject(id, seededUserId(), "Falta a secao de revisao A.");
 
         Document rejected = reload(id);
         assertThat(rejected.getStatus()).isEqualTo(DocumentStatus.REJECTED);
@@ -206,6 +212,12 @@ class DocumentReviewFlowTest {
         assertThat(rejected.getReviewedAt()).isNotNull();
         assertThat(documentFiles.findByDocumentId(id)).isEmpty();
         verifyNoInteractions(stream);
+        // Committed with the rejection, naming who returned it and why.
+        assertThat(jdbc.queryForMap("""
+                SELECT user_id, details ->> 'comment' AS comment FROM audit_logs
+                WHERE action = 'DOCUMENT_REJECTED' AND entity_id = ?""", id))
+                .containsEntry("user_id", seededUserId())
+                .containsEntry("comment", "Falta a secao de revisao A.");
     }
 
     /** Author and approver of these documents: the user seeded by V5, there on every database. */

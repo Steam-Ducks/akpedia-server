@@ -40,18 +40,21 @@ public class DocumentUploadService {
     private final CategoryRepository categories;
     private final UserRepository users;
     private final GotenbergClient gotenberg;
+    private final AuditService audit;
 
     public DocumentUploadService(
             DocumentRepository documents,
             DocumentFileRepository documentFiles,
             CategoryRepository categories,
             UserRepository users,
-            GotenbergClient gotenberg) {
+            GotenbergClient gotenberg,
+            AuditService audit) {
         this.documents = documents;
         this.documentFiles = documentFiles;
         this.categories = categories;
         this.users = users;
         this.gotenberg = gotenberg;
+        this.audit = audit;
     }
 
     /**
@@ -111,6 +114,8 @@ public class DocumentUploadService {
 
         documents.save(document);
         documentFiles.save(new DocumentFile(document, pdf));
+        audit.record(creatorId, AuditService.DOCUMENT_UPLOADED, AuditService.DOCUMENT, document.getId(),
+                AuditService.details("name", documentName, "category_id", categoryId));
 
         return document;
     }

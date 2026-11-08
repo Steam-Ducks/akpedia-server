@@ -192,7 +192,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("reject with a comment returns the document to its author")
     void rejectWithComment() throws Exception {
-        given(reviewService.reject(7L, "Falta a secao de revisao A."))
+        given(reviewService.reject(7L, APPROVER_ID, "Falta a secao de revisao A."))
                 .willReturn(rejected("Falta a secao de revisao A."));
 
         mvc.perform(post("/api/v1/documents/7/reject")
@@ -215,7 +215,7 @@ class DocumentReviewControllerTest {
                 .andExpect(jsonPath("$.code").value("invalid_request"))
                 .andExpect(jsonPath("$.message").value(containsString("comment")));
 
-        verify(reviewService, never()).reject(anyLong(), anyString());
+        verify(reviewService, never()).reject(anyLong(), anyLong(), anyString());
     }
 
     @Test
@@ -227,7 +227,7 @@ class DocumentReviewControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
 
-        verify(reviewService, never()).reject(anyLong(), anyString());
+        verify(reviewService, never()).reject(anyLong(), anyLong(), anyString());
     }
 
     @Test
@@ -237,13 +237,13 @@ class DocumentReviewControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
 
-        verify(reviewService, never()).reject(anyLong(), anyString());
+        verify(reviewService, never()).reject(anyLong(), anyLong(), anyString());
     }
 
     @Test
     @DisplayName("reject on a document not waiting on a decision answers 409")
     void rejectConflict() throws Exception {
-        given(reviewService.reject(eq(7L), anyString()))
+        given(reviewService.reject(eq(7L), anyLong(), anyString()))
                 .willThrow(new DocumentNotPendingApprovalException(7L, DocumentStatus.REJECTED));
 
         mvc.perform(post("/api/v1/documents/7/reject")

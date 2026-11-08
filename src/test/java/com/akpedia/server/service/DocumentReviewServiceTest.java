@@ -58,6 +58,8 @@ class DocumentReviewServiceTest {
     private UserRepository users;
     @Mock
     private ApplicationEventPublisher events;
+    @Mock
+    private AuditService audit;
 
     private DocumentReviewService service;
     private Category original;
@@ -65,7 +67,7 @@ class DocumentReviewServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DocumentReviewService(documents, documentFiles, categories, users, events);
+        service = new DocumentReviewService(documents, documentFiles, categories, users, events, audit);
         original = category(3L, "Tecnico");
         approver = new User("Aprovador", "aprovador@akpedia.local", new Sector("Engenharia", null));
         ReflectionTestUtils.setField(approver, "id", APPROVER_ID);
@@ -212,7 +214,7 @@ class DocumentReviewServiceTest {
     void rejectReturnsTheDocument() {
         Document document = stored(DocumentStatus.PENDING_APPROVAL);
 
-        DocumentReviewResponse response = service.reject(DOCUMENT_ID, "  Falta a secao de revisao A.  ");
+        DocumentReviewResponse response = service.reject(DOCUMENT_ID, APPROVER_ID, "  Falta a secao de revisao A.  ");
 
         assertThat(document.getStatus()).isEqualTo(DocumentStatus.REJECTED);
         assertThat(document.getReviewComment()).isEqualTo("Falta a secao de revisao A.");
@@ -236,7 +238,7 @@ class DocumentReviewServiceTest {
     void rejectRefusesAnyOtherStatus(DocumentStatus status) {
         Document document = stored(status);
 
-        assertThatThrownBy(() -> service.reject(DOCUMENT_ID, "motivo"))
+        assertThatThrownBy(() -> service.reject(DOCUMENT_ID, APPROVER_ID, "motivo"))
                 .isInstanceOf(DocumentNotPendingApprovalException.class);
 
         assertThat(document.getStatus()).isEqualTo(status);
@@ -250,7 +252,7 @@ class DocumentReviewServiceTest {
 
         assertThatThrownBy(() -> service.approve(404L, APPROVER_ID, ApproveDocumentRequest.NONE))
                 .isInstanceOf(DocumentNotFoundException.class);
-        assertThatThrownBy(() -> service.reject(404L, "motivo"))
+        assertThatThrownBy(() -> service.reject(404L, APPROVER_ID, "motivo"))
                 .isInstanceOf(DocumentNotFoundException.class);
 
         verifyNoInteractions(documentFiles, events);
