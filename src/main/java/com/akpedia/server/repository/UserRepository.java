@@ -15,6 +15,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
+    /** The row with its sector loaded. */
+    @Query("SELECT u FROM User u JOIN FETCH u.sector WHERE u.id = :id")
+    Optional<User> findWithSectorById(@Param("id") Long id);
+
+    /** Whether the row linked to this Keycloak account was disabled by an admin. */
+    boolean existsByKeycloakIdAndActiveFalse(String keycloakId);
+
     /** The id of the row linked to this Keycloak account, without loading the row. */
     @Query("SELECT u.id FROM User u WHERE u.keycloakId = :keycloakId")
     Optional<Long> findIdByKeycloakId(@Param("keycloakId") String keycloakId);

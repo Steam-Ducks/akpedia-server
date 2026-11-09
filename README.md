@@ -286,7 +286,7 @@ apague-o depois do import, e crie os administradores de verdade pelo console.
 ### Login nas rotas da API
 
 Toda rota em `/api` exige o access token do Keycloak no header `Authorization: Bearer <token>`;
-sem ele, ou com um token vencido, a resposta é **401**. O token vem do login no front
+sem ele, ou com um token vencido, a resposta é **401** `unauthorized`. O token vem do login no front
 (`akpedia-client`). O servidor confere a assinatura, o emissor (`iss`) e se o token foi emitido
 para ele (`akpedia-server` no `aud`).
 
@@ -295,8 +295,12 @@ para ele (`akpedia-server` no `aud`).
 | `GET /health`, `/actuator/health`, Swagger (`/swagger-ui.html`, `/v3/api-docs`) | qualquer um, sem token |
 | `/internal/**` | só o worker do akpedia-ml, com o `X-Internal-Token` (ver [Indexação pelo worker](#indexação-pelo-worker-rotas-internas)) |
 | `GET /api/v1/documents/pending`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
-| `/api/v1/admin/**` (termos de uso, usuários e auditoria) | papel `ADMIN`; os outros recebem **403** |
+| `/api/v1/admin/**` (termos de uso, usuários, permissões e auditoria) | papel `ADMIN`; os outros recebem **403** `forbidden` |
 | o resto de `/api` | qualquer usuário logado |
+
+Os **401** e **403** da checagem de login e papel vêm no formato de erro da API
+(`{"code", "message"}`), como os demais erros. O token de uma conta desativada por um admin,
+ainda válido por alguns minutos, recebe **401** `account_disabled`.
 
 Os exemplos de `curl` deste README omitem o header. Para rodá-los, entre no front, copie o token
 de uma requisição à API (aba Rede do navegador) e acrescente `-H "Authorization: Bearer $TOKEN"`.
@@ -338,7 +342,7 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 - **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
   três primeiras acima e `DELETE /api/v1/me` (excluir a conta), responde **403** `terms_not_accepted`, inclusive as de admin: quem
   publica também aceita. A conferência vem depois do login e dos papéis, então sem token
-  continua sendo **401**, e sem o papel, **403** sem esse código. `/health`, Swagger e
+  continua sendo **401**, e sem o papel, **403** `forbidden`. `/health`, Swagger e
   `/internal` não passam por ela.
 - **Sem termos publicados, não há bloqueio**: até o admin publicar a primeira versão, ninguém
   é perguntado.

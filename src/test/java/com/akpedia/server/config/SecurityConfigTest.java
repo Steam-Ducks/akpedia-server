@@ -14,6 +14,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -36,6 +37,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.akpedia.server.repository.UserRepository;
 import com.akpedia.server.service.AccountDeletionLog;
 import com.akpedia.server.service.AuditService;
 import com.akpedia.server.service.TermsService;
@@ -113,6 +115,11 @@ class SecurityConfigTest {
             return "ok";
         }
 
+        @GetMapping("/api/v1/me")
+        String me() {
+            return "ok";
+        }
+
         @DeleteMapping("/api/v1/me")
         String deleteMe() {
             return "ok";
@@ -143,6 +150,10 @@ class SecurityConfigTest {
     @MockBean
     private AccountDeletionLog deletions;
 
+    /** Says no account was disabled, unless a test says otherwise. */
+    @MockBean
+    private UserRepository users;
+
     /** A token as Keycloak issues it, with the given realm roles in {@code realm_access.roles}. */
     private static JwtRequestPostProcessor tokenWithRoles(String... roles) {
         return jwt()
@@ -153,7 +164,40 @@ class SecurityConfigTest {
     @Test
     @DisplayName("an /api route without a token answers 401")
     void apiWithoutTokenIsUnauthorized() throws Exception {
-        mvc.perform(get("/api/v1/categories")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/categories"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("unauthorized"))
+                .andExpect(jsonPath("$.message").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("an invalid token gets 401 in the API's error format, with WWW-Authenticate")
+    void invalidTokenIsUnauthorizedAsJson() throws Exception {
+        mvc.perform(get("/api/v1/categories").header("Authorization", "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().exists("WWW-Authenticate"))
+                .andExpect(jsonPath("$.code").value("unauthorized"));
+    }
+
+    @Test
+    @DisplayName("a role that does not reach the route gets 403 in the API's error format")
+    void forbiddenIsJson() throws Exception {
+        mvc.perform(get("/api/v1/admin/users").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("forbidden"))
+                .andExpect(jsonPath("$.message").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("a disabled account's token, still valid, gets 401 account_disabled")
+    void disabledAccountIsRefused() throws Exception {
+        given(users.existsByKeycloakIdAndActiveFalse("off")).willReturn(true);
+
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD").jwt(token -> token.subject("off"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("account_disabled"));
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD").jwt(token -> token.subject("on"))))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -252,6 +296,7 @@ class SecurityConfigTest {
         given(terms.mustAccept(anyString())).willReturn(true);
 
         mvc.perform(get("/api/v1/terms").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/me").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
         mvc.perform(post("/api/v1/terms/accept").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
         mvc.perform(post("/api/v1/terms/decline").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
         // A user may delete their account without accepting.
@@ -283,7 +328,7 @@ class SecurityConfigTest {
         // Refused for the missing role, not for the terms.
         mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").doesNotExist());
+                .andExpect(jsonPath("$.code").value("forbidden"));
     }
 
     @Test
