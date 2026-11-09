@@ -356,7 +356,7 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 | `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**). `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
 
 - **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
-  quatro primeiras acima e `DELETE /api/v1/me` (excluir a conta), responde **403** `terms_not_accepted`, inclusive as de admin: quem
+  quatro primeiras acima e `DELETE /api/v1/me` (excluir a conta), responde **403** `terms_pending`, inclusive as de admin: quem
   publica também aceita. A conferência vem depois do login e dos papéis, então sem token
   continua sendo **401**, e sem o papel, **403** `forbidden`. `/health`, Swagger e
   `/internal` não passam por ela.

@@ -20,7 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Answers 403 {@code terms_not_accepted} on every {@code /api} route until the user accepted the
+ * Answers 403 {@code terms_pending} on every {@code /api} route until the user accepted the
  * current terms of use. The routes the terms screen needs stay open: who the user is
  * ({@code GET /me}, which says the terms are pending), reading the terms, and accepting or
  * declining them. So does deleting one's account: a user may leave without
@@ -66,7 +66,7 @@ public class TermsGateFilter extends OncePerRequestFilter {
             response.setStatus(HttpStatus.FORBIDDEN.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
-            json.writeValue(response.getOutputStream(), new ApiErrorResponse("terms_not_accepted",
+            json.writeValue(response.getOutputStream(), new ApiErrorResponse("terms_pending",
                     "Aceite os termos de uso atuais para continuar usando o Akpedia."));
             return;
         }

@@ -55,7 +55,7 @@ public class TermsController {
             description = """
                     `current` is `null` while no version was published. The user must accept when `current`
                     is set and `accepted` is not that version; until then every other `/api` route answers
-                    403 `terms_not_accepted`.""")
+                    403 `terms_pending`.""")
     @GetMapping("/terms")
     public TermsStatusResponse status() {
         return terms.status(currentUser.keycloakId());

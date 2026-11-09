@@ -273,21 +273,21 @@ class SecurityConfigTest {
     }
 
     @Test
-    @DisplayName("until the current terms are accepted, /api answers 403 terms_not_accepted")
+    @DisplayName("until the current terms are accepted, /api answers 403 terms_pending")
     void termsGateHoldsBackTheApi() throws Exception {
         given(terms.mustAccept(anyString())).willReturn(true);
 
         mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("terms_not_accepted"));
+                .andExpect(jsonPath("$.code").value("terms_pending"));
         // Admin routes too: after publishing, the admin accepts like everyone else.
         mvc.perform(get("/api/v1/admin/terms").with(tokenWithRoles("ADMIN")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("terms_not_accepted"));
+                .andExpect(jsonPath("$.code").value("terms_pending"));
         // The profile too: only deleting the account is open before accepting.
         mvc.perform(get("/api/v1/me/profile").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("terms_not_accepted"));
+                .andExpect(jsonPath("$.code").value("terms_pending"));
     }
 
     @Test
