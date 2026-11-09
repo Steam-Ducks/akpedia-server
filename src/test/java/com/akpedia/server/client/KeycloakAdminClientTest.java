@@ -343,6 +343,18 @@ class KeycloakAdminClientTest {
     }
 
     @Test
+    @DisplayName("lists a sector's users with an exact attribute query")
+    void listsUsersOfASector() {
+        expectToken("tok-1");
+        keycloak.expect(requestTo(USERS_URL
+                        + "?first=0&max=100&briefRepresentation=false&q=sector%3AManuten%C3%A7%C3%A3o&exact=true"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        assertThat(client.users(null, "Manutenção", 0, 100)).isEmpty();
+        keycloak.verify();
+    }
+
+    @Test
     @DisplayName("finds the users with a CPF by an exact attribute query")
     void findsUsersWithCpf() {
         expectToken("tok-1");

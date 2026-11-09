@@ -86,6 +86,15 @@ public class KeycloakAdminClient {
      *               users when {@code null} or blank
      */
     public List<KeycloakUser> users(String search, int first, int max) {
+        return users(search, null, first, max);
+    }
+
+    /**
+     * One page of the realm's users, as {@link #users(String, int, int)}, or, given a sector, of
+     * the users in exactly that sector. Keycloak ignores the sector when there is a search too, so
+     * the caller passes one or the other.
+     */
+    public List<KeycloakUser> users(String search, String sector, int first, int max) {
         return call("listar os usuarios", token -> restClient.get()
                 .uri(builder -> {
                     builder.path("/admin/realms/{realm}/users")
@@ -95,7 +104,11 @@ public class KeycloakAdminClient {
                     if (search != null && !search.isBlank()) {
                         builder.queryParam("search", "{search}");
                     }
-                    return builder.build(Map.of("realm", properties.realm(), "search", search == null ? "" : search.strip()));
+                    if (sector != null && !sector.isBlank()) {
+                        builder.queryParam("q", "{q}").queryParam("exact", true);
+                    }
+                    return builder.build(Map.of("realm", properties.realm(), "search", search == null ? "" : search.strip(),
+                            "q", "sector:" + (sector == null ? "" : sector.strip())));
                 })
                 .headers(bearer(token))
                 .retrieve()

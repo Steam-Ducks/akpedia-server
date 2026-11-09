@@ -56,11 +56,12 @@ public class AdminUserController {
             description = """
                     In Keycloak's order, by username (the email). `search` is looked for in the email, first and
                     last name. Each user carries their realm roles among `STANDARD`, `APPROVER` and `ADMIN`, the
-                    last version of the terms they accepted and the current one. `size` defaults to 20, at most
-                    100.""")
+                    last version of the terms they accepted and the current one. `sector` keeps one sector;
+                    `role` keeps the users with `APPROVER` or `ADMIN`, or, for `STANDARD`, those with neither.
+                    `size` defaults to 20, at most 100.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "The page."),
-        @ApiResponse(responseCode = "400", description = "`page` or `size` is out of bounds.",
+        @ApiResponse(responseCode = "400", description = "`page` or `size` is out of bounds; `invalid_role`: unknown `role`.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "502", description = "`keycloak_unavailable`: Keycloak did not answer as expected.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
@@ -68,9 +69,11 @@ public class AdminUserController {
     @GetMapping("/users")
     public PageResponse<AdminUser> list(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String sector,
+            @RequestParam(required = false) String role,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
-        return adminUsers.list(search, page, size);
+        return adminUsers.list(search, sector, role, page, size);
     }
 
     @Operation(

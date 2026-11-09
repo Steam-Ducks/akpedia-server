@@ -3,14 +3,17 @@ package com.akpedia.server.service;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -104,21 +107,98 @@ public class AdminUserService {
      */
     @Transactional(readOnly = true)
     public PageResponse<AdminUser> list(String search, Integer requestedPage, Integer requestedSize) {
+        return list(search, null, null, requestedPage, requestedSize);
+    }
+
+    /**
+     * One page of the realm's users, in Keycloak's order (by username, which is the email).
+     *
+     * <p>Without a sector or role, Keycloak pages the list. With either, the whole realm (or the
+     * sector) is read and filtered here, since Keycloak can neither combine a search with a sector
+     * nor, for this service account, list a role's users: one role lookup per user, which is fine
+     * for a company's staff.
+     *
+     * @param search text looked for in the email and name
+     * @param sector only users in exactly this sector, when set
+     * @param role   only users with this role, when set; {@code STANDARD} means neither APPROVER nor
+     *               ADMIN
+     * @throws InvalidPageRequestException if the page is negative or the size out of range
+     * @throws InvalidRoleException        if the role is not STANDARD, APPROVER or ADMIN
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<AdminUser> list(String search, String sector, String role, Integer requestedPage,
+            Integer requestedSize) {
         int page = requestedPage == null ? 0 : requestedPage;
         int size = requestedSize == null ? DEFAULT_PAGE_SIZE : requestedSize;
         if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
             throw new InvalidPageRequestException(MAX_PAGE_SIZE);
         }
-        List<KeycloakUser> found = keycloak.users(search, page * size, size);
-        long total = keycloak.countUsers(search);
-
+        String wantedRole = isBlank(role) ? null : role.strip().toUpperCase(Locale.ROOT);
+        if (wantedRole != null && !KNOWN_ROLES.contains(wantedRole)) {
+            throw InvalidRoleException.ofFilter(role);
+        }
         String current = currentTermsVersion();
-        Map<String, String> accepted = lastAcceptedVersions(found.stream().map(KeycloakUser::id).toList());
-        List<AdminUser> content = found.stream()
-                .map(user -> toAdminUser(user, user.isEnabled(), roleNames(keycloak.effectiveRealmRoles(user.id())),
-                        accepted.get(user.id()), current))
+        if (isBlank(sector) && wantedRole == null) {
+            List<KeycloakUser> found = keycloak.users(search, page * size, size);
+            long total = keycloak.countUsers(search);
+            return page(found.stream().map(user -> new Listed(user, roleNames(keycloak.effectiveRealmRoles(user.id()))))
+                    .toList(), current, page, size, total);
+        }
+
+        List<Listed> matching = new ArrayList<>();
+        for (KeycloakUser user : allUsers(isBlank(sector) ? search : null, sector)) {
+            if (!isBlank(sector) && !isBlank(search) && !matches(user, search)) {
+                continue;
+            }
+            List<String> roles = roleNames(keycloak.effectiveRealmRoles(user.id()));
+            if (wantedRole == null || hasRole(roles, wantedRole)) {
+                matching.add(new Listed(user, roles));
+            }
+        }
+        int from = Math.min(page * size, matching.size());
+        int to = Math.min(from + size, matching.size());
+        return page(matching.subList(from, to), current, page, size, matching.size());
+    }
+
+    /** A listed user with their known roles. */
+    private record Listed(KeycloakUser user, List<String> roles) {
+    }
+
+    private PageResponse<AdminUser> page(List<Listed> listed, String current, int page, int size, long total) {
+        Map<String, String> accepted = lastAcceptedVersions(listed.stream().map(entry -> entry.user().id()).toList());
+        List<AdminUser> content = listed.stream()
+                .map(entry -> toAdminUser(entry.user(), entry.user().isEnabled(), entry.roles(),
+                        accepted.get(entry.user().id()), current))
                 .toList();
         return new PageResponse<>(content, page, size, total, (int) ((total + size - 1) / size));
+    }
+
+    /** Every user Keycloak lists for this search or sector, across all its pages. */
+    private List<KeycloakUser> allUsers(String search, String sector) {
+        List<KeycloakUser> all = new ArrayList<>();
+        for (int first = 0;; first += ADMIN_SEARCH_PAGE) {
+            List<KeycloakUser> batch = keycloak.users(search, sector, first, ADMIN_SEARCH_PAGE);
+            all.addAll(batch);
+            if (batch.size() < ADMIN_SEARCH_PAGE) {
+                return all;
+            }
+        }
+    }
+
+    /** STANDARD stands for the users with neither APPROVER nor ADMIN. */
+    private static boolean hasRole(List<String> roles, String role) {
+        return STANDARD.equals(role) ? !roles.contains(APPROVER) && !roles.contains(ADMIN) : roles.contains(role);
+    }
+
+    /** Keycloak's search, done here: the text in the username, email, first or last name, any case. */
+    private static boolean matches(KeycloakUser user, String search) {
+        String text = search.strip().toLowerCase(Locale.ROOT);
+        return Stream.of(user.username(), user.email(), user.firstName(), user.lastName())
+                .anyMatch(value -> value != null && value.toLowerCase(Locale.ROOT).contains(text));
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     /**

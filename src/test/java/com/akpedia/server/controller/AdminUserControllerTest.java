@@ -85,7 +85,7 @@ class AdminUserControllerTest {
     @Test
     @DisplayName("GET /admin/users answers a page of users in snake_case")
     void listAnswersPage() throws Exception {
-        given(adminUsers.list("ana", 0, 20)).willReturn(new PageResponse<>(List.of(ana(true, "STANDARD")), 0, 20, 1, 1));
+        given(adminUsers.list("ana", null, null, 0, 20)).willReturn(new PageResponse<>(List.of(ana(true, "STANDARD")), 0, 20, 1, 1));
 
         mvc.perform(get("/api/v1/admin/users").param("search", "ana").param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())

@@ -273,6 +273,41 @@ class AdminUserServiceTest {
     }
 
     @Test
+    @DisplayName("list: a role filter reads the whole realm and keeps the users with it; STANDARD means neither")
+    void listFiltersByRole() {
+        KeycloakUser bia = user("bia-2222", "bia@akpedia.test", true);
+        given(keycloak.users("souza", null, 0, AdminUserService.ADMIN_SEARCH_PAGE))
+                .willReturn(List.of(user(ANA_ID, "ana@akpedia.test", true), bia));
+        given(keycloak.effectiveRealmRoles(ANA_ID)).willReturn(List.of(STANDARD, APPROVER));
+        given(keycloak.effectiveRealmRoles("bia-2222")).willReturn(List.of(DEFAULT_ROLES, STANDARD));
+
+        PageResponse<AdminUser> approvers = service.list("souza", null, "approver", 0, 20);
+        assertThat(approvers.content()).extracting(AdminUser::id).containsExactly(ANA_ID);
+        assertThat(approvers.totalElements()).isEqualTo(1);
+
+        PageResponse<AdminUser> standard = service.list("souza", null, "STANDARD", 0, 20);
+        assertThat(standard.content()).extracting(AdminUser::id).containsExactly("bia-2222");
+
+        assertThatThrownBy(() -> service.list(null, null, "ROOT", 0, 20)).isInstanceOf(InvalidRoleException.class);
+    }
+
+    @Test
+    @DisplayName("list: a sector filter asks Keycloak for the sector and searches here, paging the result")
+    void listFiltersBySector() {
+        KeycloakUser bia = new KeycloakUser("bia-2222", "bia@akpedia.test", "bia@akpedia.test", "Bia", "Lima", true,
+                null, Map.of("sector", List.of("Qualidade")));
+        KeycloakUser carla = new KeycloakUser("carla-3333", "carla@akpedia.test", "carla@akpedia.test", "Carla",
+                "Lima", true, null, Map.of("sector", List.of("Qualidade")));
+        given(keycloak.users(null, "Qualidade", 0, AdminUserService.ADMIN_SEARCH_PAGE))
+                .willReturn(List.of(bia, carla));
+        given(keycloak.effectiveRealmRoles(anyString())).willReturn(List.of(STANDARD));
+
+        assertThat(service.list("LIMA", "Qualidade", null, 1, 1).content()).extracting(AdminUser::id)
+                .containsExactly("carla-3333");
+        assertThat(service.list("carla", "Qualidade", null, 0, 20).totalElements()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("create: a CPF with wrong check digits, or another user's, is refused before Keycloak is touched")
     void createRefusesBadOrTakenCpf() {
         assertThatThrownBy(() -> service.create(newUser("123.456.789-01", "Logística", List.of())))
