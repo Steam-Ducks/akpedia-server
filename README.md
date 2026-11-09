@@ -360,8 +360,12 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
   publica também aceita. A conferência vem depois do login e dos papéis, então sem token
   continua sendo **401**, e sem o papel, **403** `forbidden`. `/health`, Swagger e
   `/internal` não passam por ela.
-- **Sem termos publicados, não há bloqueio**: até o admin publicar a primeira versão, ninguém
-  é perguntado.
+- **Versão 1.0 provisória**: a migration `V16__seed_terms_version_1.sql` publica a versão
+  `1.0` com um texto provisório, para que todos aceitem termos desde o primeiro deploy. O texto
+  definitivo entra como uma versão nova, publicada pelo admin. A migration só insere em um banco
+  sem nenhuma versão: onde o admin já publicou, nada muda.
+- **Sem termos publicados, não há bloqueio**: num banco sem versão nenhuma, ninguém é
+  perguntado.
 - **Histórico**: `terms_versions` e `terms_acceptances` (migration `V8__terms_of_use.sql`) só
   recebem inserções. Uma versão publicada nunca muda (uma mudança é uma versão nova), e cada
   aceite fica guardado com o usuário, a versão e quando. Cada usuário aceita uma versão uma vez
