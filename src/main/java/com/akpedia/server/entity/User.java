@@ -39,6 +39,9 @@ public class User {
     @Column(name = "keycloak_id", length = 36, unique = true)
     private String keycloakId;
 
+    @Column(name = "cpf", length = 11, unique = true)
+    private String cpf;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "sector_id", nullable = false)
     private Sector sector;
@@ -95,6 +98,15 @@ public class User {
         this.keycloakId = keycloakId;
     }
 
+    /** The CPF's 11 digits, as on the Keycloak account; {@code null} until the user's first access. */
+    public String getCpf() {
+        return cpf;
+    }
+
+    public void setCpf(String cpf) {
+        this.cpf = cpf;
+    }
+
     public Sector getSector() {
         return sector;
     }
@@ -125,13 +137,14 @@ public class User {
     }
 
     /**
-     * What is left once the user deleted their account: no name, email or Keycloak link. The row
+     * What is left once the user deleted their account: no name, email, CPF or Keycloak link. The row
      * stays, since documents and terms acceptances point at it.
      */
     public void anonymize(OffsetDateTime when) {
         this.name = DELETED_NAME;
         this.email = "removido-%d@removido.invalid".formatted(id);
         this.keycloakId = null;
+        this.cpf = null;
         this.active = false;
         if (deletedAt == null) {
             this.deletedAt = when;

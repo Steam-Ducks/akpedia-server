@@ -31,6 +31,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import com.akpedia.server.TestCpfs;
 import com.akpedia.server.client.KeycloakAdminClient;
 import com.akpedia.server.client.KeycloakRole;
 import com.akpedia.server.client.KeycloakUser;
@@ -298,7 +299,8 @@ class AccountDeletionServiceTest {
         entityManager.clear();
 
         String newKeycloakId = UUID.randomUUID().toString();
-        Long newId = provisioning.provision(new KeycloakAccount(newKeycloakId, email, "Ana Souza", sector.getName()));
+        Long newId = provisioning.provision(new KeycloakAccount(newKeycloakId, email, "Ana Souza", sector.getName(),
+                TestCpfs.random()));
 
         assertThat(newId).isNotEqualTo(oldId);
         entityManager.clear();
@@ -308,6 +310,7 @@ class AccountDeletionServiceTest {
         assertThat(again.getDeletedAt()).isNull();
         User old = users.findById(oldId).orElseThrow();
         assertThat(old.getName()).isEqualTo("Usuário removido");
+        assertThat(old.getCpf()).isNull();
         assertThat(old.getKeycloakId()).isNull();
     }
 

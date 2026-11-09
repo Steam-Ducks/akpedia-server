@@ -314,6 +314,16 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("incomplete_account", e.getMessage()));
     }
 
+    /**
+     * 422: the logged-in account's CPF has wrong check digits, or another user has it, so it
+     * gets no row here until an admin corrects it in Keycloak.
+     */
+    @ExceptionHandler(AccountCpfException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccountCpf(AccountCpfException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ApiErrorResponse(e.getCode(), e.getMessage()));
+    }
+
     /** 400: a page of a list was asked for out of bounds. */
     @ExceptionHandler(InvalidPageRequestException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidPage(InvalidPageRequestException e) {

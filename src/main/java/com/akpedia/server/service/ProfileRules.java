@@ -12,7 +12,7 @@ import com.akpedia.server.exception.CpfTakenException;
  * creating or editing a user, the user editing themself or asking for a new e-mail or CPF. Each
  * method takes the exception its caller answers with, so the screen gets that caller's code.
  */
-final class ProfileRules {
+public final class ProfileRules {
 
     /** Keycloak's user profile caps every attribute at 255. */
     static final int MAX_LENGTH = 255;
@@ -58,6 +58,11 @@ final class ProfileRules {
             throw invalid.apply("CPF inválido: confira os dígitos.");
         }
         return cpf;
+    }
+
+    /** Whether the value is 11 digits ending in the CPF's check digits. */
+    public static boolean isValidCpf(String cpf) {
+        return cpf != null && CPF.matcher(cpf).matches() && hasValidCheckDigits(cpf);
     }
 
     /**

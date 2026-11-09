@@ -1,6 +1,7 @@
 package com.akpedia.server.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 
@@ -12,7 +13,9 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
+import com.akpedia.server.TestCpfs;
 import com.akpedia.server.entity.User;
+import com.akpedia.server.exception.AccountCpfException;
 import com.akpedia.server.repository.UserRepository;
 
 @DataJpaTest
@@ -30,7 +33,7 @@ class UserProvisioningServiceTest {
     private TestEntityManager entityManager;
 
     private static KeycloakAccount account(String email, String name, String sector) {
-        return new KeycloakAccount(UUID.randomUUID().toString(), email, name, sector);
+        return new KeycloakAccount(UUID.randomUUID().toString(), email, name, sector, TestCpfs.random());
     }
 
     private static String unique(String prefix) {
@@ -54,6 +57,7 @@ class UserProvisioningServiceTest {
         assertThat(user.getEmail()).isEqualTo(account.email());
         assertThat(user.getName()).isEqualTo("Ana Souza");
         assertThat(user.getSector().getName()).isEqualTo(sector);
+        assertThat(user.getCpf()).isEqualTo(account.cpf());
         assertThat(user.isActive()).isTrue();
     }
 
@@ -82,19 +86,20 @@ class UserProvisioningServiceTest {
     }
 
     @Test
-    @DisplayName("a name, email or sector changed in Keycloak is copied over")
+    @DisplayName("a name, email, sector or CPF changed in Keycloak is copied over")
     void changesInKeycloakAreCopied() {
         KeycloakAccount before = account(unique("ana") + "@akpedia.test", "Ana", unique("Setor"));
         Long id = provisioning.provision(before);
 
         KeycloakAccount after = new KeycloakAccount(
-                before.id(), unique("ana.souza") + "@akpedia.test", "Ana Souza", unique("Outro"));
+                before.id(), unique("ana.souza") + "@akpedia.test", "Ana Souza", unique("Outro"), TestCpfs.random());
         assertThat(provisioning.provision(after)).isEqualTo(id);
 
         User user = reload(id);
         assertThat(user.getEmail()).isEqualTo(after.email());
         assertThat(user.getName()).isEqualTo("Ana Souza");
         assertThat(user.getSector().getName()).isEqualTo(after.sector());
+        assertThat(user.getCpf()).isEqualTo(after.cpf());
     }
 
     @Test
@@ -116,5 +121,45 @@ class UserProvisioningServiceTest {
         User user = reload(provisioning.provision(account(unique("ana") + "@akpedia.test", name, unique("Setor"))));
 
         assertThat(user.getName()).hasSize(150);
+    }
+
+    @Test
+    @DisplayName("a first access with a CPF of wrong check digits is refused, and creates no row")
+    void invalidCpfIsRefused() {
+        KeycloakAccount account = new KeycloakAccount(UUID.randomUUID().toString(), unique("ana") + "@akpedia.test",
+                "Ana", unique("Setor"), "52998224726");
+        long before = users.count();
+
+        assertThatThrownBy(() -> provisioning.provision(account))
+                .isInstanceOf(AccountCpfException.class)
+                .extracting("code").isEqualTo("invalid_cpf");
+        assertThat(users.count()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("a first access with another user's CPF is refused")
+    void takenCpfIsRefused() {
+        KeycloakAccount ana = account(unique("ana") + "@akpedia.test", "Ana", unique("Setor"));
+        provisioning.provision(ana);
+        KeycloakAccount bia = new KeycloakAccount(UUID.randomUUID().toString(), unique("bia") + "@akpedia.test",
+                "Bia", ana.sector(), ana.cpf());
+
+        assertThatThrownBy(() -> provisioning.provision(bia))
+                .isInstanceOf(AccountCpfException.class)
+                .extracting("code").isEqualTo("cpf_taken");
+    }
+
+    @Test
+    @DisplayName("a CPF changed in Keycloak to another user's is refused, and the row keeps its own")
+    void changedToTakenCpfIsRefused() {
+        KeycloakAccount ana = account(unique("ana") + "@akpedia.test", "Ana", unique("Setor"));
+        KeycloakAccount bia = account(unique("bia") + "@akpedia.test", "Bia", ana.sector());
+        provisioning.provision(ana);
+        Long biaId = provisioning.provision(bia);
+        KeycloakAccount biaWithAnasCpf = new KeycloakAccount(bia.id(), bia.email(), bia.name(), bia.sector(),
+                ana.cpf());
+
+        assertThatThrownBy(() -> provisioning.provision(biaWithAnasCpf)).isInstanceOf(AccountCpfException.class);
+        assertThat(reload(biaId).getCpf()).isEqualTo(bia.cpf());
     }
 }

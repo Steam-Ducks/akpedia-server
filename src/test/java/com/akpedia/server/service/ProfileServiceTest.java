@@ -338,6 +338,23 @@ class ProfileServiceTest {
         Map<String, Object> sent = sentToKeycloak(ana.getKeycloakId(), null);
         assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(NEW_CPF), "sector", List.of("Engenharia")));
         assertThat(sent).doesNotContainKey("email");
+        entityManager.flush();
+        assertThat(users.findById(ana.getId()).orElseThrow().getCpf()).isEqualTo(NEW_CPF);
+    }
+
+    @Test
+    @DisplayName("a row still holding the approved CPF from before gives it up")
+    void staleRowGivesUpTheCpf() {
+        admin.setCpf(NEW_CPF);
+        entityManager.flush();
+        ProfileChangeRequest request = persistRequest(ana, ProfileField.CPF, NEW_CPF);
+
+        profiles.approve(request.getId(), admin.getId());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(users.findById(ana.getId()).orElseThrow().getCpf()).isEqualTo(NEW_CPF);
+        assertThat(users.findById(admin.getId()).orElseThrow().getCpf()).isNull();
     }
 
     @Test
@@ -390,6 +407,7 @@ class ProfileServiceTest {
         assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(NEW_CPF), "sector", List.of("Engenharia")));
         entityManager.flush();
         assertThat(users.findById(ana.getId()).orElseThrow().getEmail()).isEqualTo(newEmail);
+        assertThat(users.findById(ana.getId()).orElseThrow().getCpf()).isEqualTo(NEW_CPF);
         assertThat(events(AuditService.USER_UPDATED)).singleElement().satisfies(entry -> {
             assertThat(details(entry)).isEqualTo(Map.of("target_keycloak_id", ana.getKeycloakId(),
                     "fields", List.of("email", "cpf")));

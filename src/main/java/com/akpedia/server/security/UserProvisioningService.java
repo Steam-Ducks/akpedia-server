@@ -6,9 +6,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.akpedia.server.entity.Sector;
+import com.akpedia.server.exception.AccountCpfException;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.repository.SectorRepository;
 import com.akpedia.server.repository.UserRepository;
+import com.akpedia.server.service.ProfileRules;
 
 /** Keeps the {@code users} row of a Keycloak account in step with the account. */
 @Service
@@ -26,8 +28,11 @@ public class UserProvisioningService {
     }
 
     /**
-     * Finds the account's row, creating it on the first login, and copies over any name, email or
-     * sector changed in Keycloak since.
+     * Finds the account's row, creating it on the first login, and copies over any name, email,
+     * sector or CPF changed in Keycloak since.
+     *
+     * <p>A CPF the row does not have yet (the first access, or a CPF changed in Keycloak) is
+     * checked first: its check digits, and that no other user has it.
      *
      * <p>A row with the same email but no Keycloak link (the seeded user, say) is taken over
      * rather than duplicated, since the email is unique. So is one linked to another account with
@@ -37,6 +42,7 @@ public class UserProvisioningService {
      * realm's user profile.
      *
      * @return the user's id
+     * @throws AccountCpfException if the account's CPF is invalid or another user's
      * @throws org.springframework.dao.DataIntegrityViolationException if a concurrent request
      *         created the same row or sector first; calling again then finds it
      */
@@ -48,11 +54,15 @@ public class UserProvisioningService {
         String name = account.name().length() > MAX_NAME_LENGTH
                 ? account.name().substring(0, MAX_NAME_LENGTH)
                 : account.name();
+        if (user == null || !account.cpf().equals(user.getCpf())) {
+            ensureCpfUsable(account.cpf(), user);
+        }
         Sector sector = sectorNamed(account.sector());
 
         if (user == null) {
             user = new User(name, account.email(), sector);
             user.setKeycloakId(account.id());
+            user.setCpf(account.cpf());
             return users.saveAndFlush(user).getId();
         }
         // Set only what changed, so an unchanged user costs no UPDATE on every request.
@@ -68,8 +78,27 @@ public class UserProvisioningService {
         if (!Objects.equals(sector.getId(), user.getSector().getId())) {
             user.setSector(sector);
         }
+        if (!account.cpf().equals(user.getCpf())) {
+            user.setCpf(account.cpf());
+        }
         users.flush();
         return user.getId();
+    }
+
+    /**
+     * Refuses a CPF with wrong check digits, or one another user's row has.
+     *
+     * @param user the account's row, {@code null} before the first access
+     */
+    private void ensureCpfUsable(String cpf, User user) {
+        if (!ProfileRules.isValidCpf(cpf)) {
+            throw AccountCpfException.invalid();
+        }
+        boolean taken = users.findByCpf(cpf).filter(other -> user == null || !other.getId().equals(user.getId()))
+                .isPresent();
+        if (taken) {
+            throw AccountCpfException.taken();
+        }
     }
 
     private Sector sectorNamed(String name) {

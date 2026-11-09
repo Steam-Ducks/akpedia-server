@@ -15,6 +15,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
+    Optional<User> findByCpf(String cpf);
+
     /** The row with its sector loaded. */
     @Query("SELECT u FROM User u JOIN FETCH u.sector WHERE u.id = :id")
     Optional<User> findWithSectorById(@Param("id") Long id);

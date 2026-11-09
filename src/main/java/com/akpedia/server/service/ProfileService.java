@@ -180,6 +180,7 @@ public class ProfileService {
         }, emailChanged ? email : null);
         if (row != null) {
             mirror(row, firstName, lastName, emailChanged ? email : null, sector);
+            mirrorCpf(row, cpf);
         }
         audit.record(null, AuditService.USER_UPDATED, AuditService.USER, row == null ? null : row.getId(),
                 AuditService.details("target_keycloak_id", id, "fields", fields));
@@ -312,6 +313,7 @@ public class ProfileService {
             ensureCpfFree(keycloakId, value);
             updateKeycloak(keycloakId, representation -> attributes(representation)
                     .put("cpf", new ArrayList<>(List.of(value))), null);
+            mirrorCpf(row, value);
         }
         request.decide(ChangeRequestStatus.APPROVED, users.getReferenceById(adminId), null, OffsetDateTime.now(clock));
         audit.record(adminId, AuditService.PROFILE_CHANGE_APPROVED, AuditService.PROFILE_CHANGE_REQUEST, requestId,
@@ -395,6 +397,22 @@ public class ProfileService {
         if (!sector.equals(row.getSector().getName())) {
             row.setSector(sectors.findByName(sector).orElseGet(() -> sectors.saveAndFlush(new Sector(sector, null))));
         }
+    }
+
+    /**
+     * Copies the CPF to the user's row. Keycloak said no other account has it, so a row still
+     * holding it is out of date (its account changed CPF and has not logged in since): it gives
+     * the CPF up, and gets its new one on its next request.
+     */
+    private void mirrorCpf(User row, String cpf) {
+        if (cpf.equals(row.getCpf())) {
+            return;
+        }
+        users.findByCpf(cpf).filter(other -> !other.getId().equals(row.getId())).ifPresent(other -> {
+            other.setCpf(null);
+            users.flush();
+        });
+        row.setCpf(cpf);
     }
 
     /** The API names of the fields that differ from the account's, in the form's order. */

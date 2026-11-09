@@ -36,6 +36,7 @@ class CurrentUserTest {
                 .claim("email", "ana@akpedia.test")
                 .claim("name", "Ana")
                 .claim("sector", "Engenharia")
+                .claim("cpf", "52998224725")
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(300))
                 .build();

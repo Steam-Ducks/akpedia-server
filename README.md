@@ -314,12 +314,23 @@ de uma requisição à API (aba Rede do navegador) e acrescente `-H "Authorizati
 
 O usuário de uma requisição é o dono do token. Na primeira requisição que precisa dele (enviar um
 documento, listar as próprias submissões, aprovar), o servidor cria a linha em `users` a partir do
-token: nome, email e setor (claim `sector`), ligada à conta do Keycloak por `keycloak_id` (o `sub`
-do token). Nas seguintes, copia o que tiver mudado no Keycloak. Um setor que o banco ainda não tem
-é criado. Uma linha que já existia com o mesmo email é reaproveitada, e não duplicada.
+token: nome, email, setor (claim `sector`) e CPF (claim `cpf`), ligada à conta do Keycloak por
+`keycloak_id` (o `sub` do token). Nas seguintes, copia o que tiver mudado no Keycloak. Um setor que
+o banco ainda não tem é criado. Uma linha que já existia com o mesmo email é reaproveitada, e não
+duplicada.
 
-Uma conta sem email ou sem setor (só acontece com usuário criado à mão no console, sem esses
+O CPF é conferido no primeiro acesso e sempre que muda no Keycloak: com dígitos verificadores
+errados a resposta é **422** `invalid_cpf`, e se outro usuário já tem esse CPF em `users.cpf`
+(único), **422** `cpf_taken`. Nos dois casos a linha não é criada (nem o CPF trocado) até um admin
+corrigir o CPF da conta. O cadastro pela tela do Keycloak só confere o formato, por isso a
+conferência fica aqui.
+
+Uma conta sem email, setor ou CPF (só acontece com usuário criado à mão no console, sem esses
 campos) recebe **403** `incomplete_account` nessas rotas.
+
+Os claims `sector` e `cpf` vêm de mappers do client `akpedia-client` no realm. Um Keycloak que
+importou o realm antes do mapper `cpf` existir precisa dele criado à mão (Clients › akpedia-client ›
+Client scopes › Dedicated › Add mapper › User Attribute, atributo e claim `cpf`, só no access token).
 
 O usuário `aprovador@akpedia.local`, criado pela migration `V5__seed_default_approver.sql` quando
 ainda não havia login, continua no banco como autor e aprovador dos documentos daquela época.
@@ -373,8 +384,9 @@ guardado até perto de vencer.
   conta (**409** `cannot_disable_self`), e ninguém desativa nem tira o `ADMIN` do único admin
   ativo (**409** `last_admin`), nem um admin que acabou de perder o papel e ainda tem o token antigo.
 - O CPF, ao ser cadastrado ou trocado (pelo admin ou num pedido aprovado), precisa ter os dígitos
-  verificadores certos e não pode ser de outra conta (**409** `cpf_taken`). No cadastro pela tela
-  do Keycloak só o formato (11 dígitos) é conferido.
+  verificadores certos e não pode ser de outra conta (**409** `cpf_taken`). O novo CPF vai também
+  para `users.cpf`. No cadastro pela tela do Keycloak só o formato (11 dígitos) é conferido; o
+  resto, no primeiro acesso (acima).
 - **404** `user_not_found` para um id que o Keycloak não conhece; **502** `keycloak_unavailable`
   quando o Keycloak não responde ou recusa a service account.
 
