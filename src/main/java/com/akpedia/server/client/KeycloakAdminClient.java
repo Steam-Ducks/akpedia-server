@@ -177,6 +177,20 @@ public class KeycloakAdminClient {
         return found == null ? List.of() : found;
     }
 
+    /** The users whose {@code cpf} attribute is exactly this one. At most one while the server keeps CPFs unique. */
+    public List<KeycloakUser> usersWithCpf(String cpf) {
+        List<KeycloakUser> found = call("procurar o CPF", token -> restClient.get()
+                .uri(builder -> builder.path("/admin/realms/{realm}/users")
+                        .queryParam("q", "{q}")
+                        .queryParam("exact", true)
+                        .queryParam("briefRepresentation", false)
+                        .build(Map.of("realm", properties.realm(), "q", "cpf:" + cpf)))
+                .headers(bearer(token))
+                .retrieve()
+                .body(USERS));
+        return found == null ? List.of() : found;
+    }
+
     /**
      * Changes the user's account. The whole representation is read and sent back with the change
      * applied: Keycloak replaces what it is sent, attributes included, so a field left out would be

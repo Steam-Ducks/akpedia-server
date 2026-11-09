@@ -37,6 +37,7 @@ import com.akpedia.server.entity.TermsVersion;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.exception.CannotChangeOwnAdminException;
 import com.akpedia.server.exception.CannotDisableSelfException;
+import com.akpedia.server.exception.CpfTakenException;
 import com.akpedia.server.exception.InvalidPageRequestException;
 import com.akpedia.server.exception.InvalidRoleException;
 import com.akpedia.server.exception.InvalidUserException;
@@ -269,6 +270,18 @@ class AdminUserServiceTest {
         service.setEnabled(ANA_ID, false, ADMIN_ID);
 
         verify(keycloak).setEnabled(ANA_ID, false);
+    }
+
+    @Test
+    @DisplayName("create: a CPF with wrong check digits, or another user's, is refused before Keycloak is touched")
+    void createRefusesBadOrTakenCpf() {
+        assertThatThrownBy(() -> service.create(newUser("123.456.789-01", "Logística", List.of())))
+                .isInstanceOf(InvalidUserException.class).hasMessageContaining("CPF inválido");
+
+        given(keycloak.usersWithCpf("12345678909")).willReturn(List.of(user(ANA_ID, "ana@akpedia.test", true)));
+        assertThatThrownBy(() -> service.create(newUser("123.456.789-09", "Logística", List.of())))
+                .isInstanceOf(CpfTakenException.class);
+        verify(keycloak, never()).createUser(any());
     }
 
     @Test

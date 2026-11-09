@@ -366,6 +366,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("user_exists", e.getMessage()));
     }
 
+    /** 409: another user already has that CPF. */
+    @ExceptionHandler(CpfTakenException.class)
+    public ResponseEntity<ApiErrorResponse> handleCpfTaken(CpfTakenException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("cpf_taken", e.getMessage()));
+    }
+
     /** 400: the profile edit is missing a field or has an invalid one, the message says which. */
     @ExceptionHandler(InvalidProfileException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidProfile(InvalidProfileException e) {

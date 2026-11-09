@@ -140,6 +140,7 @@ public class ProfileService {
      * @throws InvalidProfileException if a field is missing or invalid, or Keycloak refused one
      * @throws NothingChangedException if it is all as it was
      * @throws UserExistsException     if another user has that e-mail
+     * @throws com.akpedia.server.exception.CpfTakenException if another user has that CPF
      * @throws UserNotFoundException   if there is no such user
      */
     @Transactional
@@ -162,6 +163,9 @@ public class ProfileService {
         User row = users.findByKeycloakId(id).orElse(null);
         if (emailChanged) {
             ensureEmailFree(id, row, email);
+        }
+        if (fields.contains("cpf")) {
+            ensureCpfFree(id, cpf);
         }
         updateKeycloak(id, representation -> {
             representation.put("firstName", firstName);
@@ -195,6 +199,7 @@ public class ProfileService {
      *         current one, or the reason too long
      * @throws ChangeRequestPendingException if a request for that field is waiting already
      * @throws UserExistsException           if another user has that e-mail
+     * @throws com.akpedia.server.exception.CpfTakenException if another user has that CPF
      */
     @Transactional
     public ChangeRequest request(String keycloakId, Long userId, NewChangeRequest body) {
@@ -221,6 +226,8 @@ public class ProfileService {
         }
         if (field == ProfileField.EMAIL) {
             ensureEmailFree(keycloakId, null, value);
+        } else {
+            ensureCpfFree(keycloakId, value);
         }
         ProfileChangeRequest saved;
         try {
@@ -283,6 +290,7 @@ public class ProfileService {
      * @throws ChangeRequestNotFoundException   if there is no such request
      * @throws ChangeRequestNotPendingException if it was decided already
      * @throws UserExistsException              if the e-mail was taken meanwhile
+     * @throws com.akpedia.server.exception.CpfTakenException if the CPF was taken meanwhile
      */
     @Transactional
     public ChangeRequest approve(Long requestId, Long adminId) {
@@ -301,6 +309,7 @@ public class ProfileService {
             }, value);
             row.setEmail(value);
         } else {
+            ensureCpfFree(keycloakId, value);
             updateKeycloak(keycloakId, representation -> attributes(representation)
                     .put("cpf", new ArrayList<>(List.of(value))), null);
         }
@@ -345,6 +354,10 @@ public class ProfileService {
      *
      * @param row the account's own row, if it has one
      */
+    private void ensureCpfFree(String keycloakId, String cpf) {
+        ProfileRules.ensureCpfFree(keycloak, keycloakId, cpf);
+    }
+
     private void ensureEmailFree(String keycloakId, User row, String email) {
         boolean taken = keycloak.usersWithEmail(email).stream().anyMatch(other -> !other.id().equals(keycloakId));
         if (!taken) {

@@ -343,6 +343,19 @@ class KeycloakAdminClientTest {
     }
 
     @Test
+    @DisplayName("finds the users with a CPF by an exact attribute query")
+    void findsUsersWithCpf() {
+        expectToken("tok-1");
+        keycloak.expect(requestTo(USERS_URL + "?q=cpf%3A12345678909&exact=true&briefRepresentation=false"))
+                .andRespond(withSuccess("""
+                        [{"id": "u1", "username": "ana@akpedia.test", "attributes": {"cpf": ["12345678909"]}}]""",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(client.usersWithCpf("12345678909")).extracting(KeycloakUser::id).containsExactly("u1");
+        keycloak.verify();
+    }
+
+    @Test
     @DisplayName("ends a user's sessions")
     void logsOut() {
         expectToken("tok-1");

@@ -235,10 +235,12 @@ public class AdminUserService {
      *
      * @throws InvalidUserException if a field is missing or invalid, or Keycloak refused one
      * @throws UserExistsException  if the realm already has a user with that email
+     * @throws com.akpedia.server.exception.CpfTakenException if another user has that CPF
      */
     @Transactional
     public AdminUser create(CreateUserRequest request) {
         NewUser user = validate(request);
+        ProfileRules.ensureCpfFree(keycloak, null, user.cpf());
         Map<String, Object> representation = new LinkedHashMap<>();
         representation.put("username", user.email());
         representation.put("email", user.email());
