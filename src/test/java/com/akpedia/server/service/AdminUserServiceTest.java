@@ -289,9 +289,9 @@ class AdminUserServiceTest {
         given(keycloak.availableRealmRoles("bia-2222")).willReturn(List.of(APPROVER, ADMIN));
         given(keycloak.effectiveRealmRoles("bia-2222")).willReturn(List.of(DEFAULT_ROLES, STANDARD, APPROVER));
         given(keycloak.user("bia-2222")).willReturn(new KeycloakUser("bia-2222", "bia@akpedia.test",
-                "bia@akpedia.test", "Bia", "Lima", true, 1_762_000_000_000L, Map.of("sector", List.of("Setor 3"))));
+                "bia@akpedia.test", "Bia", "Lima", true, 1_762_000_000_000L, Map.of("sector", List.of("Logística"))));
 
-        AdminUser created = service.create(newUser("123.456.789-01", "Setor 3", List.of("APPROVER")));
+        AdminUser created = service.create(newUser("123.456.789-09", "Logística", List.of("APPROVER")));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> representation = ArgumentCaptor.forClass(Map.class);
@@ -303,13 +303,13 @@ class AdminUserServiceTest {
                 .containsEntry("lastName", "Lima")
                 .containsEntry("enabled", true)
                 .containsEntry("emailVerified", true)
-                .containsEntry("attributes", Map.of("cpf", List.of("12345678901"), "sector", List.of("Setor 3")))
+                .containsEntry("attributes", Map.of("cpf", List.of("12345678909"), "sector", List.of("Logística")))
                 .doesNotContainKey("credentials");
         verify(keycloak).setPassword("bia-2222", "s3gr3d0!");
         verify(keycloak).addRealmRoles("bia-2222", List.of(APPROVER));
         assertThat(created.id()).isEqualTo("bia-2222");
         assertThat(created.roles()).containsExactly("STANDARD", "APPROVER");
-        assertThat(created.sector()).isEqualTo("Setor 3");
+        assertThat(created.sector()).isEqualTo("Logística");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> details = ArgumentCaptor.forClass(Map.class);
@@ -328,7 +328,7 @@ class AdminUserServiceTest {
         given(keycloak.createUser(any())).willReturn("bia-2222");
         willThrow(new InvalidUserException("senha fraca")).given(keycloak).setPassword("bia-2222", "s3gr3d0!");
 
-        assertThatThrownBy(() -> service.create(newUser("12345678901", "Setor 1", List.of())))
+        assertThatThrownBy(() -> service.create(newUser("12345678909", "Engenharia", List.of())))
                 .isInstanceOf(InvalidUserException.class);
 
         verify(keycloak).deleteUser("bia-2222");
@@ -339,14 +339,14 @@ class AdminUserServiceTest {
     @DisplayName("create: each missing or invalid field is invalid_user, before Keycloak is called")
     void createValidates() {
         List<CreateUserRequest> invalid = List.of(
-                new CreateUserRequest(null, "Lima", "bia@akpedia.test", "x", "12345678901", "Setor 1", List.of()),
-                new CreateUserRequest("Bia", " ", "bia@akpedia.test", "x", "12345678901", "Setor 1", List.of()),
-                new CreateUserRequest("Bia", "Lima", "bia", "x", "12345678901", "Setor 1", List.of()),
-                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "", "12345678901", "Setor 1", List.of()),
-                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "1234567890", "Setor 1", List.of()),
-                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "1234567890a", "Setor 1", List.of()),
-                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "12345678901", "Setor 9", List.of()),
-                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "12345678901", "Setor 1",
+                new CreateUserRequest(null, "Lima", "bia@akpedia.test", "x", "12345678909", "Engenharia", List.of()),
+                new CreateUserRequest("Bia", " ", "bia@akpedia.test", "x", "12345678909", "Engenharia", List.of()),
+                new CreateUserRequest("Bia", "Lima", "bia", "x", "12345678909", "Engenharia", List.of()),
+                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "", "12345678909", "Engenharia", List.of()),
+                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "1234567890", "Engenharia", List.of()),
+                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "1234567890a", "Engenharia", List.of()),
+                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "12345678909", "Setor 9", List.of()),
+                new CreateUserRequest("Bia", "Lima", "bia@akpedia.test", "x", "12345678909", "Engenharia",
                         List.of("STANDARD")));
 
         for (CreateUserRequest request : invalid) {
@@ -360,7 +360,7 @@ class AdminUserServiceTest {
     void createExisting() {
         given(keycloak.createUser(any())).willThrow(new UserExistsException("bia@akpedia.test"));
 
-        assertThatThrownBy(() -> service.create(newUser("12345678901", "Setor 1", List.of())))
+        assertThatThrownBy(() -> service.create(newUser("12345678909", "Engenharia", List.of())))
                 .isInstanceOf(UserExistsException.class);
         verify(keycloak, never()).setPassword(anyString(), anyString());
         verify(keycloak, never()).deleteUser(anyString());

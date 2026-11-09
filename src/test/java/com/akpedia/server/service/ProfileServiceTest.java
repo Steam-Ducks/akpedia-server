@@ -76,7 +76,7 @@ class ProfileServiceTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private static final String CPF = "12345678901";
+    private static final String CPF = "12345678909";
     private static final String NEW_CPF = "98765432100";
 
     @Autowired
@@ -108,7 +108,7 @@ class ProfileServiceTest {
         ana = persistUser("Ana Souza");
         admin = persistUser("Admin Akpedia");
         newEmail = "nova-" + UUID.randomUUID() + "@akpedia.test";
-        given(keycloak.user(ana.getKeycloakId())).willReturn(account(ana, "Setor 1"));
+        given(keycloak.user(ana.getKeycloakId())).willReturn(account(ana, "Engenharia"));
         given(keycloak.effectiveRealmRoles(anyString()))
                 .willReturn(List.of(new KeycloakRole("r-std", "STANDARD"), new KeycloakRole("r-def", "default-roles")));
         given(keycloak.usersWithEmail(anyString())).willReturn(List.of());
@@ -136,7 +136,7 @@ class ProfileServiceTest {
         representation.put("firstName", "Ana");
         Map<String, List<String>> attributes = new HashMap<>();
         attributes.put("cpf", new ArrayList<>(List.of(CPF)));
-        attributes.put("sector", new ArrayList<>(List.of("Setor 1")));
+        attributes.put("sector", new ArrayList<>(List.of("Engenharia")));
         representation.put("attributes", attributes);
         change.getValue().accept(representation);
         return representation;
@@ -172,7 +172,7 @@ class ProfileServiceTest {
         assertThat(profile.lastName()).isEqualTo("Souza");
         assertThat(profile.email()).isEqualTo(ana.getEmail());
         assertThat(profile.cpf()).isEqualTo(CPF);
-        assertThat(profile.sector()).isEqualTo("Setor 1");
+        assertThat(profile.sector()).isEqualTo("Engenharia");
         assertThat(profile.roles()).containsExactly("STANDARD");
         assertThat(profile.editable()).containsExactly("first_name", "last_name", "sector");
         assertThat(profile.requestable()).containsExactly("email", "cpf");
@@ -181,16 +181,16 @@ class ProfileServiceTest {
     @Test
     @DisplayName("editing name and sector: Keycloak gets them with the CPF kept, the row follows, the audit names the fields")
     void updatesOwnProfile() {
-        profiles.update(ana.getKeycloakId(), ana.getId(), new UpdateProfileRequest(" Ana Maria ", "Souza", "Setor 3"));
+        profiles.update(ana.getKeycloakId(), ana.getId(), new UpdateProfileRequest(" Ana Maria ", "Souza", "Logística"));
 
         Map<String, Object> sent = sentToKeycloak(ana.getKeycloakId(), null);
         assertThat(sent).containsEntry("firstName", "Ana Maria").containsEntry("lastName", "Souza");
-        assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(CPF), "sector", List.of("Setor 3")));
+        assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(CPF), "sector", List.of("Logística")));
         entityManager.flush();
         entityManager.clear();
         User row = users.findById(ana.getId()).orElseThrow();
         assertThat(row.getName()).isEqualTo("Ana Maria Souza");
-        assertThat(row.getSector().getName()).isEqualTo("Setor 3");
+        assertThat(row.getSector().getName()).isEqualTo("Logística");
         assertThat(events(AuditService.PROFILE_UPDATED)).singleElement().satisfies(entry -> {
             assertThat(details(entry)).isEqualTo(Map.of("fields", List.of("first_name", "sector")));
             assertThat(entry.getEntityId()).isEqualTo(ana.getId());
@@ -201,18 +201,18 @@ class ProfileServiceTest {
     @DisplayName("editing: nothing_changed when it is all as it was; invalid_profile for a bad field or Keycloak's refusal")
     void updateRefusals() {
         String id = ana.getKeycloakId();
-        assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana", "Souza", "Setor 1")))
+        assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana", "Souza", "Engenharia")))
                 .isInstanceOf(NothingChangedException.class);
-        assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana", " ", "Setor 1")))
+        assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana", " ", "Engenharia")))
                 .isInstanceOf(InvalidProfileException.class).hasMessage("Informe o sobrenome.");
         assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana", "Souza", "Setor 9")))
                 .isInstanceOf(InvalidProfileException.class).hasMessageContaining("Setor inválido");
         assertThatThrownBy(() -> profiles.update(id, ana.getId(),
-                new UpdateProfileRequest("A".repeat(256), "Souza", "Setor 1")))
+                new UpdateProfileRequest("A".repeat(256), "Souza", "Engenharia")))
                 .isInstanceOf(InvalidProfileException.class).hasMessageContaining("255");
         willThrow(new InvalidUserException("O Keycloak recusou: firstName"))
                 .given(keycloak).updateUser(eq(id), any(), any());
-        assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana$", "Souza", "Setor 1")))
+        assertThatThrownBy(() -> profiles.update(id, ana.getId(), new UpdateProfileRequest("Ana$", "Souza", "Engenharia")))
                 .isInstanceOf(InvalidProfileException.class).hasMessageContaining("firstName");
         assertThat(events(AuditService.PROFILE_UPDATED)).isEmpty();
     }
@@ -260,7 +260,7 @@ class ProfileServiceTest {
                 .isInstanceOf(InvalidChangeRequestException.class).hasMessage("O novo CPF é igual ao atual.");
         assertThatThrownBy(() -> profiles.request(id, row, new NewChangeRequest("cpf", NEW_CPF, "x".repeat(501))))
                 .isInstanceOf(InvalidChangeRequestException.class).hasMessageContaining("500");
-        given(keycloak.usersWithEmail(newEmail)).willReturn(List.of(account(admin, "Setor 1")));
+        given(keycloak.usersWithEmail(newEmail)).willReturn(List.of(account(admin, "Engenharia")));
         assertThatThrownBy(() -> profiles.request(id, row, new NewChangeRequest("email", newEmail, null)))
                 .isInstanceOf(UserExistsException.class);
         assertThat(requests.findByUserIdOrderByCreatedAtDescIdDesc(row)).isEmpty();
@@ -320,7 +320,7 @@ class ProfileServiceTest {
     @DisplayName("approving an e-mail taken meanwhile is user_exists, and the request stays pending")
     void approveTakenEmail() {
         ProfileChangeRequest request = persistRequest(ana, ProfileField.EMAIL, newEmail);
-        given(keycloak.usersWithEmail(newEmail)).willReturn(List.of(account(admin, "Setor 1")));
+        given(keycloak.usersWithEmail(newEmail)).willReturn(List.of(account(admin, "Engenharia")));
 
         assertThatThrownBy(() -> profiles.approve(request.getId(), admin.getId()))
                 .isInstanceOf(UserExistsException.class);
@@ -336,7 +336,7 @@ class ProfileServiceTest {
         profiles.approve(request.getId(), admin.getId());
 
         Map<String, Object> sent = sentToKeycloak(ana.getKeycloakId(), null);
-        assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(NEW_CPF), "sector", List.of("Setor 1")));
+        assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(NEW_CPF), "sector", List.of("Engenharia")));
         assertThat(sent).doesNotContainKey("email");
     }
 
@@ -383,11 +383,11 @@ class ProfileServiceTest {
     @DisplayName("the admin edits every field: e-mail verified, row follows, USER_UPDATED names the fields only")
     void adminEdits() {
         profiles.updateAsAdmin(ana.getKeycloakId(),
-                new AdminProfileUpdateRequest("Ana", "Souza", newEmail, "987.654.321-00", "Setor 1"));
+                new AdminProfileUpdateRequest("Ana", "Souza", newEmail, "987.654.321-00", "Engenharia"));
 
         Map<String, Object> sent = sentToKeycloak(ana.getKeycloakId(), newEmail);
         assertThat(sent).containsEntry("email", newEmail).containsEntry("emailVerified", true);
-        assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(NEW_CPF), "sector", List.of("Setor 1")));
+        assertThat(sent.get("attributes")).isEqualTo(Map.of("cpf", List.of(NEW_CPF), "sector", List.of("Engenharia")));
         entityManager.flush();
         assertThat(users.findById(ana.getId()).orElseThrow().getEmail()).isEqualTo(newEmail);
         assertThat(events(AuditService.USER_UPDATED)).singleElement().satisfies(entry -> {
@@ -402,18 +402,18 @@ class ProfileServiceTest {
     void adminEditRefusals() {
         String id = ana.getKeycloakId();
         assertThatThrownBy(() -> profiles.updateAsAdmin(id,
-                new AdminProfileUpdateRequest("Ana", "Souza", ana.getEmail(), CPF, "Setor 1")))
+                new AdminProfileUpdateRequest("Ana", "Souza", ana.getEmail(), CPF, "Engenharia")))
                 .isInstanceOf(NothingChangedException.class);
         assertThatThrownBy(() -> profiles.updateAsAdmin(id,
-                new AdminProfileUpdateRequest("Ana", "Souza", ana.getEmail(), "1", "Setor 1")))
+                new AdminProfileUpdateRequest("Ana", "Souza", ana.getEmail(), "1", "Engenharia")))
                 .isInstanceOf(InvalidProfileException.class);
         // Another row has it, even if Keycloak does not know it.
         assertThatThrownBy(() -> profiles.updateAsAdmin(id,
-                new AdminProfileUpdateRequest("Ana", "Souza", admin.getEmail(), CPF, "Setor 1")))
+                new AdminProfileUpdateRequest("Ana", "Souza", admin.getEmail(), CPF, "Engenharia")))
                 .isInstanceOf(UserExistsException.class);
-        given(keycloak.usersWithEmail(newEmail)).willReturn(List.of(account(admin, "Setor 1")));
+        given(keycloak.usersWithEmail(newEmail)).willReturn(List.of(account(admin, "Engenharia")));
         assertThatThrownBy(() -> profiles.updateAsAdmin(id,
-                new AdminProfileUpdateRequest("Ana", "Souza", newEmail, CPF, "Setor 1")))
+                new AdminProfileUpdateRequest("Ana", "Souza", newEmail, CPF, "Engenharia")))
                 .isInstanceOf(UserExistsException.class);
         verify(keycloak, never()).updateUser(anyString(), any(), any());
     }

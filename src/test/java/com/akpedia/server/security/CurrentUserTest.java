@@ -35,7 +35,7 @@ class CurrentUserTest {
                 .subject("3f1c2a9e-0000-4000-8000-000000000001")
                 .claim("email", "ana@akpedia.test")
                 .claim("name", "Ana")
-                .claim("sector", "Setor 1")
+                .claim("sector", "Engenharia")
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(300))
                 .build();

@@ -66,10 +66,10 @@ public class AdminUserService {
 
     /**
      * The sectors the realm's user profile offers (keycloak/akpedia-realm.json, attribute
-     * {@code sector}). Keep both in step.
+     * {@code sector}) and migration V13 seeds. Keep all three in step.
      */
-    static final List<String> SECTORS = List.of("Setor 1", "Setor 2", "Setor 3", "Setor 4", "Setor 5", "Setor 6",
-            "Setor 7");
+    public static final List<String> SECTORS = List.of("Engenharia", "Qualidade", "Logística", "Manutenção",
+            "Recursos Humanos", "Financeiro", "Jurídico");
 
     static final int DEFAULT_PAGE_SIZE = 20;
     /** Page size when scanning the whole realm for its admins. */

@@ -160,12 +160,12 @@ class KeycloakAdminClientTest {
         keycloak.expect(requestTo(USERS_URL + "/u1")).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"id": "u1", "email": "ana@akpedia.test", "enabled": true,
-                         "attributes": {"sector": ["Engenharia"], "cpf": ["12345678901"]}}""",
+                         "attributes": {"sector": ["Engenharia"], "cpf": ["12345678909"]}}""",
                         MediaType.APPLICATION_JSON));
         keycloak.expect(requestTo(USERS_URL + "/u1")).andExpect(method(HttpMethod.PUT))
                 .andExpect(jsonPath("$.enabled").value(false))
                 .andExpect(jsonPath("$.attributes.sector[0]").value("Engenharia"))
-                .andExpect(jsonPath("$.attributes.cpf[0]").value("12345678901"))
+                .andExpect(jsonPath("$.attributes.cpf[0]").value("12345678909"))
                 .andRespond(withStatus(HttpStatus.NO_CONTENT));
 
         client.setEnabled("u1", false);
@@ -179,20 +179,20 @@ class KeycloakAdminClientTest {
         keycloak.expect(requestTo(USERS_URL + "/u1")).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"id": "u1", "email": "ana@akpedia.test", "firstName": "Ana", "enabled": true,
-                         "attributes": {"sector": ["Setor 1"], "cpf": ["12345678901"]}}""",
+                         "attributes": {"sector": ["Engenharia"], "cpf": ["12345678909"]}}""",
                         MediaType.APPLICATION_JSON));
         keycloak.expect(requestTo(USERS_URL + "/u1")).andExpect(method(HttpMethod.PUT))
                 .andExpect(jsonPath("$.firstName").value("Ana Maria"))
                 .andExpect(jsonPath("$.enabled").value(true))
-                .andExpect(jsonPath("$.attributes.sector[0]").value("Setor 2"))
-                .andExpect(jsonPath("$.attributes.cpf[0]").value("12345678901"))
+                .andExpect(jsonPath("$.attributes.sector[0]").value("Qualidade"))
+                .andExpect(jsonPath("$.attributes.cpf[0]").value("12345678909"))
                 .andRespond(withStatus(HttpStatus.NO_CONTENT));
 
         client.updateUser("u1", representation -> {
             representation.put("firstName", "Ana Maria");
             @SuppressWarnings("unchecked")
             Map<String, List<String>> attributes = (Map<String, List<String>>) representation.get("attributes");
-            attributes.put("sector", List.of("Setor 2"));
+            attributes.put("sector", List.of("Qualidade"));
         }, null);
         keycloak.verify();
     }
@@ -255,11 +255,11 @@ class KeycloakAdminClientTest {
         keycloak.expect(requestTo(USERS_URL))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.username").value("ana@akpedia.test"))
-                .andExpect(jsonPath("$.attributes.cpf[0]").value("12345678901"))
+                .andExpect(jsonPath("$.attributes.cpf[0]").value("12345678909"))
                 .andRespond(withStatus(HttpStatus.CREATED).location(URI.create(USERS_URL + "/new-id")));
 
         String id = client.createUser(Map.of("username", "ana@akpedia.test", "email", "ana@akpedia.test",
-                "attributes", Map.of("cpf", List.of("12345678901"))));
+                "attributes", Map.of("cpf", List.of("12345678909"))));
 
         assertThat(id).isEqualTo("new-id");
         keycloak.verify();

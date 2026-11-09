@@ -164,6 +164,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
     }
 
+    /** 404: there is no sector with that id. */
+    @ExceptionHandler(SectorNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleSectorNotFound(SectorNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiErrorResponse("sector_not_found", e.getMessage()));
+    }
+
     /** 404: the category named in a document upload does not exist. */
     @ExceptionHandler(CategoryNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleCategoryNotFound(CategoryNotFoundException e) {

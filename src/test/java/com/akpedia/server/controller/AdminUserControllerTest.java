@@ -73,7 +73,7 @@ class AdminUserControllerTest {
     }
 
     private static AdminUser ana(boolean enabled, String... roles) {
-        return new AdminUser(ANA_ID, "Ana Souza", "ana@akpedia.test", "Engenharia", "12345678901", enabled, List.of(roles), "1.0", "2.0",
+        return new AdminUser(ANA_ID, "Ana Souza", "ana@akpedia.test", "Engenharia", "12345678909", enabled, List.of(roles), "1.0", "2.0",
                 OffsetDateTime.parse("2026-11-01T10:00:00Z"));
     }
 
@@ -148,9 +148,9 @@ class AdminUserControllerTest {
     void create() throws Exception {
         String body = """
                 {"first_name": "Ana", "last_name": "Souza", "email": "ana@akpedia.test", "password": "s3gr3d0",
-                 "cpf": "12345678901", "sector": "Setor 1", "roles": ["APPROVER"]}""";
-        given(adminUsers.create(new CreateUserRequest("Ana", "Souza", "ana@akpedia.test", "s3gr3d0", "12345678901",
-                "Setor 1", List.of("APPROVER")))).willReturn(ana(true, "STANDARD", "APPROVER"));
+                 "cpf": "12345678909", "sector": "Engenharia", "roles": ["APPROVER"]}""";
+        given(adminUsers.create(new CreateUserRequest("Ana", "Souza", "ana@akpedia.test", "s3gr3d0", "12345678909",
+                "Engenharia", List.of("APPROVER")))).willReturn(ana(true, "STANDARD", "APPROVER"));
         given(adminUsers.create(new CreateUserRequest(null, null, "dup@akpedia.test", null, null, null, null)))
                 .willThrow(new UserExistsException("dup@akpedia.test"));
         given(adminUsers.create(new CreateUserRequest(null, null, null, null, null, null, null)))
@@ -189,13 +189,13 @@ class AdminUserControllerTest {
     void updateProfile() throws Exception {
         given(adminUsers.get(ANA_ID)).willReturn(ana(true, "STANDARD"));
         String body = """
-                {"first_name": "Ana", "last_name": "Souza", "email": "ana@akpedia.test", "cpf": "123.456.789-01",
-                 "sector": "Setor 2"}""";
+                {"first_name": "Ana", "last_name": "Souza", "email": "ana@akpedia.test", "cpf": "123.456.789-09",
+                 "sector": "Qualidade"}""";
 
         putJson("/api/v1/admin/users/" + ANA_ID + "/profile", body,
-                status().isOk(), jsonPath("$.id").value(ANA_ID), jsonPath("$.cpf").value("12345678901"));
+                status().isOk(), jsonPath("$.id").value(ANA_ID), jsonPath("$.cpf").value("12345678909"));
         verify(profiles).updateAsAdmin(ANA_ID,
-                new AdminProfileUpdateRequest("Ana", "Souza", "ana@akpedia.test", "123.456.789-01", "Setor 2"));
+                new AdminProfileUpdateRequest("Ana", "Souza", "ana@akpedia.test", "123.456.789-09", "Qualidade"));
     }
 
     @Test

@@ -278,7 +278,7 @@ administrador:
 | Login  | `KEYCLOAK_DEV_ADMIN_EMAIL` (`admin@akpedia.local` por padrão) |
 | Senha  | `KEYCLOAK_DEV_ADMIN_PASSWORD`, do `.env` |
 | Papéis | `ADMIN` e `STANDARD` |
-| CPF / setor | `00000000000` / o primeiro setor da lista |
+| CPF / setor | `52998224725` / `Engenharia` |
 
 Ele existe só para o ambiente local. Fora dele, não importe esse usuário: tire-o do arquivo ou
 apague-o depois do import, e crie os administradores de verdade pelo console.
@@ -374,6 +374,23 @@ guardado até perto de vencer.
   do Keycloak só o formato (11 dígitos) é conferido.
 - **404** `user_not_found` para um id que o Keycloak não conhece; **502** `keycloak_unavailable`
   quando o Keycloak não responde ou recusa a service account.
+
+#### Permissões por setor (admin)
+
+Cada setor vê só as categorias liberadas para ele (tabela `sector_categories`). A migration
+`V13__sectors_and_category_access.sql` cria os 7 setores do realm e a tabela combinada:
+Engenharia, Qualidade, Logística e Manutenção veem `Tecnico`, `Regulatorio` e `Qualidade`;
+Recursos Humanos, Financeiro e Jurídico veem `Regulatorio` e `Juridico`.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/sector-categories` | `{categories, sectors}`: todas as categorias (as colunas, por nome) e os setores do realm (as linhas, na ordem do realm), cada um com os `category_ids` que vê |
+| `PUT /api/v1/admin/sectors/{id}/categories` | `{"category_ids": [1, 3]}`: o setor passa a ver exatamente essas categorias. Vale a partir da próxima busca. Registrado como `SECTOR_CATEGORIES_CHANGED`, com as categorias antes e depois. **404** `sector_not_found` ou `category_not_found` |
+
+A lista de setores fica em três lugares, que andam juntos: o atributo `sector` do realm
+(`keycloak/akpedia-realm.json`), `AdminUserService.SECTORS` e a migration V13. Um Keycloak que
+já tinha o realm importado não relê o arquivo: para pegar os setores novos, troque as opções do
+atributo `sector` no console (*Realm settings > User profile*) ou recrie o volume do Keycloak.
 
 | Variável                        | Default                     | Para que serve |
 |---------------------------------|-----------------------------|----------------|

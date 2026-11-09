@@ -68,7 +68,7 @@ class ProfileControllerTest {
     }
 
     private static Profile profile(String firstName) {
-        return new Profile(firstName, "Souza", "ana@akpedia.test", "12345678901", "Setor 1", List.of("STANDARD"),
+        return new Profile(firstName, "Souza", "ana@akpedia.test", "12345678909", "Engenharia", List.of("STANDARD"),
                 Profile.EDITABLE, Profile.REQUESTABLE);
     }
 
@@ -88,8 +88,8 @@ class ProfileControllerTest {
                 .andExpect(jsonPath("$.first_name").value("Ana"))
                 .andExpect(jsonPath("$.last_name").value("Souza"))
                 .andExpect(jsonPath("$.email").value("ana@akpedia.test"))
-                .andExpect(jsonPath("$.cpf").value("12345678901"))
-                .andExpect(jsonPath("$.sector").value("Setor 1"))
+                .andExpect(jsonPath("$.cpf").value("12345678909"))
+                .andExpect(jsonPath("$.sector").value("Engenharia"))
                 .andExpect(jsonPath("$.roles[0]").value("STANDARD"))
                 .andExpect(jsonPath("$.editable").value(org.hamcrest.Matchers.contains("first_name", "last_name", "sector")))
                 .andExpect(jsonPath("$.requestable").value(org.hamcrest.Matchers.contains("email", "cpf")));
@@ -98,21 +98,21 @@ class ProfileControllerTest {
     @Test
     @DisplayName("PUT /me/profile passes the fields, and answers invalid_profile and nothing_changed")
     void updatesProfile() throws Exception {
-        given(profiles.update(ANA_ID, ANA_ROW, new UpdateProfileRequest("Ana Maria", "Souza", "Setor 2")))
+        given(profiles.update(ANA_ID, ANA_ROW, new UpdateProfileRequest("Ana Maria", "Souza", "Qualidade")))
                 .willReturn(profile("Ana Maria"));
-        given(profiles.update(ANA_ID, ANA_ROW, new UpdateProfileRequest("", "Souza", "Setor 2")))
+        given(profiles.update(ANA_ID, ANA_ROW, new UpdateProfileRequest("", "Souza", "Qualidade")))
                 .willThrow(new InvalidProfileException("Informe o nome."));
-        given(profiles.update(ANA_ID, ANA_ROW, new UpdateProfileRequest("Ana", "Souza", "Setor 1")))
+        given(profiles.update(ANA_ID, ANA_ROW, new UpdateProfileRequest("Ana", "Souza", "Engenharia")))
                 .willThrow(new NothingChangedException("Nada foi alterado."));
 
         mvc.perform(put("/api/v1/me/profile").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"first_name\": \"Ana Maria\", \"last_name\": \"Souza\", \"sector\": \"Setor 2\"}"))
+                        .content("{\"first_name\": \"Ana Maria\", \"last_name\": \"Souza\", \"sector\": \"Qualidade\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.first_name").value("Ana Maria"));
         mvc.perform(put("/api/v1/me/profile").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"first_name\": \"\", \"last_name\": \"Souza\", \"sector\": \"Setor 2\"}"))
+                        .content("{\"first_name\": \"\", \"last_name\": \"Souza\", \"sector\": \"Qualidade\"}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("invalid_profile"));
         mvc.perform(put("/api/v1/me/profile").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"first_name\": \"Ana\", \"last_name\": \"Souza\", \"sector\": \"Setor 1\"}"))
+                        .content("{\"first_name\": \"Ana\", \"last_name\": \"Souza\", \"sector\": \"Engenharia\"}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("nothing_changed"));
     }
 
