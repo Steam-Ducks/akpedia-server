@@ -21,8 +21,9 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Answers 403 {@code terms_not_accepted} on every {@code /api} route until the user accepted the
- * current terms of use. The routes the terms screen needs stay open: reading the terms, and
- * accepting or declining them. So does deleting one's account: a user may leave without
+ * current terms of use. The routes the terms screen needs stay open: who the user is
+ * ({@code GET /me}, which says the terms are pending), reading the terms, and accepting or
+ * declining them. So does deleting one's account: a user may leave without
  * accepting.
  *
  * <p>Runs inside the security chain, after the token was checked, so a request without one still
@@ -51,7 +52,7 @@ public class TermsGateFilter extends OncePerRequestFilter {
             return true;
         }
         String method = request.getMethod();
-        return (HttpMethod.GET.matches(method) && path.equals(TERMS_PATH))
+        return (HttpMethod.GET.matches(method) && (path.equals(TERMS_PATH) || path.equals(ME_PATH)))
                 || (HttpMethod.POST.matches(method) && (path.equals(ACCEPT_PATH) || path.equals(DECLINE_PATH)))
                 || (HttpMethod.DELETE.matches(method) && path.equals(ME_PATH));
     }

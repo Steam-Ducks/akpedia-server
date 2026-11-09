@@ -92,6 +92,11 @@ public class TermsService {
         if (!current.getVersion().equalsIgnoreCase(version.strip())) {
             throw new TermsChangedException(version, current.getVersion());
         }
+        // Accepting again (a double click, two tabs) answers the first acceptance.
+        Optional<TermsAcceptance> existing = acceptances.findByUserIdAndTermsVersionId(userId, current.getId());
+        if (existing.isPresent()) {
+            return toResponse(existing.get());
+        }
         TermsAcceptance acceptance = acceptances.saveAndFlush(
                 new TermsAcceptance(users.getReferenceById(userId), current));
         audit.record(userId, AuditService.TERMS_ACCEPTED, AuditService.TERMS_VERSION, current.getId(),

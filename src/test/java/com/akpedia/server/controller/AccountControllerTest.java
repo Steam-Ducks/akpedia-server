@@ -3,7 +3,10 @@ package com.akpedia.server.controller;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -18,13 +21,17 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.List;
+
 import com.akpedia.server.dto.AccountDeletionReplayResponse;
+import com.akpedia.server.dto.MeResponse;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.KeycloakUnavailableException;
 import com.akpedia.server.exception.LastAdminException;
 import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.AccountDeletionReplay;
 import com.akpedia.server.service.AccountDeletionService;
+import com.akpedia.server.service.MeService;
 
 @WebMvcTest(controllers = AccountController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -43,9 +50,27 @@ class AccountControllerTest {
     @MockBean
     private CurrentUser currentUser;
 
+    @MockBean
+    private MeService me;
+
     @BeforeEach
     void logIn() {
         given(currentUser.keycloakId()).willReturn("ana-1111");
+    }
+
+    @Test
+    @DisplayName("GET /me answers the user, their sector and roles, and terms_pending, in snake_case")
+    void getMe() throws Exception {
+        given(currentUser.id()).willReturn(7L);
+        given(me.me(eq(7L), eq("ana-1111"), any())).willReturn(
+                new MeResponse(7L, "Ana Souza", "ana@akpedia.test", "Engenharia", List.of("STANDARD"), true));
+
+        mvc.perform(get("/api/v1/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.sector").value("Engenharia"))
+                .andExpect(jsonPath("$.roles[0]").value("STANDARD"))
+                .andExpect(jsonPath("$.terms_pending").value(true));
     }
 
     @Test

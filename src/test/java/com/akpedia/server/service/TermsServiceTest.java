@@ -201,15 +201,16 @@ class TermsServiceTest {
     }
 
     @Test
-    @DisplayName("every acceptance is kept")
+    @DisplayName("every version accepted is kept, and accepting one again answers the first acceptance")
     void acceptancesAreAppendOnly() {
         publish("1.0");
-        terms.accept(ana.getId(), "1.0");
-        terms.accept(ana.getId(), "1.0");
+        var first = terms.accept(ana.getId(), "1.0");
+        var again = terms.accept(ana.getId(), "1.0");
         publish("2.0");
         terms.accept(ana.getId(), "2.0");
 
-        assertThat(acceptances.count()).isEqualTo(3);
+        assertThat(again).isEqualTo(first);
+        assertThat(acceptances.count()).isEqualTo(2);
         assertThat(terms.status(ana.getKeycloakId()).accepted().version()).isEqualTo("2.0");
     }
 

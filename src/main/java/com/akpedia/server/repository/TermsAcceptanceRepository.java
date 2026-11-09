@@ -29,4 +29,7 @@ public interface TermsAcceptanceRepository extends JpaRepository<TermsAcceptance
                   WHERE b.user = a.user
                     AND (b.acceptedAt > a.acceptedAt OR (b.acceptedAt = a.acceptedAt AND b.id > a.id)))""")
     List<Object[]> findLastAcceptedVersions(@Param("keycloakIds") Collection<String> keycloakIds);
+
+    /** The user's acceptance of this version, if they accepted it. */
+    Optional<TermsAcceptance> findByUserIdAndTermsVersionId(Long userId, Long termsVersionId);
 }
