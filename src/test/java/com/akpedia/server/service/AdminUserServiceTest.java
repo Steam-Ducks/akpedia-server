@@ -41,6 +41,7 @@ import com.akpedia.server.exception.InvalidPageRequestException;
 import com.akpedia.server.exception.InvalidRoleException;
 import com.akpedia.server.exception.InvalidUserException;
 import com.akpedia.server.exception.KeycloakUnavailableException;
+import com.akpedia.server.exception.LastAdminException;
 import com.akpedia.server.exception.UserExistsException;
 import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.repository.TermsAcceptanceRepository;
@@ -190,6 +191,7 @@ class AdminUserServiceTest {
         AdminUser result = service.setEnabled(ANA_ID, false, ADMIN_ID);
 
         verify(keycloak).setEnabled(ANA_ID, false);
+        verify(keycloak).logout(ANA_ID);
         assertThat(row.isActive()).isFalse();
         assertThat(result.enabled()).isFalse();
         verify(audit).record(eq(null), eq("USER_DISABLED"), eq("USER"), eq(42L), any());
@@ -237,6 +239,36 @@ class AdminUserServiceTest {
             assertThat(user.currentTermsVersion()).isEqualTo("3.0");
             assertThat(user.createdAt()).isNotNull();
         });
+    }
+
+    @Test
+    @DisplayName("the only enabled admin cannot be disabled nor lose ADMIN, even by an admin whose token is stale")
+    void lastAdminIsProtected() {
+        given(keycloak.effectiveRealmRoles(ANA_ID)).willReturn(List.of(STANDARD, ADMIN));
+        given(keycloak.realmRoles(ANA_ID)).willReturn(List.of(DEFAULT_ROLES, ADMIN));
+        // The caller lost ADMIN in Keycloak a minute ago; their token still has it.
+        given(keycloak.effectiveRealmRoles(ADMIN_ID)).willReturn(List.of(STANDARD));
+        given(keycloak.users(null, 0, AdminUserService.ADMIN_SEARCH_PAGE)).willReturn(List.of(
+                user(ANA_ID, "ana@akpedia.test", true), user(ADMIN_ID, "admin@akpedia.test", true)));
+
+        assertThatThrownBy(() -> service.setEnabled(ANA_ID, false, ADMIN_ID)).isInstanceOf(LastAdminException.class);
+        assertThatThrownBy(() -> service.setRoles(ANA_ID, List.of("APPROVER"), ADMIN_ID))
+                .isInstanceOf(LastAdminException.class);
+        verify(keycloak, never()).setEnabled(anyString(), anyBoolean());
+        verify(keycloak, never()).removeRealmRoles(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("an admin can be disabled while another enabled admin remains")
+    void adminWithAnotherAdminCanBeDisabled() {
+        given(keycloak.effectiveRealmRoles(ANA_ID)).willReturn(List.of(STANDARD, ADMIN));
+        given(keycloak.effectiveRealmRoles(ADMIN_ID)).willReturn(List.of(STANDARD, ADMIN));
+        given(keycloak.users(null, 0, AdminUserService.ADMIN_SEARCH_PAGE)).willReturn(List.of(
+                user(ANA_ID, "ana@akpedia.test", true), user(ADMIN_ID, "admin@akpedia.test", true)));
+
+        service.setEnabled(ANA_ID, false, ADMIN_ID);
+
+        verify(keycloak).setEnabled(ANA_ID, false);
     }
 
     @Test

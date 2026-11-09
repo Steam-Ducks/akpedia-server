@@ -334,7 +334,7 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("cannot_disable_self", e.getMessage()));
     }
 
-    /** 409: the only enabled admin would delete their own account. */
+    /** 409: the action would leave no enabled admin. */
     @ExceptionHandler(LastAdminException.class)
     public ResponseEntity<ApiErrorResponse> handleLastAdmin(LastAdminException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("last_admin", e.getMessage()));

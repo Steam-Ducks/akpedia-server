@@ -149,6 +149,18 @@ public class KeycloakAdminClient {
     }
 
     /**
+     * Ends every session of the user, so they cannot refresh their token. An access token already
+     * issued stays valid until it expires.
+     */
+    public void logout(String id) {
+        callForUser(id, "encerrar as sessoes do usuario", token -> restClient.post()
+                .uri("/admin/realms/{realm}/users/{id}/logout", properties.realm(), id)
+                .headers(bearer(token))
+                .retrieve()
+                .toBodilessEntity());
+    }
+
+    /**
      * The users whose email is exactly this one (Keycloak compares it without case). At most one
      * while the realm forbids duplicate emails.
      */

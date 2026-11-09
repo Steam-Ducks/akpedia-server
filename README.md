@@ -363,11 +363,15 @@ guardado até perto de vencer.
 | `POST /api/v1/admin/users` | `{"first_name", "last_name", "email", "password", "cpf", "sector", "roles": []}` cria a conta no Keycloak (**201**, o usuário como na lista), com o e-mail já verificado, a senha definitiva e os papéis (`APPROVER`, `ADMIN`). `cpf` tem 11 dígitos (pontos e traço são ignorados) e `sector` é um dos setores do realm (`Setor 1` a `Setor 7`). **400** `invalid_user` diz o que falta ou está errado (inclusive o que o Keycloak recusar, como a política de senha); **409** `user_exists` se o e-mail já tem conta. Se um passo falha depois de a conta ser criada, ela é apagada de novo. A senha nunca vai para log nem auditoria |
 | `GET /api/v1/admin/roles` | Os três papéis, com nome na tela, descrição, se é `assignable` e as permissões de cada um |
 | `PUT /api/v1/admin/users/{id}/roles` | `{"roles": ["APPROVER", "ADMIN"]}`: o usuário fica com exatamente esses papéis atribuíveis. `STANDARD` vem com toda conta e não é mexido. **400** `invalid_role` para outro papel |
-| `PUT /api/v1/admin/users/{id}/status` | `{"enabled": false}` desativa a conta (não entra mais); `true` reativa. Espelhado em `users.is_active` quando o usuário já tem linha |
+| `PUT /api/v1/admin/users/{id}/status` | `{"enabled": false}` desativa a conta (não entra mais, e as sessões dela são encerradas na hora); `true` reativa. Espelhado em `users.is_active` quando o usuário já tem linha, e o token ainda válido de uma conta desativada recebe **401** `account_disabled` |
 
 - A mudança de papel chega ao usuário no próximo refresh do token (uns 5 minutos) ou no próximo login.
 - O admin não tira o próprio `ADMIN` (**409** `cannot_change_own_admin`) nem desativa a própria
-  conta (**409** `cannot_disable_self`).
+  conta (**409** `cannot_disable_self`), e ninguém desativa nem tira o `ADMIN` do único admin
+  ativo (**409** `last_admin`), nem um admin que acabou de perder o papel e ainda tem o token antigo.
+- O CPF, ao ser cadastrado ou trocado (pelo admin ou num pedido aprovado), precisa ter os dígitos
+  verificadores certos e não pode ser de outra conta (**409** `cpf_taken`). No cadastro pela tela
+  do Keycloak só o formato (11 dígitos) é conferido.
 - **404** `user_not_found` para um id que o Keycloak não conhece; **502** `keycloak_unavailable`
   quando o Keycloak não responde ou recusa a service account.
 

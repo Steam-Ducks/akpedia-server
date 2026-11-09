@@ -10,6 +10,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withNoContent;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -339,5 +340,18 @@ class KeycloakAdminClientTest {
         public Clock withZone(ZoneId zone) {
             return this;
         }
+    }
+
+    @Test
+    @DisplayName("ends a user's sessions")
+    void logsOut() {
+        expectToken("tok-1");
+        keycloak.expect(requestTo(USERS_URL + "/u1/logout"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer tok-1"))
+                .andRespond(withNoContent());
+
+        client.logout("u1");
+        keycloak.verify();
     }
 }

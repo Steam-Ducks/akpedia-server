@@ -18,7 +18,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.akpedia.server.client.KeycloakAdminClient;
 import com.akpedia.server.client.KeycloakRole;
-import com.akpedia.server.client.KeycloakUser;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.exception.LastAdminException;
 import com.akpedia.server.exception.UserNotFoundException;
@@ -44,7 +43,7 @@ public class AccountDeletionService {
     private static final Logger log = LoggerFactory.getLogger(AccountDeletionService.class);
 
     /** Users read per Keycloak call while looking for another admin. */
-    static final int ADMIN_SEARCH_PAGE = 100;
+    static final int ADMIN_SEARCH_PAGE = AdminUserService.ADMIN_SEARCH_PAGE;
 
     private final AccountDeletionLog deletions;
     private final KeycloakAdminClient keycloak;
@@ -160,17 +159,7 @@ public class AccountDeletionService {
             // Already gone from Keycloak: an earlier attempt got that far.
             return false;
         }
-        for (int first = 0;; first += ADMIN_SEARCH_PAGE) {
-            List<KeycloakUser> page = keycloak.users(null, first, ADMIN_SEARCH_PAGE);
-            for (KeycloakUser user : page) {
-                if (!user.id().equals(keycloakId) && user.isEnabled() && hasAdmin(user.id())) {
-                    return false;
-                }
-            }
-            if (page.size() < ADMIN_SEARCH_PAGE) {
-                return true;
-            }
-        }
+        return !AdminUserService.hasOtherEnabledAdmin(keycloak, keycloakId);
     }
 
     private boolean hasAdmin(String keycloakId) {

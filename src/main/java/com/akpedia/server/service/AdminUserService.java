@@ -28,6 +28,7 @@ import com.akpedia.server.exception.CannotDisableSelfException;
 import com.akpedia.server.exception.InvalidPageRequestException;
 import com.akpedia.server.exception.InvalidRoleException;
 import com.akpedia.server.exception.InvalidUserException;
+import com.akpedia.server.exception.LastAdminException;
 import com.akpedia.server.exception.UserExistsException;
 import com.akpedia.server.repository.TermsAcceptanceRepository;
 import com.akpedia.server.repository.TermsVersionRepository;
@@ -40,8 +41,9 @@ import com.akpedia.server.repository.UserRepository;
  * <p>Users and roles live in Keycloak, so this reads and changes them there, through the Admin
  * API. A change reaches the user's token on its next refresh, not at once.
  *
- * <p>An admin cannot take ADMIN from themself nor disable their own account: either could leave
- * the realm with nobody to undo it.
+ * <p>An admin cannot take ADMIN from themself nor disable their own account, and nobody can take
+ * ADMIN from, or disable, the only enabled admin: either could leave the realm with nobody to undo
+ * it. A disabled account's sessions are ended at once.
  */
 @Service
 public class AdminUserService {
@@ -70,6 +72,8 @@ public class AdminUserService {
             "Setor 7");
 
     static final int DEFAULT_PAGE_SIZE = 20;
+    /** Page size when scanning the whole realm for its admins. */
+    static final int ADMIN_SEARCH_PAGE = 100;
     static final int MAX_PAGE_SIZE = 100;
 
     private final KeycloakAdminClient keycloak;
@@ -138,6 +142,7 @@ public class AdminUserService {
      * @param callerId the admin's own Keycloak id
      * @throws InvalidRoleException          if a role is not APPROVER or ADMIN
      * @throws CannotChangeOwnAdminException if the admin would lose ADMIN themself
+     * @throws LastAdminException            if the user is the only enabled admin and would lose ADMIN
      * @throws com.akpedia.server.exception.UserNotFoundException if there is no such user
      */
     @Transactional
@@ -155,6 +160,10 @@ public class AdminUserService {
         }
 
         List<String> before = roleNames(keycloak.effectiveRealmRoles(id));
+        if (before.contains(ADMIN) && !wanted.contains(ADMIN) && user.isEnabled()
+                && !hasOtherEnabledAdmin(keycloak, id)) {
+            throw LastAdminException.ofOther();
+        }
         List<KeycloakRole> direct = keycloak.realmRoles(id);
         Set<String> directNames = direct.stream().map(KeycloakRole::name).collect(Collectors.toSet());
 
@@ -186,10 +195,14 @@ public class AdminUserService {
     }
 
     /**
-     * Enables or disables the account, and mirrors it on the user's row, when there is one.
+     * Enables or disables the account, and mirrors it on the user's row, when there is one. A
+     * disabled account's sessions are ended, so its token cannot be refreshed; until the token
+     * expires, the row's {@code is_active} keeps it out (see
+     * {@link com.akpedia.server.security.DisabledAccountFilter}).
      *
      * @param callerId the admin's own Keycloak id
      * @throws CannotDisableSelfException if the admin would disable themself
+     * @throws LastAdminException         if the user is the only enabled admin
      * @throws com.akpedia.server.exception.UserNotFoundException if there is no such user
      */
     @Transactional
@@ -199,7 +212,14 @@ public class AdminUserService {
         }
         KeycloakUser user = keycloak.user(id);
         if (user.isEnabled() != enabled) {
+            List<String> roles = roleNames(keycloak.effectiveRealmRoles(id));
+            if (!enabled && roles.contains(ADMIN) && !hasOtherEnabledAdmin(keycloak, id)) {
+                throw LastAdminException.ofOther();
+            }
             keycloak.setEnabled(id, enabled);
+            if (!enabled) {
+                keycloak.logout(id);
+            }
             users.findByKeycloakId(id).ifPresent(row -> row.setActive(enabled));
             audit.record(null, enabled ? AuditService.USER_ENABLED : AuditService.USER_DISABLED, AuditService.USER,
                     localId(id), AuditService.details("target_keycloak_id", id, "target_email", user.email()));
@@ -273,6 +293,22 @@ public class AdminUserService {
             roles.add(role);
         }
         return new NewUser(firstName, lastName, email, cpf, sector, roles);
+    }
+
+    /** Whether an enabled user other than this one has ADMIN, looked for across the whole realm. */
+    static boolean hasOtherEnabledAdmin(KeycloakAdminClient keycloak, String keycloakId) {
+        for (int first = 0;; first += ADMIN_SEARCH_PAGE) {
+            List<KeycloakUser> page = keycloak.users(null, first, ADMIN_SEARCH_PAGE);
+            for (KeycloakUser user : page) {
+                if (!user.id().equals(keycloakId) && user.isEnabled()
+                        && roleNames(keycloak.effectiveRealmRoles(user.id())).contains(ADMIN)) {
+                    return true;
+                }
+            }
+            if (page.size() < ADMIN_SEARCH_PAGE) {
+                return false;
+            }
+        }
     }
 
     private Long localId(String keycloakId) {
