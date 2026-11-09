@@ -4,6 +4,8 @@ import com.akpedia.server.entity.TermsAcceptance;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -32,4 +34,20 @@ public interface TermsAcceptanceRepository extends JpaRepository<TermsAcceptance
 
     /** The user's acceptance of this version, if they accepted it. */
     Optional<TermsAcceptance> findByUserIdAndTermsVersionId(Long userId, Long termsVersionId);
+
+    /**
+     * Acceptances, newest first, of {@code version} (any case; empty for every version) by users
+     * whose name or e-mail, in lower case, matches {@code user} (a LIKE pattern; empty for every
+     * user). Empty strings rather than nulls: Postgres cannot type a null parameter here.
+     */
+    @Query(value = """
+            SELECT a FROM TermsAcceptance a JOIN FETCH a.user u JOIN FETCH a.termsVersion v
+            WHERE (:version = '' OR lower(v.version) = lower(:version))
+              AND (:user = '' OR lower(u.name) LIKE :user OR lower(u.email) LIKE :user)
+            ORDER BY a.acceptedAt DESC, a.id DESC""",
+            countQuery = """
+            SELECT count(a) FROM TermsAcceptance a JOIN a.user u JOIN a.termsVersion v
+            WHERE (:version = '' OR lower(v.version) = lower(:version))
+              AND (:user = '' OR lower(u.name) LIKE :user OR lower(u.email) LIKE :user)""")
+    Page<TermsAcceptance> search(@Param("version") String version, @Param("user") String user, Pageable pageable);
 }

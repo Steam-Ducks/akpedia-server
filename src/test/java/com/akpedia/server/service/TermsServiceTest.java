@@ -17,13 +17,16 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PublishTermsRequest;
+import com.akpedia.server.dto.TermsAcceptanceEntry;
 import com.akpedia.server.dto.TermsStatusResponse;
 import com.akpedia.server.dto.TermsVersionResponse;
 import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.AuditLog;
 import com.akpedia.server.entity.TermsVersion;
+import com.akpedia.server.exception.InvalidPageRequestException;
 import com.akpedia.server.exception.InvalidTermsException;
 import com.akpedia.server.exception.TermsChangedException;
 import com.akpedia.server.exception.TermsVersionExistsException;
@@ -212,6 +215,30 @@ class TermsServiceTest {
         assertThat(again).isEqualTo(first);
         assertThat(acceptances.count()).isEqualTo(2);
         assertThat(terms.status(ana.getKeycloakId()).accepted().version()).isEqualTo("2.0");
+    }
+
+    @Test
+    @DisplayName("the admin's acceptances list is newest first, filtered by version and by the user's name or e-mail")
+    void acceptancesList() {
+        publish("1.0");
+        terms.accept(ana.getId(), "1.0");
+        terms.accept(admin.getId(), "1.0");
+        publish("2.0");
+        terms.accept(ana.getId(), "2.0");
+
+        PageResponse<TermsAcceptanceEntry> all = terms.acceptances(null, null, 0, 20);
+        assertThat(all.totalElements()).isEqualTo(3);
+        assertThat(all.content().get(0).version()).isEqualTo("2.0");
+        assertThat(all.content().get(0).userName()).isEqualTo("Ana Souza");
+
+        assertThat(terms.acceptances(" 1.0 ", "", 0, 20).content()).extracting(TermsAcceptanceEntry::version)
+                .containsOnly("1.0").hasSize(2);
+        assertThat(terms.acceptances("1.0", "ana s", 0, 20).content()).extracting(TermsAcceptanceEntry::userName)
+                .containsExactly("Ana Souza");
+        assertThat(terms.acceptances(null, ana.getEmail().substring(0, 8).toUpperCase(), 0, 20).totalElements())
+                .isEqualTo(2);
+        assertThat(terms.acceptances(null, null, 1, 2).content()).hasSize(1);
+        assertThatThrownBy(() -> terms.acceptances(null, null, 0, 101)).isInstanceOf(InvalidPageRequestException.class);
     }
 
     @Test

@@ -7,13 +7,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.akpedia.server.dto.AcceptTermsRequest;
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.DeclineTermsRequest;
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PublishTermsRequest;
+import com.akpedia.server.dto.TermsAcceptanceEntry;
 import com.akpedia.server.dto.TermsAcceptanceResponse;
 import com.akpedia.server.dto.TermsStatusResponse;
 import com.akpedia.server.dto.TermsVersionResponse;
@@ -90,6 +93,25 @@ public class TermsController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void decline(@RequestBody @Valid DeclineTermsRequest request) {
         terms.decline(request.version());
+    }
+
+    @Operation(
+            summary = "Who accepted which version of the terms, and when (ADMIN)",
+            description = """
+                    Newest first. `version` keeps one version (any case); `user` looks for part of the user's name
+                    or e-mail. `size` defaults to 20, at most 100. A deleted account shows its anonymized row.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "The page."),
+        @ApiResponse(responseCode = "400", description = "`page` or `size` is out of bounds.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @GetMapping("/admin/terms/acceptances")
+    public PageResponse<TermsAcceptanceEntry> acceptances(
+            @RequestParam(required = false) String version,
+            @RequestParam(required = false) String user,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return terms.acceptances(version, user, page, size);
     }
 
     @Operation(

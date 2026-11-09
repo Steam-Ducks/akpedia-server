@@ -1,19 +1,24 @@
 package com.akpedia.server.service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PublishTermsRequest;
+import com.akpedia.server.dto.TermsAcceptanceEntry;
 import com.akpedia.server.dto.TermsAcceptanceResponse;
 import com.akpedia.server.dto.TermsStatusResponse;
 import com.akpedia.server.dto.TermsVersionResponse;
 import com.akpedia.server.entity.TermsAcceptance;
 import com.akpedia.server.entity.TermsVersion;
+import com.akpedia.server.exception.InvalidPageRequestException;
 import com.akpedia.server.exception.InvalidTermsException;
 import com.akpedia.server.exception.TermsChangedException;
 import com.akpedia.server.exception.TermsVersionExistsException;
@@ -36,6 +41,9 @@ public class TermsService {
 
     private static final String INVALID_VERSION =
             "Informe a versão (até 20 caracteres: letras, números, ponto, hífen ou sublinhado).";
+
+    static final int DEFAULT_PAGE_SIZE = 20;
+    static final int MAX_PAGE_SIZE = 100;
 
     private final TermsVersionRepository versions;
     private final TermsAcceptanceRepository acceptances;
@@ -116,6 +124,34 @@ public class TermsService {
         Long versionId = versions.findByVersionIgnoreCase(version.strip()).map(TermsVersion::getId).orElse(null);
         audit.record(null, AuditService.TERMS_DECLINED, AuditService.TERMS_VERSION, versionId,
                 AuditService.details("version", version));
+    }
+
+    /**
+     * One page of the acceptances, newest first.
+     *
+     * @param version only this version (any case), or every one when blank
+     * @param user    part of the user's name or e-mail, or every user when blank
+     * @throws InvalidPageRequestException if the page is negative or the size out of range
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<TermsAcceptanceEntry> acceptances(String version, String user, Integer requestedPage,
+            Integer requestedSize) {
+        int page = requestedPage == null ? 0 : requestedPage;
+        int size = requestedSize == null ? DEFAULT_PAGE_SIZE : requestedSize;
+        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+            throw new InvalidPageRequestException(MAX_PAGE_SIZE);
+        }
+        String versionFilter = version == null ? "" : version.strip();
+        String userFilter = user == null || user.isBlank()
+                ? ""
+                : "%" + likeEscaped(user.strip().toLowerCase(Locale.ROOT)) + "%";
+        return PageResponse.from(acceptances.search(versionFilter, userFilter, PageRequest.of(page, size)),
+                TermsAcceptanceEntry::of);
+    }
+
+    /** {@code %} and {@code _} typed by the admin are dropped rather than read as wildcards. */
+    private static String likeEscaped(String text) {
+        return text.replace("%", "").replace("_", "");
     }
 
     /** Every published version, newest first. */

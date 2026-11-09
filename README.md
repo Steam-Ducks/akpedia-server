@@ -338,6 +338,7 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 | `POST /api/v1/terms/accept` | qualquer usuário logado | `{"version": n}`, a versão que o usuário viu. **409** `terms_changed` se ela não for mais a atual |
 | `POST /api/v1/terms/decline` | qualquer usuário logado | `{"version": n}`: registra na auditoria que o usuário recusou (**204**). Sem aceitar a versão atual ninguém usa o sistema (um aceite antigo não vale), então o front oferece só aceitar ou recusar e excluir a conta: depois desta rota, chama `DELETE /api/v1/me` e faz o logout |
 | `GET /api/v1/admin/terms` | `ADMIN` | todas as versões publicadas, da mais nova para a mais antiga |
+| `GET /api/v1/admin/terms/acceptances?version=&user=&page=0&size=20` | `ADMIN` | página de aceites, do mais novo para o mais antigo: `version`, `user_id`, `user_name`, `user_email`, `accepted_at`. `version` filtra uma versão; `user` procura no nome ou no e-mail |
 | `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**). `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
 
 - **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
