@@ -50,6 +50,7 @@ import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
+import com.akpedia.server.exception.AccountCpfException;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.CategoryNotFoundException;
 import com.akpedia.server.exception.CategorySuggestionUnavailableException;
@@ -198,6 +199,18 @@ class DocumentControllerTest {
                         .param("categoryId", "1"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("incomplete_account"));
+    }
+
+    @Test
+    @DisplayName("a refused CPF answers 422 with its code")
+    void refusedCpfBecomes422() throws Exception {
+        given(currentUser.id()).willThrow(new AccountCpfException("cpf_taken"));
+
+        mvc.perform(multipart("/api/v1/documents")
+                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
+                        .param("categoryId", "1"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("cpf_taken"));
     }
 
     @Test

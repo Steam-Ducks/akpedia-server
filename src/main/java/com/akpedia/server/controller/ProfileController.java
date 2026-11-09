@@ -81,7 +81,7 @@ public class ProfileController {
     @Operation(summary = "My e-mail and CPF change requests", description = "Newest first, whatever their status.")
     @GetMapping("/requests")
     public List<ChangeRequest> requests() {
-        return profiles.requests(currentUser.id());
+        return profiles.requests(currentUser.provisioned().id());
     }
 
     @Operation(
@@ -104,7 +104,7 @@ public class ProfileController {
     @PostMapping("/requests")
     @ResponseStatus(HttpStatus.CREATED)
     public ChangeRequest request(@RequestBody NewChangeRequest request) {
-        return profiles.request(currentUser.keycloakId(), currentUser.id(), request);
+        return profiles.request(currentUser.keycloakId(), currentUser.provisioned().id(), request);
     }
 
     @Operation(
@@ -120,6 +120,6 @@ public class ProfileController {
     @DeleteMapping("/requests/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void cancel(@PathVariable("id") Long id) {
-        profiles.cancel(currentUser.id(), id);
+        profiles.cancel(currentUser.provisioned().id(), id);
     }
 }

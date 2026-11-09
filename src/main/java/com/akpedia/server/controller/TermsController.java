@@ -75,7 +75,7 @@ public class TermsController {
     })
     @PostMapping("/terms/accept")
     public TermsAcceptanceResponse accept(@RequestBody @Valid AcceptTermsRequest request) {
-        return terms.accept(currentUser.id(), request.version());
+        return terms.accept(currentUser.provisioned().id(), request.version());
     }
 
     @Operation(

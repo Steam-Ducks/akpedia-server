@@ -30,9 +30,12 @@ public class MeService {
      * @param userId      the user's row, already provisioned
      * @param keycloakId  their Keycloak account id
      * @param authorities the token's authorities; the realm roles are the {@code ROLE_*} ones
+     * @param cpfProblem  why the account's CPF was refused ({@code invalid_cpf}, {@code cpf_taken}),
+     *                    {@code null} if it was not
      */
     @Transactional(readOnly = true)
-    public MeResponse me(Long userId, String keycloakId, Collection<? extends GrantedAuthority> authorities) {
+    public MeResponse me(Long userId, String keycloakId, Collection<? extends GrantedAuthority> authorities,
+            String cpfProblem) {
         User user = users.findWithSectorById(userId).orElseThrow(() -> new UserNotFoundException(userId));
         Set<String> granted = authorities.stream()
                 .map(GrantedAuthority::getAuthority)
@@ -41,6 +44,6 @@ public class MeService {
                 .collect(Collectors.toSet());
         List<String> roles = AdminUserService.KNOWN_ROLES.stream().filter(granted::contains).toList();
         return new MeResponse(user.getId(), user.getName(), user.getEmail(), user.getSector().getName(), roles,
-                terms.mustAccept(keycloakId));
+                terms.mustAccept(keycloakId), cpfProblem);
     }
 }

@@ -16,6 +16,7 @@ import com.akpedia.server.dto.AccountDeletionReplayResponse;
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.MeResponse;
 import com.akpedia.server.security.CurrentUser;
+import com.akpedia.server.security.ProvisionedUser;
 import com.akpedia.server.service.AccountDeletionReplay;
 import com.akpedia.server.service.AccountDeletionService;
 import com.akpedia.server.service.MeService;
@@ -57,7 +58,9 @@ public class AccountController {
             description = """
                     The signed-in user's row (created on their first request), sector and realm roles, and
                     `terms_pending`: whether they must accept the current terms before using the rest of the API.
-                    Open before accepting the terms.""")
+                    `cpf_problem`: `invalid_cpf` or `cpf_taken` when the account's CPF was refused (the rest of the
+                    API answers 422 with that code until an admin corrects it), `null` otherwise. Open before
+                    accepting the terms, and with a refused CPF.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "The user."),
         @ApiResponse(responseCode = "401", description = "`unauthorized`: no valid token.",
@@ -66,8 +69,10 @@ public class AccountController {
     @GetMapping("/me")
     public MeResponse me() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        return me.me(currentUser.id(), currentUser.keycloakId(),
-                authentication == null ? List.of() : authentication.getAuthorities());
+        ProvisionedUser user = currentUser.provisioned();
+        return me.me(user.id(), currentUser.keycloakId(),
+                authentication == null ? List.of() : authentication.getAuthorities(),
+                user.cpfProblem() == null ? null : user.cpfProblem().code());
     }
 
     @Operation(

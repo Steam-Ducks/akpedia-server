@@ -37,6 +37,7 @@ import com.akpedia.server.exception.InvalidTermsException;
 import com.akpedia.server.exception.TermsChangedException;
 import com.akpedia.server.exception.TermsVersionExistsException;
 import com.akpedia.server.security.CurrentUser;
+import com.akpedia.server.security.ProvisionedUser;
 import com.akpedia.server.service.TermsService;
 
 @WebMvcTest(controllers = TermsController.class)
@@ -61,6 +62,7 @@ class TermsControllerTest {
     @BeforeEach
     void logIn() {
         given(currentUser.id()).willReturn(USER_ID);
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(USER_ID, null));
         given(currentUser.keycloakId()).willReturn(KEYCLOAK_ID);
     }
 

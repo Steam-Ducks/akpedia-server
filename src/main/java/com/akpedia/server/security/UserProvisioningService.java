@@ -6,7 +6,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.akpedia.server.entity.Sector;
-import com.akpedia.server.exception.AccountCpfException;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.repository.SectorRepository;
 import com.akpedia.server.repository.UserRepository;
@@ -32,7 +31,9 @@ public class UserProvisioningService {
      * sector or CPF changed in Keycloak since.
      *
      * <p>A CPF the row does not have yet (the first access, or a CPF changed in Keycloak) is
-     * checked first: its check digits, and that no other user has it.
+     * checked first: its check digits, and that no other user has it. One that fails is left off
+     * the row, which still gets everything else, so the user can ask an admin for the right one;
+     * the result says what was wrong.
      *
      * <p>A row with the same email but no Keycloak link (the seeded user, say) is taken over
      * rather than duplicated, since the email is unique. So is one linked to another account with
@@ -41,29 +42,30 @@ public class UserProvisioningService {
      * <p>A sector the database does not have yet is created: the list of sectors lives in the
      * realm's user profile.
      *
-     * @return the user's id
-     * @throws AccountCpfException if the account's CPF is invalid or another user's
+     * @return the user's id, and what is wrong with the account's CPF, if anything
      * @throws org.springframework.dao.DataIntegrityViolationException if a concurrent request
      *         created the same row or sector first; calling again then finds it
      */
     @Transactional
-    public Long provision(KeycloakAccount account) {
+    public ProvisionedUser provision(KeycloakAccount account) {
         User user = users.findByKeycloakId(account.id())
                 .or(() -> users.findByEmail(account.email()))
                 .orElse(null);
         String name = account.name().length() > MAX_NAME_LENGTH
                 ? account.name().substring(0, MAX_NAME_LENGTH)
                 : account.name();
-        if (user == null || !account.cpf().equals(user.getCpf())) {
-            ensureCpfUsable(account.cpf(), user);
-        }
+        CpfProblem cpfProblem = account.cpf().equals(user == null ? null : user.getCpf())
+                ? null
+                : cpfProblem(account.cpf(), user);
         Sector sector = sectorNamed(account.sector());
 
         if (user == null) {
             user = new User(name, account.email(), sector);
             user.setKeycloakId(account.id());
-            user.setCpf(account.cpf());
-            return users.saveAndFlush(user).getId();
+            if (cpfProblem == null) {
+                user.setCpf(account.cpf());
+            }
+            return new ProvisionedUser(users.saveAndFlush(user).getId(), cpfProblem);
         }
         // Set only what changed, so an unchanged user costs no UPDATE on every request.
         if (!account.id().equals(user.getKeycloakId())) {
@@ -78,27 +80,26 @@ public class UserProvisioningService {
         if (!Objects.equals(sector.getId(), user.getSector().getId())) {
             user.setSector(sector);
         }
-        if (!account.cpf().equals(user.getCpf())) {
+        if (cpfProblem == null && !account.cpf().equals(user.getCpf())) {
             user.setCpf(account.cpf());
         }
         users.flush();
-        return user.getId();
+        return new ProvisionedUser(user.getId(), cpfProblem);
     }
 
     /**
-     * Refuses a CPF with wrong check digits, or one another user's row has.
+     * What keeps the CPF off the row: wrong check digits, or another user's row having it.
      *
      * @param user the account's row, {@code null} before the first access
+     * @return {@code null} if nothing does
      */
-    private void ensureCpfUsable(String cpf, User user) {
+    private CpfProblem cpfProblem(String cpf, User user) {
         if (!ProfileRules.isValidCpf(cpf)) {
-            throw AccountCpfException.invalid();
+            return CpfProblem.INVALID;
         }
         boolean taken = users.findByCpf(cpf).filter(other -> user == null || !other.getId().equals(user.getId()))
                 .isPresent();
-        if (taken) {
-            throw AccountCpfException.taken();
-        }
+        return taken ? CpfProblem.TAKEN : null;
     }
 
     private Sector sectorNamed(String name) {

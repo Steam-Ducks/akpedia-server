@@ -18,6 +18,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
+import com.akpedia.server.exception.AccountCpfException;
+
 @ExtendWith(MockitoExtension.class)
 class CurrentUserTest {
 
@@ -47,7 +49,7 @@ class CurrentUserTest {
     @DisplayName("answers the id of the logged-in user's row")
     void answersTheUsersId() {
         logIn();
-        given(provisioning.provision(any())).willReturn(7L);
+        given(provisioning.provision(any())).willReturn(new ProvisionedUser(7L, null));
 
         assertThat(new CurrentUser(provisioning).id()).isEqualTo(7L);
     }
@@ -58,9 +60,21 @@ class CurrentUserTest {
         logIn();
         given(provisioning.provision(any()))
                 .willThrow(new DataIntegrityViolationException("uq_users_keycloak_id"))
-                .willReturn(7L);
+                .willReturn(new ProvisionedUser(7L, null));
 
         assertThat(new CurrentUser(provisioning).id()).isEqualTo(7L);
+    }
+
+    @Test
+    @DisplayName("a refused CPF fails id() with its code, but provisioned() still answers the row")
+    void refusedCpf() {
+        logIn();
+        given(provisioning.provision(any())).willReturn(new ProvisionedUser(7L, CpfProblem.TAKEN));
+        CurrentUser currentUser = new CurrentUser(provisioning);
+
+        assertThatThrownBy(currentUser::id).isInstanceOf(AccountCpfException.class)
+                .extracting("code").isEqualTo("cpf_taken");
+        assertThat(currentUser.provisioned()).isEqualTo(new ProvisionedUser(7L, CpfProblem.TAKEN));
     }
 
     @Test

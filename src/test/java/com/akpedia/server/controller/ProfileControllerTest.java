@@ -41,6 +41,7 @@ import com.akpedia.server.exception.InvalidProfileException;
 import com.akpedia.server.exception.NothingChangedException;
 import com.akpedia.server.exception.UserExistsException;
 import com.akpedia.server.security.CurrentUser;
+import com.akpedia.server.security.ProvisionedUser;
 import com.akpedia.server.service.ProfileService;
 
 @WebMvcTest(controllers = ProfileController.class)
@@ -65,6 +66,7 @@ class ProfileControllerTest {
     void logIn() {
         given(currentUser.keycloakId()).willReturn(ANA_ID);
         given(currentUser.id()).willReturn(ANA_ROW);
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(ANA_ROW, null));
     }
 
     private static Profile profile(String firstName) {

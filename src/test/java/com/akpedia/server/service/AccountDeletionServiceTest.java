@@ -300,7 +300,7 @@ class AccountDeletionServiceTest {
 
         String newKeycloakId = UUID.randomUUID().toString();
         Long newId = provisioning.provision(new KeycloakAccount(newKeycloakId, email, "Ana Souza", sector.getName(),
-                TestCpfs.random()));
+                TestCpfs.random())).id();
 
         assertThat(newId).isNotEqualTo(oldId);
         entityManager.clear();
