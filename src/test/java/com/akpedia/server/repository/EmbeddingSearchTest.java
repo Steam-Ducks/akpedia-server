@@ -68,17 +68,16 @@ class EmbeddingSearchTest {
         return document;
     }
 
-    private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
-
+    /** Searches the setup's category, which is where every document lands unless a test says otherwise. */
     private List<Long> search() {
-        return search(false, NO_CATEGORY_FILTER);
+        return search(List.of(category.getId()));
     }
 
-    private List<Long> search(boolean hasCategories, List<Long> categoryIds) {
+    private List<Long> search(List<Long> categoryIds) {
         entityManager.clear();
         return embeddingRepository.search(
                         queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE,
-                        hasCategories, categoryIds, 10)
+                        categoryIds, 10)
                 .stream()
                 .map(row -> ((Number) row[0]).longValue())
                 .toList();
@@ -137,24 +136,13 @@ class EmbeddingSearchTest {
     }
 
     @Test
-    @DisplayName("with hasCategories false, categoryIds is ignored and every eligible document comes back")
-    void withoutCategoryFilterEveryEligibleDocumentIsReturned() {
-        Category other = entityManager.persist(TestFixtures.category());
-        Document inSetupCategory = indexedDocument(DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
-        Document inOtherCategory = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
-
-        assertThat(search(false, List.of(other.getId())))
-                .contains(inSetupCategory.getId(), inOtherCategory.getId());
-    }
-
-    @Test
-    @DisplayName("with hasCategories true, only documents in one of the given categories come back")
+    @DisplayName("only documents in one of the given categories come back: there is no search without them")
     void categoryFilterLeavesOtherCategoriesOut() {
         Category other = entityManager.persist(TestFixtures.category());
         Document inFilter = indexedDocument(category, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
         Document outOfFilter = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
 
-        assertThat(search(true, List.of(category.getId())))
+        assertThat(search(List.of(category.getId())))
                 .contains(inFilter.getId())
                 .doesNotContain(outOfFilter.getId());
     }
@@ -168,7 +156,7 @@ class EmbeddingSearchTest {
         Document second = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
         Document third = indexedDocument(excluded, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
 
-        assertThat(search(true, List.of(category.getId(), other.getId())))
+        assertThat(search(List.of(category.getId(), other.getId())))
                 .contains(first.getId(), second.getId())
                 .doesNotContain(third.getId());
     }
@@ -183,7 +171,7 @@ class EmbeddingSearchTest {
         Document archived = indexedDocument(DocumentStatus.ARCHIVED, ProcessingStatus.COMPLETED);
         entityManager.clear();
 
-        List<Long> found = embeddingRepository.searchRecentByCategory(true, List.of(category.getId()), 10)
+        List<Long> found = embeddingRepository.searchRecentByCategory(List.of(category.getId()), 10)
                 .stream()
                 .map(row -> ((Number) row[0]).longValue())
                 .toList();
@@ -193,4 +181,19 @@ class EmbeddingSearchTest {
                 .doesNotContain(draft.getId(), underReview.getId(), rejected.getId(), archived.getId());
     }
 
+    @Test
+    @DisplayName("a category search with no text leaves the categories it was not given out too")
+    void categorySearchWithoutTextLeavesOtherCategoriesOut() {
+        Category other = entityManager.persist(TestFixtures.category());
+        Document inFilter = indexedDocument(category, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        Document outOfFilter = indexedDocument(other, DocumentStatus.APPROVED, ProcessingStatus.COMPLETED);
+        entityManager.clear();
+
+        List<Long> found = embeddingRepository.searchRecentByCategory(List.of(category.getId()), 10)
+                .stream()
+                .map(row -> ((Number) row[0]).longValue())
+                .toList();
+
+        assertThat(found).contains(inFilter.getId()).doesNotContain(outOfFilter.getId());
+    }
 }

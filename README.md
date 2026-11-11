@@ -294,7 +294,7 @@ para ele (`akpedia-server` no `aud`).
 |------|-----------|
 | `GET /health`, `/actuator/health`, Swagger (`/swagger-ui.html`, `/v3/api-docs`) | qualquer um, sem token |
 | `/internal/**` | só o worker do akpedia-ml, com o `X-Internal-Token` (ver [Indexação pelo worker](#indexação-pelo-worker-rotas-internas)) |
-| `GET /api/v1/documents/pending`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
+| `GET /api/v1/documents/pending` e `/pending/categories`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
 | `/api/v1/admin/**` (termos de uso, usuários, permissões e auditoria) | papel `ADMIN`; os outros recebem **403** `forbidden` |
 | o resto de `/api` | qualquer usuário logado |
 
@@ -409,6 +409,34 @@ Recursos Humanos, Financeiro e Jurídico veem `Regulatorio` e `Juridico`.
 |------|-----------|
 | `GET /api/v1/admin/sector-categories` | `{categories, sectors}`: todas as categorias (as colunas, por nome) e os setores do realm (as linhas, na ordem do realm), cada um com os `category_ids` que vê |
 | `PUT /api/v1/admin/sectors/{id}/categories` | `{"category_ids": [1, 3]}`: o setor passa a ver exatamente essas categorias. Vale a partir da próxima busca. Registrado como `SECTOR_CATEGORIES_CHANGED`, com as categorias antes e depois. **404** `sector_not_found` ou `category_not_found` |
+
+**O que o funcionário vê.** Um documento de uma categoria que o setor do usuário não vê nunca
+aparece para ele (`CategoryAccessService`). A regra vale para todos os papéis, inclusive ADMIN, e
+é lida da tabela a cada requisição, sem cache: uma mudança na tela de permissões vale a partir da
+próxima chamada.
+
+| Rota | Com a regra |
+|------|-------------|
+| `GET /api/v1/search` | busca só nas categorias do setor; as de `categoryIds` que o setor não vê são descartadas (não dá erro). Se não sobrar nenhuma, responde `[]` sem gerar embedding |
+| `GET /api/v1/documents` | lista só documentos das categorias do setor |
+| `GET /api/v1/categories` | lista só as categorias do setor (o catálogo inteiro fica em `GET /api/v1/admin/sector-categories`) |
+| `GET /api/v1/documents/{id}/file`, `/preview` e `/preview/pages/{page}` | **403** `category_forbidden`, checado antes do estado do documento (arquivado, indexando). Vale também na revalidação do cache do navegador |
+
+Duas exceções, só para abrir um documento: o **autor** abre o próprio documento, mesmo que um
+aprovador o tenha movido para uma categoria que o setor dele não vê; e **APPROVER/ADMIN** abrem um
+documento **aguardando aprovação** de qualquer categoria, porque a fila de revisão lista todos.
+Depois de aprovado, a regra do setor vale para eles também.
+
+Para corrigir a categoria na revisão, o aprovador usa `GET /api/v1/documents/pending/categories`
+(só `APPROVER` ou `ADMIN`), que lista o catálogo inteiro: a fila tem documentos de todas as
+categorias, e `GET /categories` só mostra as do setor dele.
+
+O envio (`POST /api/v1/documents`) não é restringido pela regra: enviar não é ver, a sugestão de
+categoria do classificador pode ser de qualquer categoria, e o autor continua abrindo o próprio
+documento.
+
+As três queries de busca e listagem (`EmbeddingRepository.search`, `searchRecentByCategory` e
+`DocumentRepository.findRecent`) exigem a lista de categorias: não existe chamada sem o filtro.
 
 A lista de setores fica em três lugares, que andam juntos: o atributo `sector` do realm
 (`keycloak/akpedia-realm.json`), `AdminUserService.SECTORS` e a migration V13. Um Keycloak que

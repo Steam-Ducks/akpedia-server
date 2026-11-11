@@ -1,5 +1,6 @@
 package com.akpedia.server.config;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -49,8 +50,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    /** Realm roles that may see the review queue and approve or return documents. */
+    /**
+     * Realm roles that may see the review queue and approve or return documents. Also read by
+     * {@link CurrentUser#viewer()}, so a reviewer can open the documents that queue lists.
+     */
     static final String[] REVIEWER_ROLES = {"APPROVER", "ADMIN"};
+
+    /** Whether the authorities hold one of {@link #REVIEWER_ROLES}, as the {@code ROLE_*} authority. */
+    public static boolean isReviewer(Collection<? extends GrantedAuthority> authorities) {
+        return authorities.stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(authority -> Arrays.stream(REVIEWER_ROLES).anyMatch(role -> authority.equals("ROLE_" + role)));
+    }
 
     @Bean
     public SecurityFilterChain apiSecurity(
@@ -65,7 +76,8 @@ public class SecurityConfig {
                         .requestMatchers("/health", "/actuator/health/**", "/actuator/info", "/error").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/internal/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/documents/pending").hasAnyRole(REVIEWER_ROLES)
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/documents/pending", "/api/v1/documents/pending/categories").hasAnyRole(REVIEWER_ROLES)
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/documents/*/approve", "/api/v1/documents/*/reject").hasAnyRole(REVIEWER_ROLES)
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")

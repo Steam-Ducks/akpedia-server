@@ -184,6 +184,7 @@ class DocumentReviewFlowTest {
                 .contains(Map.of("documentId", id.toString()));
     }
 
+    @SuppressWarnings("unchecked")
     @Test
     @DisplayName("a document already sent is not sent again by the retry")
     void retryLeavesWhatWasAlreadySent() {

@@ -167,7 +167,8 @@ class InternalDocumentFlowTest {
         String query = IntStream.range(0, Embedding.VECTOR_DIMENSIONS)
                 .mapToObj(i -> "1.0")
                 .collect(Collectors.joining(",", "[", "]"));
-        return embeddings.search(query, model, Embedding.VECTOR_DIMENSIONS, -1.0, false, List.of(-1L), 10)
+        Long tecnico = categories.findByName("Tecnico").orElseThrow().getId();
+        return embeddings.search(query, model, Embedding.VECTOR_DIMENSIONS, -1.0, List.of(tecnico), 10)
                 .stream()
                 .map(row -> ((Number) row[0]).longValue())
                 .toList();

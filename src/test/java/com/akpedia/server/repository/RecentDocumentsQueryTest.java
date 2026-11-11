@@ -49,7 +49,7 @@ class RecentDocumentsQueryTest {
     private List<Long> recentIdsAmong(List<Document> created) {
         List<Long> ids = created.stream().map(Document::getId).toList();
         return documentRepository
-                .findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, 1000))
+                .findRecent(ProcessingStatus.COMPLETED, List.of(category.getId()), PageRequest.of(0, 1000))
                 .stream()
                 .map(Document::getId)
                 .filter(ids::contains)
@@ -78,6 +78,26 @@ class RecentDocumentsQueryTest {
     }
 
     @Test
+    @DisplayName("only documents in one of the given categories are listed")
+    void leavesOtherCategoriesOut() {
+        creator = entityManager.persist(TestFixtures.user(entityManager.persist(TestFixtures.sector())));
+        category = entityManager.persist(TestFixtures.category());
+        Document listed = persist(ProcessingStatus.COMPLETED, DocumentStatus.APPROVED);
+        category = entityManager.persist(TestFixtures.category());
+        Document blocked = persist(ProcessingStatus.COMPLETED, DocumentStatus.APPROVED);
+        Long listedCategory = listed.getCategory().getId();
+        entityManager.clear();
+
+        List<Long> ids = documentRepository
+                .findRecent(ProcessingStatus.COMPLETED, List.of(listedCategory), PageRequest.of(0, 1000))
+                .stream()
+                .map(Document::getId)
+                .toList();
+
+        assertThat(ids).contains(listed.getId()).doesNotContain(blocked.getId());
+    }
+
+    @Test
     @DisplayName("category and creator come loaded with the document")
     void fetchesCategoryAndCreator() {
         category = entityManager.persist(TestFixtures.category());
@@ -86,7 +106,7 @@ class RecentDocumentsQueryTest {
         entityManager.clear();
 
         Document found = documentRepository
-                .findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, 1000))
+                .findRecent(ProcessingStatus.COMPLETED, List.of(category.getId()), PageRequest.of(0, 1000))
                 .stream()
                 .filter(candidate -> candidate.getId().equals(document.getId()))
                 .findFirst()

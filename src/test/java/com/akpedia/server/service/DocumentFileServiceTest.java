@@ -3,11 +3,13 @@ package com.akpedia.server.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -27,18 +29,24 @@ import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
+import com.akpedia.server.exception.CategoryForbiddenException;
 import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotProcessedException;
+import com.akpedia.server.repository.CategoryRepository;
 import com.akpedia.server.repository.DocumentFileRepository;
 import com.akpedia.server.repository.DocumentRepository;
+import com.akpedia.server.security.Viewer;
 
 /**
  * Exercises {@link DocumentFileService} with both repositories mocked. What matters here is what
  * the browser ends up receiving -- a media type it can render, a name with an extension, and
  * validators that identify this version of the file -- which of the two 404s each missing row
  * produces, and that a document that must not be opened is refused before its blob is ever loaded.
+ *
+ * <p>{@link CategoryAccessService} is the real one, over a mocked {@link CategoryRepository}: the
+ * category check is part of what {@code describe} refuses, and in which order.
  */
 @ExtendWith(MockitoExtension.class)
 class DocumentFileServiceTest {
@@ -49,12 +57,20 @@ class DocumentFileServiceTest {
     private DocumentRepository documents;
     @Mock
     private DocumentFileRepository documentFiles;
+    @Mock
+    private CategoryRepository categories;
 
     private DocumentFileService service;
 
+    private static final long CATEGORY_ID = 5L;
+    private static final Viewer VIEWER = new Viewer(20L, false);
+
     @BeforeEach
     void setUp() {
-        service = new DocumentFileService(documents, documentFiles);
+        service = new DocumentFileService(documents, documentFiles, new CategoryAccessService(categories));
+        // The viewer's sector sees the documents' category, unless a test says otherwise. Lenient:
+        // an unknown document never gets as far as the category.
+        lenient().when(categories.findIdsVisibleTo(VIEWER.userId())).thenReturn(List.of(CATEGORY_ID));
     }
 
     private static Document document(String name, String mimeType) {
@@ -63,7 +79,9 @@ class DocumentFileServiceTest {
 
     private static Document document(String name, String mimeType, DocumentStatus status, ProcessingStatus processingStatus) {
         Category category = new Category("Manuais", "manuais tecnicos");
+        ReflectionTestUtils.setField(category, "id", CATEGORY_ID);
         User creator = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
+        ReflectionTestUtils.setField(creator, "id", 30L);
         Document document = new Document(name, mimeType, (long) PDF_BYTES.length, category, creator, status);
         document.setProcessingStatus(processingStatus);
         ReflectionTestUtils.setField(document, "id", 7L);
@@ -86,7 +104,7 @@ class DocumentFileServiceTest {
     void describesAndServesStoredFile() {
         storedDocument(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE));
 
-        DocumentFileDescriptor file = service.describe(7L);
+        DocumentFileDescriptor file = service.describe(7L, VIEWER);
 
         assertThat(file.documentId()).isEqualTo(7L);
         assertThat(file.filename()).isEqualTo("relatorio.pdf");
@@ -100,7 +118,7 @@ class DocumentFileServiceTest {
     void addsPdfExtensionWhenTheNameHasNone() {
         metadataOnly(document("Manual de integracao", MediaType.APPLICATION_PDF_VALUE));
 
-        assertThat(service.describe(7L).filename()).isEqualTo("Manual de integracao.pdf");
+        assertThat(service.describe(7L, VIEWER).filename()).isEqualTo("Manual de integracao.pdf");
     }
 
     @Test
@@ -108,7 +126,7 @@ class DocumentFileServiceTest {
     void keepsAnExistingPdfExtension() {
         metadataOnly(document("RELATORIO.PDF", MediaType.APPLICATION_PDF_VALUE));
 
-        assertThat(service.describe(7L).filename()).isEqualTo("RELATORIO.PDF");
+        assertThat(service.describe(7L, VIEWER).filename()).isEqualTo("RELATORIO.PDF");
     }
 
     @Test
@@ -116,7 +134,7 @@ class DocumentFileServiceTest {
     void stripsPathSeparatorsFromTheName() {
         metadataOnly(document("../etc/passwd", MediaType.APPLICATION_PDF_VALUE));
 
-        assertThat(service.describe(7L).filename()).isEqualTo(".._etc_passwd.pdf");
+        assertThat(service.describe(7L, VIEWER).filename()).isEqualTo(".._etc_passwd.pdf");
     }
 
     @Test
@@ -124,7 +142,7 @@ class DocumentFileServiceTest {
     void fallsBackToTheIdWhenTheNameIsBlank() {
         metadataOnly(document("   ", MediaType.APPLICATION_PDF_VALUE));
 
-        assertThat(service.describe(7L).filename()).isEqualTo("documento-7.pdf");
+        assertThat(service.describe(7L, VIEWER).filename()).isEqualTo("documento-7.pdf");
     }
 
     @Test
@@ -132,7 +150,7 @@ class DocumentFileServiceTest {
     void fallsBackToPdfWhenTheMediaTypeIsInvalid() {
         metadataOnly(document("relatorio.pdf", "nao e um media type"));
 
-        assertThat(service.describe(7L).contentType()).isEqualTo(MediaType.APPLICATION_PDF);
+        assertThat(service.describe(7L, VIEWER).contentType()).isEqualTo(MediaType.APPLICATION_PDF);
     }
 
     @Test
@@ -143,7 +161,7 @@ class DocumentFileServiceTest {
         ReflectionTestUtils.setField(document, "updatedAt", changedAt);
         metadataOnly(document);
 
-        DocumentFileDescriptor file = service.describe(7L);
+        DocumentFileDescriptor file = service.describe(7L, VIEWER);
 
         assertThat(file.lastModified()).isEqualTo(Instant.parse("2026-09-24T22:31:05Z"));
         assertThat(file.etag()).isEqualTo("\"7-%d-%d\"".formatted(PDF_BYTES.length, file.lastModified().toEpochMilli()));
@@ -155,14 +173,14 @@ class DocumentFileServiceTest {
         Document before = document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE);
         ReflectionTestUtils.setField(before, "updatedAt", OffsetDateTime.of(2026, 9, 24, 22, 31, 0, 0, ZoneOffset.UTC));
         metadataOnly(before);
-        String firstEtag = service.describe(7L).etag();
+        String firstEtag = service.describe(7L, VIEWER).etag();
 
         Document after = document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE);
         after.setFileSize(PDF_BYTES.length + 10L);
         ReflectionTestUtils.setField(after, "updatedAt", OffsetDateTime.of(2026, 9, 25, 1, 10, 0, 0, ZoneOffset.UTC));
         given(documents.findById(7L)).willReturn(Optional.of(after));
 
-        assertThat(service.describe(7L).etag()).isNotEqualTo(firstEtag);
+        assertThat(service.describe(7L, VIEWER).etag()).isNotEqualTo(firstEtag);
     }
 
     @Test
@@ -170,7 +188,7 @@ class DocumentFileServiceTest {
     void unknownDocumentIsRejected() {
         given(documents.findById(404L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.describe(404L))
+        assertThatThrownBy(() -> service.describe(404L, VIEWER))
                 .isInstanceOf(DocumentNotFoundException.class)
                 .hasMessageContaining("404");
 
@@ -183,7 +201,7 @@ class DocumentFileServiceTest {
         metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE));
         given(documentFiles.findByDocumentId(7L)).willReturn(Optional.empty());
 
-        DocumentFileDescriptor file = service.describe(7L);
+        DocumentFileDescriptor file = service.describe(7L, VIEWER);
 
         assertThatThrownBy(() -> service.contentOf(file)).isInstanceOf(DocumentFileNotFoundException.class);
     }
@@ -194,7 +212,7 @@ class DocumentFileServiceTest {
         metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
                 DocumentStatus.ARCHIVED, ProcessingStatus.COMPLETED));
 
-        assertThatThrownBy(() -> service.describe(7L)).isInstanceOf(DocumentArchivedException.class);
+        assertThatThrownBy(() -> service.describe(7L, VIEWER)).isInstanceOf(DocumentArchivedException.class);
 
         verifyNoInteractions(documentFiles);
     }
@@ -205,7 +223,7 @@ class DocumentFileServiceTest {
         metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
                 DocumentStatus.APPROVED, ProcessingStatus.PROCESSING));
 
-        assertThatThrownBy(() -> service.describe(7L))
+        assertThatThrownBy(() -> service.describe(7L, VIEWER))
                 .isInstanceOf(DocumentNotProcessedException.class)
                 .hasMessageContaining("PROCESSING");
 
@@ -218,7 +236,7 @@ class DocumentFileServiceTest {
         storedDocument(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
                 DocumentStatus.PENDING_APPROVAL, ProcessingStatus.PENDING));
 
-        assertThat(service.contentOf(service.describe(7L))).isEqualTo(PDF_BYTES);
+        assertThat(service.contentOf(service.describe(7L, VIEWER))).isEqualTo(PDF_BYTES);
     }
 
     @Test
@@ -227,7 +245,7 @@ class DocumentFileServiceTest {
         storedDocument(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
                 DocumentStatus.APPROVED, ProcessingStatus.FAILED));
 
-        assertThat(service.contentOf(service.describe(7L))).isEqualTo(PDF_BYTES);
+        assertThat(service.contentOf(service.describe(7L, VIEWER))).isEqualTo(PDF_BYTES);
     }
 
     @Test
@@ -236,7 +254,37 @@ class DocumentFileServiceTest {
         storedDocument(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
                 DocumentStatus.DRAFT, ProcessingStatus.COMPLETED));
 
-        assertThat(service.contentOf(service.describe(7L))).isEqualTo(PDF_BYTES);
+        assertThat(service.contentOf(service.describe(7L, VIEWER))).isEqualTo(PDF_BYTES);
     }
 
+    @Test
+    @DisplayName("a document in a category the viewer's sector does not see is refused, and its blob is never loaded")
+    void blockedCategoryIsRefused() {
+        metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE));
+        given(categories.findIdsVisibleTo(VIEWER.userId())).willReturn(List.of(99L));
+
+        assertThatThrownBy(() -> service.describe(7L, VIEWER)).isInstanceOf(CategoryForbiddenException.class);
+
+        verifyNoInteractions(documentFiles);
+    }
+
+    @Test
+    @DisplayName("the category is checked before the state, so a blocked viewer learns nothing about it")
+    void categoryIsCheckedBeforeTheState() {
+        metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
+                DocumentStatus.ARCHIVED, ProcessingStatus.COMPLETED));
+        given(categories.findIdsVisibleTo(VIEWER.userId())).willReturn(List.of());
+
+        assertThatThrownBy(() -> service.describe(7L, VIEWER)).isInstanceOf(CategoryForbiddenException.class);
+    }
+
+    @Test
+    @DisplayName("the worker's describe is not bound by any sector: it has no user")
+    void indexingDescribeIgnoresTheSectorRule() {
+        metadataOnly(document("relatorio.pdf", MediaType.APPLICATION_PDF_VALUE,
+                DocumentStatus.APPROVED, ProcessingStatus.PROCESSING));
+
+        assertThat(service.describeForIndexing(7L).documentId()).isEqualTo(7L);
+        verifyNoInteractions(categories);
+    }
 }

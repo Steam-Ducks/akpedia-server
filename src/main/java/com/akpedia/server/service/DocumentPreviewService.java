@@ -17,6 +17,7 @@ import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.dto.DocumentPreview;
 import com.akpedia.server.exception.DocumentPageNotFoundException;
 import com.akpedia.server.exception.DocumentRenderException;
+import com.akpedia.server.security.Viewer;
 
 /**
  * Shows a document page by page, as images, without ever handing out the PDF itself.
@@ -26,7 +27,8 @@ import com.akpedia.server.exception.DocumentRenderException;
  * native PDF viewer offering its download and print buttons.
  *
  * <p>Access goes through {@link DocumentFileService#describe}, so a page is refused for exactly
- * the documents the file itself would be -- archived, or being indexed right now.
+ * the documents the file itself would be -- in a category the viewer's sector may not see, archived,
+ * or being indexed right now.
  */
 @Service
 public class DocumentPreviewService {
@@ -47,10 +49,11 @@ public class DocumentPreviewService {
      * Describes the document for the viewer, refusing it as the file route would.
      *
      * @param documentId document being opened
+     * @param viewer     who is opening it
      * @return its name and number of pages
      */
-    public DocumentPreview describe(Long documentId) {
-        DocumentFileDescriptor file = fileService.describe(documentId);
+    public DocumentPreview describe(Long documentId, Viewer viewer) {
+        DocumentFileDescriptor file = fileService.describe(documentId, viewer);
         try (PDDocument pdf = load(file)) {
             return new DocumentPreview(documentId, file.filename(), pdf.getNumberOfPages());
         } catch (IOException e) {
@@ -64,10 +67,11 @@ public class DocumentPreviewService {
      * @param documentId document being viewed
      * @param page       page to render, counted from 1
      * @return the PNG bytes of that page
+     * @param viewer     who is viewing it
      * @throws DocumentPageNotFoundException if the document has no such page
      */
-    public byte[] renderPage(Long documentId, int page) {
-        DocumentFileDescriptor file = fileService.describe(documentId);
+    public byte[] renderPage(Long documentId, int page, Viewer viewer) {
+        DocumentFileDescriptor file = fileService.describe(documentId, viewer);
         try (PDDocument pdf = load(file)) {
             int pageCount = pdf.getNumberOfPages();
             if (page < 1 || page > pageCount) {

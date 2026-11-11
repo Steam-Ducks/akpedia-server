@@ -10,11 +10,13 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,11 +30,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.dto.DocumentReviewResponse;
+import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.CategoryNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotPendingApprovalException;
+import com.akpedia.server.repository.CategoryRepository;
 import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentReviewService;
 
@@ -57,6 +61,9 @@ class DocumentReviewControllerTest {
 
     @MockBean
     private CurrentUser currentUser;
+
+    @MockBean
+    private CategoryRepository categories;
 
     @BeforeEach
     void logIn() {
@@ -252,4 +259,18 @@ class DocumentReviewControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("document_not_pending_approval"));
     }
+
+    @Test
+    @DisplayName("GET /documents/pending/categories lists the whole catalog, whatever the approver's sector")
+    void reviewCategoriesAreTheWholeCatalog() throws Exception {
+        given(categories.findAllByOrderByNameAsc())
+                .willReturn(List.of(new Category("Juridico", null), new Category("Tecnico", "manuais")));
+
+        mvc.perform(get("/api/v1/documents/pending/categories"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Juridico"))
+                .andExpect(jsonPath("$[1].name").value("Tecnico"))
+                .andExpect(jsonPath("$[1].description").value("manuais"));
+    }
+
 }
