@@ -320,9 +320,10 @@ o banco ainda não tem é criado. Uma linha que já existia com o mesmo email é
 duplicada.
 
 O CPF é conferido no primeiro acesso e sempre que muda no Keycloak: com dígitos verificadores
-errados a resposta é **422** `invalid_cpf`, e se outro usuário já tem esse CPF em `users.cpf`
-(único), **422** `cpf_taken`. A linha é criada mesmo assim, sem o CPF (ou com o anterior), para o
-usuário poder pedir a correção: continuam abertos `GET /me` (que traz o motivo em `cpf_problem`),
+errados toda a API, leituras inclusive, responde **422** `invalid_cpf`, e se outro usuário já tem
+esse CPF em `users.cpf` (único), **422** `cpf_taken` (`CpfGateFilter`, depois do filtro dos
+termos). A linha é criada mesmo assim, sem o CPF (ou com o anterior), para o usuário poder pedir a
+correção: continuam abertos `GET /me` (que traz o motivo em `cpf_problem`),
 aceitar ou recusar os termos, excluir a conta e os pedidos de alteração (`/me/profile/requests`),
 onde ele envia o CPF certo. Aprovado o pedido, o CPF vai para a conta e para a linha, e o acesso
 volta no próximo token. O cadastro pela tela do Keycloak só confere o formato, por isso a

@@ -21,6 +21,8 @@ import org.springframework.security.web.access.intercept.AuthorizationFilter;
 
 import com.akpedia.server.repository.UserRepository;
 import com.akpedia.server.security.ApiSecurityErrors;
+import com.akpedia.server.security.CpfGateFilter;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.security.DeletedAccountFilter;
 import com.akpedia.server.security.DisabledAccountFilter;
 import com.akpedia.server.security.RequestAuditFilter;
@@ -33,11 +35,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * Every {@code /api} route needs a Keycloak access token; reviewing documents also needs the
  * {@code APPROVER} or {@code ADMIN} realm role, and the admin routes the {@code ADMIN} one. Until
- * the user accepts the current terms of use, {@link TermsGateFilter} holds the rest back. Every
- * {@code /api} request, refused or not, is recorded by {@link RequestAuditFilter}. A deleted or
- * disabled account's token, still valid for a few minutes, is refused by
- * {@link DeletedAccountFilter} and {@link DisabledAccountFilter}. The chain's own 401 and 403 go
- * out in the API's error format, through {@link ApiSecurityErrors}.
+ * the user accepts the current terms of use, {@link TermsGateFilter} holds the rest back, and
+ * {@link CpfGateFilter} does while the account's CPF is refused. Every {@code /api} request,
+ * refused or not, is recorded by {@link RequestAuditFilter}. A deleted or disabled account's token,
+ * still valid for a few minutes, is refused by {@link DeletedAccountFilter} and
+ * {@link DisabledAccountFilter}. The chain's own 401 and 403 go out in the API's error format,
+ * through {@link ApiSecurityErrors}.
  *
  * <p>The {@code /internal} routes are left to {@link InternalTokenFilter}: only the akpedia-ml
  * worker calls them, with its shared token, never with a user's.
@@ -52,7 +55,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain apiSecurity(
             HttpSecurity http, TermsService terms, AuditService audit, AccountDeletionLog deletions,
-            UserRepository users, ObjectMapper json) throws Exception {
+            UserRepository users, CurrentUser currentUser, ObjectMapper json) throws Exception {
         ApiSecurityErrors errors = new ApiSecurityErrors(json);
         http
                 // Bearer tokens only, no cookies: there is no session for a forged request to ride on.
@@ -79,6 +82,8 @@ public class SecurityConfig {
                 .addFilterAfter(new DisabledAccountFilter(users, json), DeletedAccountFilter.class)
                 // After the role checks: someone without the role gets 403 for that, not for the terms.
                 .addFilterAfter(new TermsGateFilter(terms, json), AuthorizationFilter.class)
+                // Then the CPF: the terms come first, as on the screen.
+                .addFilterAfter(new CpfGateFilter(currentUser, json), TermsGateFilter.class)
                 // Before the token check, so it sees the 401s too, and the user once it returns.
                 .addFilterBefore(new RequestAuditFilter(audit), BearerTokenAuthenticationFilter.class);
         return http.build();

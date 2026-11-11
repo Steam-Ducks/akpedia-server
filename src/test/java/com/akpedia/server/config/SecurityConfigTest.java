@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +38,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.akpedia.server.exception.IncompleteAccountException;
 import com.akpedia.server.repository.UserRepository;
+import com.akpedia.server.security.CpfProblem;
+import com.akpedia.server.security.CurrentUser;
+import com.akpedia.server.security.ProvisionedUser;
 import com.akpedia.server.service.AccountDeletionLog;
 import com.akpedia.server.service.AuditService;
 import com.akpedia.server.service.TermsService;
@@ -134,6 +139,26 @@ class SecurityConfigTest {
         String profileRequests() {
             return "ok";
         }
+
+        @GetMapping("/api/v1/documents")
+        String documents() {
+            return "ok";
+        }
+
+        @GetMapping("/api/v1/me/profile/requests")
+        String myRequests() {
+            return "ok";
+        }
+
+        @PostMapping("/api/v1/me/profile/requests")
+        String requestChange() {
+            return "ok";
+        }
+
+        @DeleteMapping("/api/v1/me/profile/requests/1")
+        String cancelRequest() {
+            return "ok";
+        }
     }
 
     @Autowired
@@ -153,6 +178,15 @@ class SecurityConfigTest {
     /** Says no account was disabled, unless a test says otherwise. */
     @MockBean
     private UserRepository users;
+
+    /** Says the account's CPF was taken on, unless a test says otherwise. */
+    @MockBean
+    private CurrentUser currentUser;
+
+    @BeforeEach
+    void cpfTakenOn() {
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(1L, null));
+    }
 
     /** A token as Keycloak issues it, with the given realm roles in {@code realm_access.roles}. */
     private static JwtRequestPostProcessor tokenWithRoles(String... roles) {
@@ -329,6 +363,66 @@ class SecurityConfigTest {
         mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("forbidden"));
+    }
+
+    @Test
+    @DisplayName("while the account's CPF is refused, /api answers 422 with its code, reads included")
+    void cpfGateHoldsBackTheApi() throws Exception {
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(1L, CpfProblem.TAKEN));
+
+        mvc.perform(get("/api/v1/documents").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("cpf_taken"))
+                .andExpect(jsonPath("$.message").isNotEmpty());
+        mvc.perform(get("/api/v1/categories").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isUnprocessableEntity());
+        mvc.perform(get("/api/v1/me/profile").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isUnprocessableEntity());
+        mvc.perform(get("/api/v1/admin/users").with(tokenWithRoles("ADMIN")))
+                .andExpect(status().isUnprocessableEntity());
+
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(1L, CpfProblem.INVALID));
+        mvc.perform(get("/api/v1/documents").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("invalid_cpf"));
+    }
+
+    @Test
+    @DisplayName("with a refused CPF, GET /me, the terms, deleting the account and the change requests stay open")
+    void cpfGateLeavesTheWayToTheRightCpfOpen() throws Exception {
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(1L, CpfProblem.INVALID));
+
+        mvc.perform(get("/api/v1/me").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(delete("/api/v1/me").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/terms").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/terms/accept").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/terms/decline").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/me/profile/requests").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/me/profile/requests").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
+        mvc.perform(delete("/api/v1/me/profile/requests/1").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isOk());
+        mvc.perform(get("/health")).andExpect(status().isOk());
+        mvc.perform(get("/internal/documents/1/file")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("the CPF gate comes after the login and the terms")
+    void cpfGateRunsAfterTheTerms() throws Exception {
+        given(currentUser.provisioned()).willReturn(new ProvisionedUser(1L, CpfProblem.TAKEN));
+
+        mvc.perform(get("/api/v1/documents")).andExpect(status().isUnauthorized());
+        given(terms.mustAccept(anyString())).willReturn(true);
+        mvc.perform(get("/api/v1/documents").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("terms_pending"));
+    }
+
+    @Test
+    @DisplayName("an account without email, sector or CPF goes past the CPF gate, to its own 403")
+    void cpfGateLetsIncompleteAccountsThrough() throws Exception {
+        given(currentUser.provisioned()).willThrow(new IncompleteAccountException("CPF"));
+
+        mvc.perform(get("/api/v1/documents").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
     }
 
     @Test
