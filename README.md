@@ -24,6 +24,8 @@ docker compose up --build
 - API disponível em `http://localhost:8080`
 - Postgres exposto em `localhost:5432` (db `akpedia`, user/senha `akpedia`)
 - Keycloak em `http://localhost/auth`, atrás do nginx (ver [Autenticação (Keycloak)](#autenticação-keycloak)).
+- Mailpit em `http://localhost:8025`: a caixa de entrada de teste, com todo e-mail que o server e
+  o Keycloak enviam (ver [E-mail (SMTP)](#e-mail-smtp)).
 - nginx em `http://localhost`: o endereço único do app (ver [Entrada única (nginx)](#entrada-única-nginx)).
   Para ele mandar a API para o serviço `app` em vez do dev container, defina `SERVER_UPSTREAM=app:8080`.
   Ele **exige** o `KEYCLOAK_DEV_ADMIN_PASSWORD` no `.env`: sem ele, o container sai com erro.
@@ -87,6 +89,8 @@ akpedia-server/
     │   │   │   ├── EmbeddingProperties.java
     │   │   │   ├── GotenbergClientConfig.java
     │   │   │   ├── GotenbergProperties.java
+    │   │   │   ├── MailProperties.java # akpedia.mail.*: remetente dos e-mails
+    │   │   │   ├── MailConfig.java
     │   │   │   ├── KeycloakAdminClientConfig.java
     │   │   │   ├── KeycloakAdminProperties.java # akpedia.keycloak.admin.*: URL, realm e service account
     │   │   │   ├── SecurityConfig.java # token do Keycloak nas rotas /api, papéis da revisão
@@ -149,7 +153,10 @@ akpedia-server/
     │   │       ├── DocumentApprovedEvent.java # publicado na aprovação, tratado após o commit
     │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit, e o XACK
     │   │       ├── DocumentIndexingService.java # grava o resultado ou a falha do worker e confirma a mensagem
-    │   │       └── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
+    │   │       ├── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
+    │   │       ├── MailService.java # envia e-mail um a um e devolve o resultado de cada envio
+    │   │       ├── OutgoingMail.java # destinatário, assunto e corpo em texto
+    │   │       └── MailResult.java # Sent, ou Failed com o motivo
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -543,6 +550,87 @@ e o default já aponta para `http://gotenberg:3000`. Rodando fora do Docker, sub
 ```bash
 docker run --rm -p 3000:3000 gotenberg/gotenberg:8
 ```
+
+### E-mail (SMTP)
+
+O server envia e-mail pelo `MailService` (o aviso de vazamento de dados é o primeiro uso), e o
+Keycloak usa o mesmo servidor SMTP para verificar e-mails e redefinir senhas.
+
+| Variável                  | Default                       | Para que serve |
+|---------------------------|-------------------------------|----------------|
+| `MAIL_HOST`               | `localhost` (`mailpit` no compose) | Servidor SMTP |
+| `MAIL_PORT`               | `1025`                        | Porta SMTP (num servidor real, em geral `587`) |
+| `MAIL_USERNAME`           | vazio                         | Login no SMTP |
+| `MAIL_PASSWORD`           | vazio                         | Senha no SMTP |
+| `MAIL_SMTP_AUTH`          | `false`                       | `true` para fazer login com o usuário e a senha acima |
+| `MAIL_SMTP_STARTTLS`      | `false`                       | `true` para exigir STARTTLS (servidor real na porta 587) |
+| `MAIL_FROM`               | `nao-responda@akpedia.local`  | Remetente. Checado na subida: um endereço inválido impede o boot |
+| `MAIL_FROM_NAME`          | `Akpedia`                     | Nome mostrado junto do remetente |
+| `MAIL_CONNECT_TIMEOUT_MS` | `5000`                        | Tempo máximo para abrir a conexão |
+| `MAIL_READ_TIMEOUT_MS`    | `10000`                       | Tempo máximo esperando uma resposta do servidor |
+| `MAIL_WRITE_TIMEOUT_MS`   | `10000`                       | Tempo máximo para enviar a mensagem |
+| `MAIL_SMTP_LOCALHOST`     | `akpedia.local`               | Nome com que o server se apresenta ao SMTP (`EHLO`). Em produção, o domínio real do server |
+| `MAIL_BATCH_SIZE`         | `50`                          | Quantos e-mails o `sendAll` manda por conexão SMTP antes de abrir a próxima (1 a 1000) |
+
+Os timeouts existem porque o Jakarta Mail espera para sempre por padrão: um servidor que aceita a
+conexão e para de responder seguraria o envio, e todos os que vêm depois dele.
+
+**Em desenvolvimento** o compose sobe o [Mailpit](https://mailpit.axllent.org/) (serviço `mailpit`,
+SMTP na porta `1025`): ele guarda tudo o que recebe e não entrega nada. Os e-mails aparecem em
+<http://localhost:8025>. Rodando o server fora do Docker, suba só ele:
+
+```bash
+docker compose up -d mailpit
+./mvnw test -Dtest=MailServiceManualIT   # envia um lote de teste e confere que chegou no Mailpit
+```
+
+**Como o `MailService` responde.** `send(OutgoingMail)` envia um e-mail em texto (UTF-8) e
+**nunca lança exceção**: devolve `Sent` (com o `Message-ID` enviado) ou `Failed` com o motivo.
+`sendAll(...)` devolve um resultado por e-mail, na mesma ordem, e uma falha não impede os outros.
+
+Ele manda até `MAIL_BATCH_SIZE` e-mails por conexão SMTP, em vez de abrir uma conexão (e fazer
+login) para cada e-mail. Se o servidor derrubar a conexão no meio, ela é aberta de novo para os que
+faltam, e só o e-mail que estava sendo enviado falha; um destinatário recusado também falha sozinho.
+Os dois casos são testados contra um servidor que se comporta mal (`MailServiceConnectionTest`).
+
+Cada e-mail sai assim (texto puro, UTF-8, com o `Message-ID` no domínio do remetente, para não
+expor o nome da máquina):
+
+```
+From: Akpedia <nao-responda@akpedia.local>
+To: ana@empresa.com
+Message-ID: <0b6f...-...@akpedia.local>
+Subject: =?UTF-8?Q?Aviso_de_incidente_de_seguran=C3=A7a?=
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+```
+
+| Motivo (`Failed.reason`) | Quando | Vale tentar de novo? |
+|--------------------------|--------|----------------------|
+| `INVALID_MESSAGE` | sem destinatário, endereço inválido (ou mais de um), assunto vazio ou com quebra de linha, corpo ausente. Nada chega a ser enviado | não |
+| `REJECTED` | o servidor recusou de vez, com resposta `5xx` (ex.: caixa inexistente) | não |
+| `AUTHENTICATION` | o servidor recusou o usuário ou a senha: problema de configuração | não |
+| `UNAVAILABLE` | servidor fora do ar, inalcançável, mais lento que os timeouts, conexão caiu no meio, ou recusou por enquanto com resposta `4xx` (ex.: caixa cheia) | sim |
+| `FAILED` | qualquer outro erro do servidor ou da biblioteca | sim |
+
+A classificação usa o **código de resposta SMTP**, não o tipo da exceção: o Angus Mail lança a mesma
+`SMTPSendFailedException` para um `550` e para uma conexão que caiu (código `-1`).
+
+Se todos os e-mails de um lote saírem e só o fechamento da conexão falhar, eles continuam `Sent`:
+o servidor já os aceitou.
+
+Nos logs os destinatários aparecem mascarados (`a***@empresa.com`), inclusive quando o servidor
+cita o endereço na resposta: quem recebeu um aviso de vazamento já é dado pessoal.
+
+O health (`/actuator/health`) não checa o SMTP (`management.health.mail.enabled: false`): sem e-mail
+o resto do server funciona, e cada envio que falha já é reportado pelo `MailService`.
+
+**No Keycloak** o realm importa o SMTP das mesmas variáveis (`smtpServer` em
+`keycloak/akpedia-realm.json`). A verificação de e-mail e a redefinição de senha continuam
+**desligadas** (`verifyEmail` e `resetPasswordAllowed`): ligá-las é decisão de produto, em
+*Realm settings > Login*. Como o realm só é importado na primeira subida, um Keycloak que já existia
+não recebe o SMTP: configure em *Realm settings > Email* (host `mailpit`, porta `1025`, remetente
+`nao-responda@akpedia.local`) ou recrie o volume do Keycloak.
 
 ### Fila de indexação (Redis)
 

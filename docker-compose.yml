@@ -43,6 +43,15 @@ services:
     ports:
       - "3000:3000"
 
+  # Test SMTP server: keeps every e-mail the server and Keycloak send, and delivers none. Read them at
+  # http://localhost:8025. It accepts any login, so the dev setup needs no username or password.
+  mailpit:
+    image: axllent/mailpit:v1.32
+    container_name: akpedia-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
   # Creates the keycloak database on the Postgres above, if missing, and exits. A one-shot
   # service rather than a docker-entrypoint-initdb.d script, which would only run on a new volume.
   keycloak-db-init:
@@ -106,6 +115,15 @@ services:
       KEYCLOAK_SERVER_CLIENT_SECRET: ${KEYCLOAK_SERVER_CLIENT_SECRET:-akpedia-dev-server-secret}
       KEYCLOAK_DEV_ADMIN_EMAIL: ${KEYCLOAK_DEV_ADMIN_EMAIL:-admin@akpedia.local}
       KEYCLOAK_DEV_ADMIN_PASSWORD: ${KEYCLOAK_DEV_ADMIN_PASSWORD:-}
+      # The realm's SMTP (verify e-mail, reset password): the same server as the app's.
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_SMTP_STARTTLS: ${MAIL_SMTP_STARTTLS:-false}
+      MAIL_FROM: ${MAIL_FROM:-nao-responda@akpedia.local}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Akpedia}
     # No published port: the browser reaches Keycloak through nginx, at /auth.
     healthcheck:
       # The image has no curl: ask the management port for /auth/health/ready over bash's
@@ -148,6 +166,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-akpedia}
       DB_USER: ${POSTGRES_USER:-akpedia}
@@ -181,6 +201,21 @@ services:
       # Log of deleted accounts, replayed after a database restore. On its own volume, so it
       # survives the container and is not part of the Postgres backups.
       ACCOUNT_DELETION_LOG_FILE: /app/data/account-deletions.jsonl
+      # Outgoing e-mail (MailService). The sibling Mailpit above, reached by service name; MAIL_* in
+      # .env for a real server.
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_SMTP_STARTTLS: ${MAIL_SMTP_STARTTLS:-false}
+      MAIL_FROM: ${MAIL_FROM:-nao-responda@akpedia.local}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Akpedia}
+      MAIL_CONNECT_TIMEOUT_MS: ${MAIL_CONNECT_TIMEOUT_MS:-5000}
+      MAIL_READ_TIMEOUT_MS: ${MAIL_READ_TIMEOUT_MS:-10000}
+      MAIL_WRITE_TIMEOUT_MS: ${MAIL_WRITE_TIMEOUT_MS:-10000}
+      MAIL_SMTP_LOCALHOST: ${MAIL_SMTP_LOCALHOST:-akpedia.local}
+      MAIL_BATCH_SIZE: ${MAIL_BATCH_SIZE:-50}
     volumes:
       - account_deletions:/app/data
     extra_hosts:

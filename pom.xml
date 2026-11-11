@@ -22,6 +22,8 @@
         <!-- 2.6.x is the line that tracks Spring Boot 3.3 -->
         <springdoc.version>2.6.0</springdoc.version>
         <pdfbox.version>3.0.5</pdfbox.version>
+        <!-- The 2.1 line is built on Jakarta Mail 2.1, the same Spring Boot 3.3 brings in -->
+        <greenmail.version>2.1.15</greenmail.version>
     </properties>
 
     <dependencies>
@@ -41,6 +43,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
@@ -108,6 +115,13 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- In-memory SMTP server, so MailService is tested over the real protocol -->
+        <dependency>
+            <groupId>com.icegreen</groupId>
+            <artifactId>greenmail-junit5</artifactId>
+            <version>${greenmail.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
