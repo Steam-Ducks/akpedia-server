@@ -1,5 +1,7 @@
 package com.akpedia.server.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -26,6 +28,8 @@ import com.akpedia.server.dto.EmbeddingErrorResponse;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     /**
      * 415: the upload is in a format the analysis does not accept.
@@ -160,6 +164,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
     }
 
+    /** 404: there is no sector with that id. */
+    @ExceptionHandler(SectorNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleSectorNotFound(SectorNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiErrorResponse("sector_not_found", e.getMessage()));
+    }
+
     /** 404: the category named in a document upload does not exist. */
     @ExceptionHandler(CategoryNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleCategoryNotFound(CategoryNotFoundException e) {
@@ -264,11 +274,160 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("document_unreadable", e.getMessage()));
     }
 
-    /** 404: the creator named in a document upload does not exist. */
+    /** 404: the creator named in a document upload, or the Keycloak account the admin named, does not exist. */
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleUserNotFound(UserNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiErrorResponse("user_not_found", e.getMessage()));
+    }
+
+    /** 409: the user accepted a version of the terms that is no longer the current one. */
+    @ExceptionHandler(TermsChangedException.class)
+    public ResponseEntity<ApiErrorResponse> handleTermsChanged(TermsChangedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("terms_changed", e.getMessage()));
+    }
+
+    /**
+     * 400: the admin's new version of the terms has a field the server does not take. Same code
+     * as a blank title or content, which bean validation refuses.
+     */
+    @ExceptionHandler(InvalidTermsException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidTerms(InvalidTermsException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
+    /** 409: the admin's new version of the terms repeats one published before. */
+    @ExceptionHandler(TermsVersionExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleTermsVersionExists(TermsVersionExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("terms_version_exists", e.getMessage()));
+    }
+
+    /**
+     * 403: the user is logged in, but their Keycloak account has no email or no sector, so there
+     * is no row to attribute their documents to. Logging in again will not change that.
+     */
+    @ExceptionHandler(IncompleteAccountException.class)
+    public ResponseEntity<ApiErrorResponse> handleIncompleteAccount(IncompleteAccountException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiErrorResponse("incomplete_account", e.getMessage()));
+    }
+
+    /**
+     * 422: the logged-in account's CPF has wrong check digits, or another user has it, so it
+     * gets no row here until an admin corrects it in Keycloak.
+     */
+    @ExceptionHandler(AccountCpfException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccountCpf(AccountCpfException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ApiErrorResponse(e.getCode(), e.getMessage()));
+    }
+
+    /** 400: a page of a list was asked for out of bounds. */
+    @ExceptionHandler(InvalidPageRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidPage(InvalidPageRequestException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
+    /** 400: the admin named a role that does not exist or is not given by hand. */
+    @ExceptionHandler(InvalidRoleException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidRole(InvalidRoleException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_role", e.getMessage()));
+    }
+
+    /** 409: the admin would take ADMIN from themself. */
+    @ExceptionHandler(CannotChangeOwnAdminException.class)
+    public ResponseEntity<ApiErrorResponse> handleCannotChangeOwnAdmin(CannotChangeOwnAdminException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("cannot_change_own_admin", e.getMessage()));
+    }
+
+    /** 409: the admin would disable their own account. */
+    @ExceptionHandler(CannotDisableSelfException.class)
+    public ResponseEntity<ApiErrorResponse> handleCannotDisableSelf(CannotDisableSelfException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("cannot_disable_self", e.getMessage()));
+    }
+
+    /** 409: the action would leave no enabled admin. */
+    @ExceptionHandler(LastAdminException.class)
+    public ResponseEntity<ApiErrorResponse> handleLastAdmin(LastAdminException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("last_admin", e.getMessage()));
+    }
+
+    /** 500: the deletion log could not be written, so nothing was deleted. */
+    @ExceptionHandler(AccountDeletionLogException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccountDeletionLog(AccountDeletionLogException e) {
+        log.error("Could not write the account deletion log", e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiErrorResponse("account_deletion_failed", e.getMessage()));
+    }
+
+    /** 400: the admin's new user is missing a field, or has one Keycloak refused. */
+    @ExceptionHandler(InvalidUserException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidUser(InvalidUserException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_user", e.getMessage()));
+    }
+
+    /** 409: the realm already has a user with that email. */
+    @ExceptionHandler(UserExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleUserExists(UserExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("user_exists", e.getMessage()));
+    }
+
+    /** 409: another user already has that CPF. */
+    @ExceptionHandler(CpfTakenException.class)
+    public ResponseEntity<ApiErrorResponse> handleCpfTaken(CpfTakenException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse("cpf_taken", e.getMessage()));
+    }
+
+    /** 400: the profile edit is missing a field or has an invalid one, the message says which. */
+    @ExceptionHandler(InvalidProfileException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidProfile(InvalidProfileException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_profile", e.getMessage()));
+    }
+
+    /** 400: the edit would leave everything as it is. */
+    @ExceptionHandler(NothingChangedException.class)
+    public ResponseEntity<ApiErrorResponse> handleNothingChanged(NothingChangedException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("nothing_changed", e.getMessage()));
+    }
+
+    /** 400: the e-mail or CPF change request is invalid, the message says why. */
+    @ExceptionHandler(InvalidChangeRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidChangeRequest(InvalidChangeRequestException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_change_request", e.getMessage()));
+    }
+
+    /** 409: the user already asked to change that field, and it was not decided yet. */
+    @ExceptionHandler(ChangeRequestPendingException.class)
+    public ResponseEntity<ApiErrorResponse> handleChangeRequestPending(ChangeRequestPendingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("change_request_pending", e.getMessage()));
+    }
+
+    /** 404: no such change request, or not the caller's. */
+    @ExceptionHandler(ChangeRequestNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleChangeRequestNotFound(ChangeRequestNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("change_request_not_found", e.getMessage()));
+    }
+
+    /** 409: the change request was already decided (or cancelled meanwhile). */
+    @ExceptionHandler(ChangeRequestNotPendingException.class)
+    public ResponseEntity<ApiErrorResponse> handleChangeRequestNotPending(ChangeRequestNotPendingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("change_request_not_pending", e.getMessage()));
+    }
+
+    /** 502: Keycloak's Admin API is down, refused this server's service account, or failed. */
+    @ExceptionHandler(KeycloakUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleKeycloakUnavailable(KeycloakUnavailableException e) {
+        // The answer only says Keycloak failed; why is for the server's log.
+        log.warn("Keycloak Admin API call failed", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiErrorResponse("keycloak_unavailable", e.getMessage()));
     }
 
     /** 503: Gotenberg is down, unreachable, or past the read timeout. */

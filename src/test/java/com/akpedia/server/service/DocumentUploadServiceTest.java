@@ -22,7 +22,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.akpedia.server.client.GotenbergClient;
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.DocumentFile;
@@ -59,7 +58,7 @@ class DocumentUploadServiceTest {
     @Mock
     private GotenbergClient gotenberg;
     @Mock
-    private DefaultUserProvider defaultUser;
+    private AuditService audit;
 
     private DocumentUploadService service;
     private Category category;
@@ -67,9 +66,9 @@ class DocumentUploadServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DocumentUploadService(documents, documentFiles, categories, users, gotenberg, defaultUser);
+        service = new DocumentUploadService(documents, documentFiles, categories, users, gotenberg, audit);
         category = new Category("Manuais", "manuais tecnicos");
-        creator = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", "setor de TI"));
+        creator = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
     }
 
     @Test
@@ -238,32 +237,16 @@ class DocumentUploadServiceTest {
     }
 
     @Test
-    @DisplayName("an upload with no creator is attributed to the configured default user")
-    void noCreatorFallsBackToTheDefaultUser() {
-        given(categories.findById(10L)).willReturn(Optional.of(category));
-        given(defaultUser.userId()).willReturn(99L);
-        given(users.findById(99L)).willReturn(Optional.of(creator));
-        byte[] pdf = "%PDF-1.4 conteudo".getBytes();
-        given(documents.save(any())).willAnswer(invocation -> invocation.getArgument(0));
-
-        Document result = service.upload(pdf, "manual.pdf", "application/pdf", 10L, null, null, null, null, null);
-
-        assertThat(result.getCreator()).isSameAs(creator);
-        verify(users).findById(99L);
-    }
-
-    @Test
-    @DisplayName("an explicit creator is used as given, without consulting the default user")
-    void explicitCreatorIgnoresTheDefaultUser() {
+    @DisplayName("the document is attributed to the given creator")
+    void documentIsAttributedToTheCreator() {
         given(categories.findById(10L)).willReturn(Optional.of(category));
         given(users.findById(20L)).willReturn(Optional.of(creator));
         byte[] pdf = "%PDF-1.4 conteudo".getBytes();
         given(documents.save(any())).willAnswer(invocation -> invocation.getArgument(0));
 
-        service.upload(pdf, "manual.pdf", "application/pdf", 10L, 20L, null, null, null, null);
+        Document result = service.upload(pdf, "manual.pdf", "application/pdf", 10L, 20L, null, null, null, null);
 
-        // The fallback must not leak into uploads that name their author.
-        verifyNoInteractions(defaultUser);
+        assertThat(result.getCreator()).isSameAs(creator);
     }
 
 }

@@ -23,6 +23,18 @@ spring:
       max-file-size: 25MB
       max-request-size: 25MB
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Tokens are issued by the akpedia realm. The issuer is the public URL the browser logs in
+          # at; the keys are fetched from wherever this server reaches Keycloak, which is not
+          # localhost inside a container (KEYCLOAK_JWK_SET_URI).
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost/auth/realms/akpedia}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost/auth/realms/akpedia/protocol/openid-connect/certs}
+          # Only tokens meant for this API: akpedia-client puts akpedia-server in their aud.
+          audiences: akpedia-server
+
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -42,10 +54,6 @@ server:
   port: ${SERVER_PORT:8080}
 
 akpedia:
-  # TEMPORARY: with no registration or login, every upload and approval is attributed to the
-  # user seeded by V5__seed_default_approver.sql. Resolved to an id at startup, and the
-  # application refuses to start when no user has this email.
-  default-user-email: ${DEFAULT_USER_EMAIL:aprovador@akpedia.local}
   embedding:
     base-url: ${EMBEDDING_BASE_URL:http://localhost:8000}
     connect-timeout: ${EMBEDDING_CONNECT_TIMEOUT:2s}
@@ -71,6 +79,22 @@ akpedia:
     retry-interval: ${PROCESSING_RETRY_INTERVAL:30s}
     retry-grace: ${PROCESSING_RETRY_GRACE:1m}
     retry-batch-size: ${PROCESSING_RETRY_BATCH_SIZE:50}
+  keycloak:
+    # The Admin API, for the admin's users screen, through the akpedia-server client's service
+    # account. Inside a container, Keycloak is reached by its container name, not localhost.
+    admin:
+      base-url: ${KEYCLOAK_ADMIN_BASE_URL:http://localhost/auth}
+      realm: ${KEYCLOAK_REALM:akpedia}
+      client-id: ${KEYCLOAK_SERVER_CLIENT_ID:akpedia-server}
+      client-secret: ${KEYCLOAK_SERVER_CLIENT_SECRET:akpedia-dev-server-secret}
+  account-deletion:
+    # Every deleted account, one JSON line each (ids only, kept forever). Outside the database on
+    # purpose: a restored backup brings deleted accounts back, and this file deletes them again.
+    # Keep it out of the database backups.
+    log-file: ${ACCOUNT_DELETION_LOG_FILE:./data/account-deletions.jsonl}
+    # Replays the file on every start, in the background, retrying while Keycloak comes up.
+    replay-on-startup: ${ACCOUNT_DELETION_REPLAY_ON_STARTUP:true}
+    replay-retry-delay: ${ACCOUNT_DELETION_REPLAY_RETRY_DELAY:15s}
   gotenberg:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}

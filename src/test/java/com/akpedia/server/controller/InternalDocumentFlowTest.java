@@ -37,10 +37,10 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.entity.Category;
 import com.akpedia.server.entity.Document;
@@ -93,8 +93,9 @@ class InternalDocumentFlowTest {
     private CategoryRepository categories;
     @Autowired
     private UserRepository users;
+
     @Autowired
-    private DefaultUserProvider defaultUser;
+    private JdbcTemplate jdbc;
 
     @MockBean
     private StringRedisTemplate redis;
@@ -113,18 +114,20 @@ class InternalDocumentFlowTest {
 
     @AfterEach
     void cleanUp() {
-        // File and embeddings go with the document (ON DELETE CASCADE).
+        // File and embeddings go with the document (ON DELETE CASCADE); the audit trail has no FK to it.
         documents.deleteAllById(created);
+        created.forEach(id -> jdbc.update(
+                "DELETE FROM audit_logs WHERE entity_type = 'DOCUMENT' AND entity_id = ?", id));
     }
 
     /** A document approved by the approver, so {@code PROCESSING} and waiting on the worker. */
     private Long approvedDocument() {
         Category category = categories.findByName("Tecnico").orElseThrow();
         Document document = documents.save(new Document("manual-indexado.pdf", "application/pdf", (long) PDF.length,
-                category, users.findById(defaultUser.userId()).orElseThrow(), DocumentStatus.PENDING_APPROVAL));
+                category, users.findById(seededUserId()).orElseThrow(), DocumentStatus.PENDING_APPROVAL));
         created.add(document.getId());
         documentFiles.save(new DocumentFile(document, PDF));
-        reviewService.approve(document.getId(), ApproveDocumentRequest.NONE);
+        reviewService.approve(document.getId(), seededUserId(), ApproveDocumentRequest.NONE);
         return document.getId();
     }
 
@@ -318,7 +321,7 @@ class InternalDocumentFlowTest {
     void embeddingsOfAnUnapprovedDocumentAreRefused() throws Exception {
         Category category = categories.findByName("Tecnico").orElseThrow();
         Document pending = documents.save(new Document("pendente.pdf", "application/pdf", 1L,
-                category, users.findById(defaultUser.userId()).orElseThrow(), DocumentStatus.PENDING_APPROVAL));
+                category, users.findById(seededUserId()).orElseThrow(), DocumentStatus.PENDING_APPROVAL));
         created.add(pending.getId());
 
         postWithToken("/internal/documents/" + pending.getId() + "/embeddings",
@@ -339,5 +342,10 @@ class InternalDocumentFlowTest {
                 .andExpect(status().isNotFound());
 
         verify(stream, times(2)).acknowledge(eq(STREAM), eq(GROUP), eq(MESSAGE_ID));
+    }
+
+    /** Author and approver of these documents: the user seeded by V5, there on every database. */
+    private Long seededUserId() {
+        return users.findByEmail("aprovador@akpedia.local").orElseThrow().getId();
     }
 }

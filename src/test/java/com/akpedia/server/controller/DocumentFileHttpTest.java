@@ -23,6 +23,10 @@ import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.oauth2.resource.servlet.OAuth2ResourceServerAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -34,6 +38,7 @@ import org.springframework.http.MediaType;
 import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.DocumentArchivedException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -64,7 +69,12 @@ class DocumentFileHttpTest {
         DataSourceAutoConfiguration.class,
         DataSourceTransactionManagerAutoConfiguration.class,
         HibernateJpaAutoConfiguration.class,
-        FlywayAutoConfiguration.class})
+        FlywayAutoConfiguration.class,
+        // The route is under test, not who may call it: SecurityConfigTest covers that.
+        SecurityAutoConfiguration.class,
+        SecurityFilterAutoConfiguration.class,
+        ManagementWebSecurityAutoConfiguration.class,
+        OAuth2ResourceServerAutoConfiguration.class})
     @Import({DocumentController.class, ApiExceptionHandler.class})
     static class OnlyTheDocumentRoute {
     }
@@ -89,6 +99,9 @@ class DocumentFileHttpTest {
 
     @MockBean
     private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private CurrentUser currentUser;
 
     private final HttpClient http = HttpClient.newHttpClient();
     private byte[] pdf;

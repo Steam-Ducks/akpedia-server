@@ -16,6 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -27,6 +28,7 @@ import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.dto.PendingDocument.CategoryRef;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -34,6 +36,8 @@ import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 @WebMvcTest(controllers = DocumentController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 @Import(ApiExceptionHandler.class)
 class DocumentListHttpTest {
 
@@ -56,6 +60,9 @@ class DocumentListHttpTest {
 
     @MockBean
     private DocumentAnalysisService analysisService;
+
+    @MockBean
+    private CurrentUser currentUser;
 
     @Test
     @DisplayName("GET /api/v1/documents answers each document with the eight agreed fields")

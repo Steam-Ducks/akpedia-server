@@ -6,7 +6,6 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.dto.DocumentReviewResponse;
 import com.akpedia.server.entity.Document;
@@ -28,8 +27,8 @@ import com.akpedia.server.repository.UserRepository;
  * locked while deciding, so a second decision on the same document is refused instead of
  * overriding the first.
  *
- * <p>The approver is the configured default user, as with the upload's author: there is no login
- * yet to say who is deciding.
+ * <p>The approver is the logged-in user, whose APPROVER or ADMIN role {@code SecurityConfig}
+ * already checked.
  */
 @Service
 public class DocumentReviewService {
@@ -38,22 +37,22 @@ public class DocumentReviewService {
     private final DocumentFileRepository documentFiles;
     private final CategoryRepository categories;
     private final UserRepository users;
-    private final DefaultUserProvider defaultUser;
     private final ApplicationEventPublisher events;
+    private final AuditService audit;
 
     public DocumentReviewService(
             DocumentRepository documents,
             DocumentFileRepository documentFiles,
             CategoryRepository categories,
             UserRepository users,
-            DefaultUserProvider defaultUser,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            AuditService audit) {
         this.documents = documents;
         this.documentFiles = documentFiles;
         this.categories = categories;
         this.users = users;
-        this.defaultUser = defaultUser;
         this.events = events;
+        this.audit = audit;
     }
 
     /**
@@ -64,6 +63,7 @@ public class DocumentReviewService {
      * this transaction commits; see {@link ProcessingQueue}.
      *
      * @param documentId  the document to approve
+     * @param approverId  the user approving it
      * @param corrections metadata to change; fields left {@code null} keep their value
      * @return the document as approved
      * @throws DocumentNotFoundException           if there is no such document
@@ -71,7 +71,7 @@ public class DocumentReviewService {
      * @throws CategoryNotFoundException           if the corrected category does not exist
      */
     @Transactional
-    public DocumentReviewResponse approve(Long documentId, ApproveDocumentRequest corrections) {
+    public DocumentReviewResponse approve(Long documentId, Long approverId, ApproveDocumentRequest corrections) {
         Document document = pendingDocument(documentId);
 
         if (corrections.categoryId() != null) {
@@ -90,12 +90,14 @@ public class DocumentReviewService {
 
         OffsetDateTime now = OffsetDateTime.now();
         document.setStatus(DocumentStatus.APPROVED);
-        document.setApprover(users.getReferenceById(defaultUser.userId()));
+        document.setApprover(users.getReferenceById(approverId));
         document.setApprovedAt(now);
         document.setReviewedAt(now);
         document.setProcessingStatus(ProcessingStatus.PROCESSING);
 
         events.publishEvent(new DocumentApprovedEvent(document.getId()));
+        audit.record(approverId, AuditService.DOCUMENT_APPROVED, AuditService.DOCUMENT, document.getId(),
+                AuditService.details("category_id", document.getCategory().getId()));
         return DocumentReviewResponse.from(document);
     }
 
@@ -107,19 +109,22 @@ public class DocumentReviewService {
      * has already read it, and the author still holds the original they uploaded it from.
      *
      * @param documentId the document to return
+     * @param reviewerId the user returning it, recorded in the audit trail
      * @param comment    why it is being returned; already validated as not blank
      * @return the document as returned
      * @throws DocumentNotFoundException           if there is no such document
      * @throws DocumentNotPendingApprovalException if it is not waiting on a decision
      */
     @Transactional
-    public DocumentReviewResponse reject(Long documentId, String comment) {
+    public DocumentReviewResponse reject(Long documentId, Long reviewerId, String comment) {
         Document document = pendingDocument(documentId);
 
         document.setStatus(DocumentStatus.REJECTED);
         document.setReviewComment(comment.strip());
         document.setReviewedAt(OffsetDateTime.now());
         documentFiles.deleteByDocumentId(documentId);
+        audit.record(reviewerId, AuditService.DOCUMENT_REJECTED, AuditService.DOCUMENT, documentId,
+                AuditService.details("comment", document.getReviewComment()));
 
         return DocumentReviewResponse.from(document);
     }

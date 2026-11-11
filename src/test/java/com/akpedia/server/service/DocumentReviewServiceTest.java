@@ -22,7 +22,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.ApproveDocumentRequest;
 import com.akpedia.server.dto.DocumentReviewResponse;
 import com.akpedia.server.entity.Category;
@@ -58,9 +57,9 @@ class DocumentReviewServiceTest {
     @Mock
     private UserRepository users;
     @Mock
-    private DefaultUserProvider defaultUser;
-    @Mock
     private ApplicationEventPublisher events;
+    @Mock
+    private AuditService audit;
 
     private DocumentReviewService service;
     private Category original;
@@ -68,9 +67,9 @@ class DocumentReviewServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DocumentReviewService(documents, documentFiles, categories, users, defaultUser, events);
+        service = new DocumentReviewService(documents, documentFiles, categories, users, events, audit);
         original = category(3L, "Tecnico");
-        approver = new User("Aprovador", "aprovador@akpedia.local", "hash", new Sector("Engenharia", null));
+        approver = new User("Aprovador", "aprovador@akpedia.local", new Sector("Engenharia", null));
         ReflectionTestUtils.setField(approver, "id", APPROVER_ID);
     }
 
@@ -81,7 +80,7 @@ class DocumentReviewServiceTest {
     }
 
     private Document stored(DocumentStatus status) {
-        User author = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", null));
+        User author = new User("Ana", "ana@akpedia.test", new Sector("TI", null));
         Document document = new Document("manual.pdf", "application/pdf", 1024L, original, author, status);
         document.setDescription("descricao do autor");
         ReflectionTestUtils.setField(document, "id", DOCUMENT_ID);
@@ -90,7 +89,6 @@ class DocumentReviewServiceTest {
     }
 
     private void givenTheApprover() {
-        given(defaultUser.userId()).willReturn(APPROVER_ID);
         given(users.getReferenceById(APPROVER_ID)).willReturn(approver);
     }
 
@@ -104,7 +102,7 @@ class DocumentReviewServiceTest {
         Document document = stored(DocumentStatus.PENDING_APPROVAL);
         givenTheApprover();
 
-        DocumentReviewResponse response = service.approve(DOCUMENT_ID, ApproveDocumentRequest.NONE);
+        DocumentReviewResponse response = service.approve(DOCUMENT_ID, APPROVER_ID, ApproveDocumentRequest.NONE);
 
         assertThat(document.getStatus()).isEqualTo(DocumentStatus.APPROVED);
         assertThat(document.getProcessingStatus()).isEqualTo(ProcessingStatus.PROCESSING);
@@ -130,7 +128,7 @@ class DocumentReviewServiceTest {
         Category corrected = category(4L, "Qualidade");
         given(categories.findById(4L)).willReturn(Optional.of(corrected));
 
-        DocumentReviewResponse response = service.approve(DOCUMENT_ID,
+        DocumentReviewResponse response = service.approve(DOCUMENT_ID, APPROVER_ID,
                 new ApproveDocumentRequest("  Manual de calibracao  ", "descricao do aprovador", 4L));
 
         assertThat(document.getName()).isEqualTo("Manual de calibracao");
@@ -147,7 +145,7 @@ class DocumentReviewServiceTest {
         Document document = stored(DocumentStatus.PENDING_APPROVAL);
         givenTheApprover();
 
-        service.approve(DOCUMENT_ID, new ApproveDocumentRequest(null, "so a descricao", null));
+        service.approve(DOCUMENT_ID, APPROVER_ID, new ApproveDocumentRequest(null, "so a descricao", null));
 
         assertThat(document.getDescription()).isEqualTo("so a descricao");
         assertThat(document.getName()).isEqualTo("manual.pdf");
@@ -160,7 +158,7 @@ class DocumentReviewServiceTest {
         Document document = stored(DocumentStatus.PENDING_APPROVAL);
         givenTheApprover();
 
-        DocumentReviewResponse response = service.approve(DOCUMENT_ID, new ApproveDocumentRequest(null, "   ", null));
+        DocumentReviewResponse response = service.approve(DOCUMENT_ID, APPROVER_ID, new ApproveDocumentRequest(null, "   ", null));
 
         // Stored as no description, the way the upload stores a blank one -- not as "".
         assertThat(document.getDescription()).isNull();
@@ -173,7 +171,7 @@ class DocumentReviewServiceTest {
         stored(DocumentStatus.PENDING_APPROVAL);
         givenTheApprover();
 
-        service.approve(DOCUMENT_ID, ApproveDocumentRequest.NONE);
+        service.approve(DOCUMENT_ID, APPROVER_ID, ApproveDocumentRequest.NONE);
 
         // Only published here: it reaches Redis after commit, which ProcessingQueueTest covers.
         verify(events).publishEvent(new DocumentApprovedEvent(DOCUMENT_ID));
@@ -185,7 +183,7 @@ class DocumentReviewServiceTest {
         Document document = stored(DocumentStatus.PENDING_APPROVAL);
         given(categories.findById(99L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.approve(DOCUMENT_ID, new ApproveDocumentRequest(null, null, 99L)))
+        assertThatThrownBy(() -> service.approve(DOCUMENT_ID, APPROVER_ID, new ApproveDocumentRequest(null, null, 99L)))
                 .isInstanceOf(CategoryNotFoundException.class);
 
         verify(events, never()).publishEvent(any());
@@ -199,7 +197,7 @@ class DocumentReviewServiceTest {
     void approveRefusesAnyOtherStatus(DocumentStatus status) {
         Document document = stored(status);
 
-        assertThatThrownBy(() -> service.approve(DOCUMENT_ID, ApproveDocumentRequest.NONE))
+        assertThatThrownBy(() -> service.approve(DOCUMENT_ID, APPROVER_ID, ApproveDocumentRequest.NONE))
                 .isInstanceOf(DocumentNotPendingApprovalException.class)
                 .hasMessageContaining(status.name());
 
@@ -216,7 +214,7 @@ class DocumentReviewServiceTest {
     void rejectReturnsTheDocument() {
         Document document = stored(DocumentStatus.PENDING_APPROVAL);
 
-        DocumentReviewResponse response = service.reject(DOCUMENT_ID, "  Falta a secao de revisao A.  ");
+        DocumentReviewResponse response = service.reject(DOCUMENT_ID, APPROVER_ID, "  Falta a secao de revisao A.  ");
 
         assertThat(document.getStatus()).isEqualTo(DocumentStatus.REJECTED);
         assertThat(document.getReviewComment()).isEqualTo("Falta a secao de revisao A.");
@@ -240,7 +238,7 @@ class DocumentReviewServiceTest {
     void rejectRefusesAnyOtherStatus(DocumentStatus status) {
         Document document = stored(status);
 
-        assertThatThrownBy(() -> service.reject(DOCUMENT_ID, "motivo"))
+        assertThatThrownBy(() -> service.reject(DOCUMENT_ID, APPROVER_ID, "motivo"))
                 .isInstanceOf(DocumentNotPendingApprovalException.class);
 
         assertThat(document.getStatus()).isEqualTo(status);
@@ -252,9 +250,9 @@ class DocumentReviewServiceTest {
     void unknownDocument() {
         given(documents.findForReview(404L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.approve(404L, ApproveDocumentRequest.NONE))
+        assertThatThrownBy(() -> service.approve(404L, APPROVER_ID, ApproveDocumentRequest.NONE))
                 .isInstanceOf(DocumentNotFoundException.class);
-        assertThatThrownBy(() -> service.reject(404L, "motivo"))
+        assertThatThrownBy(() -> service.reject(404L, APPROVER_ID, "motivo"))
                 .isInstanceOf(DocumentNotFoundException.class);
 
         verifyNoInteractions(documentFiles, events);

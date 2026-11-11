@@ -10,6 +10,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -27,6 +28,7 @@ import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.repository.DocumentFileRepository;
 import com.akpedia.server.repository.DocumentRepository;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -41,6 +43,8 @@ import com.akpedia.server.service.DocumentUploadService;
  * status code the route answers for it.
  */
 @WebMvcTest(controllers = DocumentController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 @Import({ApiExceptionHandler.class, DocumentFileService.class})
 class PendingDocumentFileTest {
 
@@ -67,8 +71,11 @@ class PendingDocumentFileTest {
     @MockBean
     private DocumentAnalysisService analysisService;
 
+    @MockBean
+    private CurrentUser currentUser;
+
     private void stored(DocumentStatus status, ProcessingStatus processingStatus) {
-        User creator = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", null));
+        User creator = new User("Ana", "ana@akpedia.test", new Sector("TI", null));
         Document document = new Document(
                 "relatorio.pdf", MediaType.APPLICATION_PDF_VALUE, (long) PDF_BYTES.length,
                 new Category("Manuais", null), creator, status);

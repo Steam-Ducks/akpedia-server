@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -21,11 +22,13 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -47,6 +50,7 @@ import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
+import com.akpedia.server.exception.AccountCpfException;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.CategoryNotFoundException;
 import com.akpedia.server.exception.CategorySuggestionUnavailableException;
@@ -54,13 +58,14 @@ import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotProcessedException;
+import com.akpedia.server.exception.IncompleteAccountException;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
 import com.akpedia.server.exception.InvalidDocumentUploadException;
 import com.akpedia.server.exception.PdfConversionRejectedException;
 import com.akpedia.server.exception.PdfConversionUnavailableException;
 import com.akpedia.server.exception.UnknownSuggestedCategoryException;
 import com.akpedia.server.exception.UnsupportedDocumentFormatException;
-import com.akpedia.server.exception.UserNotFoundException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -73,6 +78,8 @@ import com.akpedia.server.service.DocumentUploadService;
  * 201 with the stored metadata.
  */
 @WebMvcTest(controllers = DocumentController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 @Import(ApiExceptionHandler.class)
 class DocumentControllerTest {
 
@@ -94,6 +101,14 @@ class DocumentControllerTest {
     @MockBean
     private DocumentSubmissionService submissionService;
 
+    @MockBean
+    private CurrentUser currentUser;
+
+    @BeforeEach
+    void logIn() {
+        given(currentUser.id()).willReturn(20L);
+    }
+
     /** Fixed validators, so the conditional-request cases can send the exact values back. */
     private static final Instant LAST_MODIFIED = Instant.parse("2026-09-24T22:31:05Z");
     private static final String ETAG = "\"1-17-1790634665000\"";
@@ -102,7 +117,7 @@ class DocumentControllerTest {
     private static Document document() {
         Sector sector = new Sector("TI", "setor de TI");
         Category category = new Category("Manuais", "manuais tecnicos");
-        User creator = new User("Ana", "ana@akpedia.test", "hash", sector);
+        User creator = new User("Ana", "ana@akpedia.test", sector);
         Document document = new Document(
                 "relatorio.pdf", "application/pdf", 2048L, category, creator, DocumentStatus.PENDING_APPROVAL);
         ReflectionTestUtils.setField(category, "id", 10L);
@@ -123,8 +138,7 @@ class DocumentControllerTest {
                         .file(new MockMultipartFile("file", "relatorio.docx",
                                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                 "conteudo".getBytes()))
-                        .param("categoryId", "10")
-                        .param("creatorId", "20"))
+                        .param("categoryId", "10"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value("relatorio.pdf"))
@@ -153,7 +167,6 @@ class DocumentControllerTest {
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "relatorio.docx", "application/msword", "conteudo".getBytes()))
                         .param("categoryId", "10")
-                        .param("creatorId", "20")
                         .param("suggestedCategoryId", "11")
                         .param("categoryConfidence", "0.87"))
                 .andExpect(status().isCreated())
@@ -162,16 +175,42 @@ class DocumentControllerTest {
     }
 
     @Test
-    @DisplayName("an upload with no creatorId is accepted and handed to the service without one")
-    void uploadWithoutCreatorIsAccepted() throws Exception {
-        given(uploadService.upload(any(), any(), any(), eq(10L), isNull(), isNull(), isNull(), isNull(), isNull()))
+    @DisplayName("an upload is attributed to the logged-in user, whatever creatorId the request sends")
+    void uploadIsAttributedToTheLoggedInUser() throws Exception {
+        given(uploadService.upload(any(), any(), any(), eq(10L), eq(20L), isNull(), isNull(), isNull(), isNull()))
                 .willReturn(document());
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "relatorio.docx", "application/msword", "conteudo".getBytes()))
-                        .param("categoryId", "10"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"));
+                        .param("categoryId", "10")
+                        .param("creatorId", "999"))
+                .andExpect(status().isCreated());
+
+        verify(uploadService).upload(any(), any(), any(), eq(10L), eq(20L), isNull(), isNull(), isNull(), isNull());
+    }
+
+    @Test
+    @DisplayName("a Keycloak account with no sector answers 403 incomplete_account")
+    void incompleteAccountBecomes403() throws Exception {
+        given(currentUser.id()).willThrow(new IncompleteAccountException("setor"));
+
+        mvc.perform(multipart("/api/v1/documents")
+                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
+                        .param("categoryId", "1"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("incomplete_account"));
+    }
+
+    @Test
+    @DisplayName("a refused CPF answers 422 with its code")
+    void refusedCpfBecomes422() throws Exception {
+        given(currentUser.id()).willThrow(new AccountCpfException("cpf_taken"));
+
+        mvc.perform(multipart("/api/v1/documents")
+                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
+                        .param("categoryId", "1"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("cpf_taken"));
     }
 
     @Test
@@ -183,7 +222,6 @@ class DocumentControllerTest {
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
                         .param("categoryId", "1")
-                        .param("creatorId", "1")
                         .param("suggestedCategoryId", "2")
                         .param("categoryConfidence", "1.5"))
                 .andExpect(status().isBadRequest())
@@ -210,24 +248,9 @@ class DocumentControllerTest {
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
-                        .param("categoryId", "999")
-                        .param("creatorId", "1"))
+                        .param("categoryId", "999"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("category_not_found"));
-    }
-
-    @Test
-    @DisplayName("an unknown creator answers 404, not 500")
-    void unknownCreatorBecomes404() throws Exception {
-        willThrow(new UserNotFoundException(999L))
-                .given(uploadService).upload(any(), any(), any(), anyLong(), eq(999L), any(), any(), any(), any());
-
-        mvc.perform(multipart("/api/v1/documents")
-                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
-                        .param("categoryId", "1")
-                        .param("creatorId", "999"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("user_not_found"));
     }
 
     @Test
@@ -238,8 +261,7 @@ class DocumentControllerTest {
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.xyz", "application/octet-stream", new byte[] {1}))
-                        .param("categoryId", "1")
-                        .param("creatorId", "1"))
+                        .param("categoryId", "1"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("pdf_conversion_rejected"));
     }
@@ -252,8 +274,7 @@ class DocumentControllerTest {
 
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
-                        .param("categoryId", "1")
-                        .param("creatorId", "1"))
+                        .param("categoryId", "1"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("pdf_conversion_unavailable"));
     }
@@ -262,8 +283,7 @@ class DocumentControllerTest {
     @DisplayName("a missing categoryId answers 400, not 500")
     void missingCategoryIdBecomes400() throws Exception {
         mvc.perform(multipart("/api/v1/documents")
-                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
-                        .param("creatorId", "1"))
+                        .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
     }
@@ -273,8 +293,7 @@ class DocumentControllerTest {
     void nonNumericCategoryIdBecomes400() throws Exception {
         mvc.perform(multipart("/api/v1/documents")
                         .file(new MockMultipartFile("file", "a.txt", "text/plain", "x".getBytes()))
-                        .param("categoryId", "abc")
-                        .param("creatorId", "1"))
+                        .param("categoryId", "abc"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
     }
@@ -462,7 +481,7 @@ class DocumentControllerTest {
                         SubmissionStatus.UNDER_REVIEW, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
 
-        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+        mvc.perform(get("/api/v1/documents/submissions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].document_id").value(1))
                 .andExpect(jsonPath("$.content[0].submission_status").value("UNDER_REVIEW"))
@@ -485,7 +504,7 @@ class DocumentControllerTest {
                         SubmissionStatus.PROCESSING, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
 
-        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+        mvc.perform(get("/api/v1/documents/submissions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].submission_status").value("PROCESSING"))
                 .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
@@ -499,7 +518,7 @@ class DocumentControllerTest {
                         SubmissionStatus.INDEXING_FAILED, null, null,
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
 
-        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+        mvc.perform(get("/api/v1/documents/submissions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].submission_status").value("INDEXING_FAILED"))
                 .andExpect(jsonPath("$.content[0].review_comment").doesNotExist());
@@ -514,7 +533,7 @@ class DocumentControllerTest {
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"),
                         OffsetDateTime.parse("2026-10-16T13:00:00Z"))));
 
-        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+        mvc.perform(get("/api/v1/documents/submissions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].submission_status").value("PUBLISHED"))
                 .andExpect(jsonPath("$.content[0].category").value("Regulatorio"))
@@ -530,7 +549,7 @@ class DocumentControllerTest {
                         OffsetDateTime.parse("2026-10-16T12:00:00Z"),
                         OffsetDateTime.parse("2026-10-16T11:20:00Z"), null)));
 
-        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "20"))
+        mvc.perform(get("/api/v1/documents/submissions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].submission_status").value("RETURNED"))
                 .andExpect(jsonPath("$.content[0].review_comment").value("Falta a secao de revisao A."))
@@ -538,9 +557,9 @@ class DocumentControllerTest {
     }
 
     @Test
-    @DisplayName("GET /documents/submissions carries the paging totals and works without creatorId")
+    @DisplayName("GET /documents/submissions carries the paging totals")
     void submissionsCarryPagingTotals() throws Exception {
-        given(submissionService.submissions(isNull(), eq(1), eq(10), isNull())).willReturn(
+        given(submissionService.submissions(eq(20L), eq(1), eq(10), isNull())).willReturn(
                 new PageResponse<>(List.of(), 1, 10, 23, 3));
 
         mvc.perform(get("/api/v1/documents/submissions").param("page", "1").param("size", "10"))
@@ -553,21 +572,10 @@ class DocumentControllerTest {
     }
 
     @Test
-    @DisplayName("GET /documents/submissions answers 404 for a creatorId no user has")
-    void submissionsUnknownCreator() throws Exception {
-        willThrow(new UserNotFoundException(404L))
-                .given(submissionService).submissions(eq(404L), isNull(), isNull(), isNull());
-
-        mvc.perform(get("/api/v1/documents/submissions").param("creatorId", "404"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("user_not_found"));
-    }
-
-    @Test
     @DisplayName("GET /documents/submissions answers 400 for a size out of bounds")
     void submissionsSizeOutOfBounds() throws Exception {
         willThrow(new InvalidDocumentListRequestException("size must be between 1 and 50."))
-                .given(submissionService).submissions(isNull(), isNull(), eq(0), isNull());
+                .given(submissionService).submissions(eq(20L), isNull(), eq(0), isNull());
 
         mvc.perform(get("/api/v1/documents/submissions").param("size", "0"))
                 .andExpect(status().isBadRequest())
@@ -577,7 +585,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("GET /documents/submissions passes categoryIds through to the service")
     void submissionsCategoryIdsReachTheService() throws Exception {
-        given(submissionService.submissions(isNull(), isNull(), isNull(), eq(List.of(1L, 3L))))
+        given(submissionService.submissions(eq(20L), isNull(), isNull(), eq(List.of(1L, 3L))))
                 .willReturn(new PageResponse<>(List.of(), 0, 10, 0, 0));
 
         mvc.perform(get("/api/v1/documents/submissions").param("categoryIds", "1", "3"))

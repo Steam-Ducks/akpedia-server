@@ -16,9 +16,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.OffsetDateTime;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -31,6 +33,7 @@ import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.CategoryNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotPendingApprovalException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentReviewService;
 
 /**
@@ -38,7 +41,11 @@ import com.akpedia.server.service.DocumentReviewService;
  * each refusal is answered.
  */
 @WebMvcTest(controllers = DocumentReviewController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 class DocumentReviewControllerTest {
+
+    private static final long APPROVER_ID = 20L;
 
     private static final OffsetDateTime DECIDED_AT = OffsetDateTime.parse("2026-10-20T14:00:00Z");
 
@@ -47,6 +54,14 @@ class DocumentReviewControllerTest {
 
     @MockBean
     private DocumentReviewService reviewService;
+
+    @MockBean
+    private CurrentUser currentUser;
+
+    @BeforeEach
+    void logIn() {
+        given(currentUser.id()).willReturn(APPROVER_ID);
+    }
 
     private static DocumentReviewResponse approved(String name, String description, long categoryId) {
         return new DocumentReviewResponse(7L, name, description, categoryId, DocumentStatus.APPROVED,
@@ -65,7 +80,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("approve with no body approves without corrections")
     void approveWithoutBody() throws Exception {
-        given(reviewService.approve(7L, ApproveDocumentRequest.NONE))
+        given(reviewService.approve(7L, APPROVER_ID, ApproveDocumentRequest.NONE))
                 .willReturn(approved("manual.pdf", null, 3L));
 
         mvc.perform(post("/api/v1/documents/7/approve"))
@@ -84,7 +99,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("approve with an empty body also approves without corrections")
     void approveWithEmptyObject() throws Exception {
-        given(reviewService.approve(7L, ApproveDocumentRequest.NONE))
+        given(reviewService.approve(7L, APPROVER_ID, ApproveDocumentRequest.NONE))
                 .willReturn(approved("manual.pdf", null, 3L));
 
         mvc.perform(post("/api/v1/documents/7/approve")
@@ -92,14 +107,14 @@ class DocumentReviewControllerTest {
                         .content("{}"))
                 .andExpect(status().isOk());
 
-        verify(reviewService).approve(7L, ApproveDocumentRequest.NONE);
+        verify(reviewService).approve(7L, APPROVER_ID, ApproveDocumentRequest.NONE);
     }
 
     @Test
     @DisplayName("approve with corrections passes name, description and categoryId to the service")
     void approveWithCorrections() throws Exception {
         ApproveDocumentRequest corrections = new ApproveDocumentRequest("Manual de calibracao", "revisado", 4L);
-        given(reviewService.approve(7L, corrections))
+        given(reviewService.approve(7L, APPROVER_ID, corrections))
                 .willReturn(approved("Manual de calibracao", "revisado", 4L));
 
         mvc.perform(post("/api/v1/documents/7/approve")
@@ -123,7 +138,7 @@ class DocumentReviewControllerTest {
                 .andExpect(jsonPath("$.code").value("invalid_request"))
                 .andExpect(jsonPath("$.message").value(containsString("name")));
 
-        verify(reviewService, never()).approve(anyLong(), any());
+        verify(reviewService, never()).approve(anyLong(), anyLong(), any());
     }
 
     @Test
@@ -139,7 +154,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("approve with a corrected category that does not exist answers 404")
     void approveWithUnknownCategory() throws Exception {
-        given(reviewService.approve(eq(7L), any())).willThrow(new CategoryNotFoundException(99L));
+        given(reviewService.approve(eq(7L), eq(APPROVER_ID), any())).willThrow(new CategoryNotFoundException(99L));
 
         mvc.perform(post("/api/v1/documents/7/approve")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -151,7 +166,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("approve on a document not waiting on a decision answers 409")
     void approveConflict() throws Exception {
-        given(reviewService.approve(eq(7L), any()))
+        given(reviewService.approve(eq(7L), eq(APPROVER_ID), any()))
                 .willThrow(new DocumentNotPendingApprovalException(7L, DocumentStatus.APPROVED));
 
         mvc.perform(post("/api/v1/documents/7/approve"))
@@ -163,7 +178,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("approve on a document that does not exist answers 404")
     void approveUnknownDocument() throws Exception {
-        given(reviewService.approve(eq(404L), any())).willThrow(new DocumentNotFoundException(404L));
+        given(reviewService.approve(eq(404L), eq(APPROVER_ID), any())).willThrow(new DocumentNotFoundException(404L));
 
         mvc.perform(post("/api/v1/documents/404/approve"))
                 .andExpect(status().isNotFound())
@@ -177,7 +192,7 @@ class DocumentReviewControllerTest {
     @Test
     @DisplayName("reject with a comment returns the document to its author")
     void rejectWithComment() throws Exception {
-        given(reviewService.reject(7L, "Falta a secao de revisao A."))
+        given(reviewService.reject(7L, APPROVER_ID, "Falta a secao de revisao A."))
                 .willReturn(rejected("Falta a secao de revisao A."));
 
         mvc.perform(post("/api/v1/documents/7/reject")
@@ -200,7 +215,7 @@ class DocumentReviewControllerTest {
                 .andExpect(jsonPath("$.code").value("invalid_request"))
                 .andExpect(jsonPath("$.message").value(containsString("comment")));
 
-        verify(reviewService, never()).reject(anyLong(), anyString());
+        verify(reviewService, never()).reject(anyLong(), anyLong(), anyString());
     }
 
     @Test
@@ -212,7 +227,7 @@ class DocumentReviewControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
 
-        verify(reviewService, never()).reject(anyLong(), anyString());
+        verify(reviewService, never()).reject(anyLong(), anyLong(), anyString());
     }
 
     @Test
@@ -222,13 +237,13 @@ class DocumentReviewControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
 
-        verify(reviewService, never()).reject(anyLong(), anyString());
+        verify(reviewService, never()).reject(anyLong(), anyLong(), anyString());
     }
 
     @Test
     @DisplayName("reject on a document not waiting on a decision answers 409")
     void rejectConflict() throws Exception {
-        given(reviewService.reject(eq(7L), anyString()))
+        given(reviewService.reject(eq(7L), anyLong(), anyString()))
                 .willThrow(new DocumentNotPendingApprovalException(7L, DocumentStatus.REJECTED));
 
         mvc.perform(post("/api/v1/documents/7/reject")

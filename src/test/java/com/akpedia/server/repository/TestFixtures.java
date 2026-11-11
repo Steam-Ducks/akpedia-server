@@ -29,7 +29,7 @@ final class TestFixtures {
     }
 
     static User user(Sector sector) {
-        return new User("Usuario de Teste", unique("email") + "@akpedia.test", "hash-de-teste", sector);
+        return new User("Usuario de Teste", unique("email") + "@akpedia.test", sector);
     }
 
     static Document document(Category category, User creator) {

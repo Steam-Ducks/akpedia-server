@@ -43,6 +43,101 @@ services:
     ports:
       - "3000:3000"
 
+  # Creates the keycloak database on the Postgres above, if missing, and exits. A one-shot
+  # service rather than a docker-entrypoint-initdb.d script, which would only run on a new volume.
+  keycloak-db-init:
+    image: pgvector/pgvector:pg16
+    container_name: akpedia-keycloak-db-init
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-akpedia}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-akpedia}
+      PGDATABASE: ${POSTGRES_DB:-akpedia}
+      KEYCLOAK_DB: ${KEYCLOAK_DB:-keycloak}
+    command:
+      - sh
+      - -c
+      - >-
+        psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$$KEYCLOAK_DB'" | grep -q 1
+        || psql -c "CREATE DATABASE \"$$KEYCLOAK_DB\""
+    restart: "no"
+
+  # Identity provider: login and the STANDARD/APPROVER/ADMIN roles (users are created by an admin).
+  # Served under /auth, behind nginx (below), on the same address as the app.
+  # The akpedia realm is imported from keycloak/akpedia-realm.json on the first start only
+  # (--import-realm skips a realm that already exists). The file is copied into the image
+  # (keycloak/Dockerfile): after editing it, rebuild with `up -d --build keycloak`.
+  keycloak:
+    build: ./keycloak
+    image: akpedia-keycloak
+    container_name: akpedia-keycloak
+    depends_on:
+      keycloak-db-init:
+        condition: service_completed_successfully
+    # The initial ADMIN user's password has no default: it has to come from .env.
+    entrypoint:
+      - bash
+      - -c
+      - >-
+        if [ -z "$$KEYCLOAK_DEV_ADMIN_PASSWORD" ]; then
+        echo "KEYCLOAK_DEV_ADMIN_PASSWORD is not set: copy .env.example to .env and set it." >&2; exit 1; fi;
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/${KEYCLOAK_DB:-keycloak}
+      KC_DB_USERNAME: ${POSTGRES_USER:-akpedia}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-akpedia}
+      # Master realm admin, for the admin console. Only created on the first start.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Public URL, through nginx, and the token issuer (iss). Containers can still reach it
+      # directly as keycloak:8080/auth.
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${KEYCLOAK_URL:-http://localhost/auth}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # nginx tells Keycloak the browser's address and scheme in X-Forwarded-* headers.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      # Placeholders read by keycloak/akpedia-realm.json on import.
+      AKPEDIA_CLIENT_URL: ${AKPEDIA_CLIENT_URL:-http://localhost}
+      KEYCLOAK_SERVER_CLIENT_SECRET: ${KEYCLOAK_SERVER_CLIENT_SECRET:-akpedia-dev-server-secret}
+      KEYCLOAK_DEV_ADMIN_EMAIL: ${KEYCLOAK_DEV_ADMIN_EMAIL:-admin@akpedia.local}
+      KEYCLOAK_DEV_ADMIN_PASSWORD: ${KEYCLOAK_DEV_ADMIN_PASSWORD:-}
+    # No published port: the browser reaches Keycloak through nginx, at /auth.
+    healthcheck:
+      # The image has no curl: ask the management port for /auth/health/ready over bash's
+      # /dev/tcp (the management port follows KC_HTTP_RELATIVE_PATH).
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/localhost/9000 &&
+          printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Single entry point: the front-end, the API and Keycloak on one address, so the login and the
+  # app share an origin. By default it forwards to the dev container (`akpedia run` serves the
+  # client on 5173 and the server on 8080); point the upstreams elsewhere to run without it, e.g.
+  # SERVER_UPSTREAM=app:8080 for the `app` service below.
+  nginx:
+    build: ./nginx
+    image: akpedia-nginx
+    container_name: akpedia-nginx
+    depends_on:
+      - keycloak
+    environment:
+      KEYCLOAK_UPSTREAM: ${KEYCLOAK_UPSTREAM:-keycloak:8080}
+      SERVER_UPSTREAM: ${SERVER_UPSTREAM:-akpedia-devcontainer:8080}
+      CLIENT_UPSTREAM: ${CLIENT_UPSTREAM:-akpedia-devcontainer:5173}
+    ports:
+      - "${AKPEDIA_HTTP_PORT:-80}:80"
+
   app:
     build: .
     container_name: akpedia-app
@@ -58,8 +153,13 @@ services:
       DB_USER: ${POSTGRES_USER:-akpedia}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-akpedia}
       SERVER_PORT: 8080
-      # Default user, temporary while there is no registration or login.
-      DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL:-aprovador@akpedia.local}
+      # Keycloak signs the tokens; its keys are fetched over the compose network, while the issuer
+      # stays the public URL the browser logs in at.
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_URL:-http://localhost/auth}/realms/akpedia
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/auth/realms/akpedia/protocol/openid-connect/certs
+      # The admin's users screen: Keycloak's Admin API, as the akpedia-server service account.
+      KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080/auth
+      KEYCLOAK_SERVER_CLIENT_SECRET: ${KEYCLOAK_SERVER_CLIENT_SECRET:-akpedia-dev-server-secret}
       # Embedding service (akpedia-ml). It comes up through its own repository's
       # compose, on a separate network: host-gateway reaches the port it publishes
       # on the developer's machine.
@@ -78,6 +178,11 @@ services:
       # Shared secret of the /internal routes; the akpedia-ml compose falls back to the same
       # development value, so the worker can call back with no .env on either side.
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-akpedia-dev-internal-token}
+      # Log of deleted accounts, replayed after a database restore. On its own volume, so it
+      # survives the container and is not part of the Postgres backups.
+      ACCOUNT_DELETION_LOG_FILE: /app/data/account-deletions.jsonl
+    volumes:
+      - account_deletions:/app/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -86,6 +191,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  account_deletions:
 
 networks:
   # Shared with the akpedia-ml compose, which declares it as external. Created here,
