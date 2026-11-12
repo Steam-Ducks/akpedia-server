@@ -99,6 +99,17 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("embedding_service_error", e.getMessage()));
     }
 
+    /**
+     * 503: the chat could not answer because akpedia-ml failed. The person can only try again
+     * later, so every way that can happen is the same status and code.
+     */
+    @ExceptionHandler(ChatUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleChatUnavailable(ChatUnavailableException e) {
+        log.warn("Chat answer failed: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiErrorResponse("chat_unavailable", "O chat está indisponível no momento. Tente novamente mais tarde."));
+    }
+
     /** 413: the upload is past this server's own multipart limit, so it never left here. */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiErrorResponse> handleTooLarge(MaxUploadSizeExceededException e) {

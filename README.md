@@ -563,6 +563,21 @@ em outra rede Docker.
 | `SEARCH_MINIMUM_SCORE`    | `0.85`  | Similaridade mínima para um trecho valer um resultado            |
 | `SEARCH_SNIPPET_LENGTH`   | `300`   | Tamanho máximo do trecho devolvido, em caracteres (ver [Busca](#busca)) |
 
+### Chat
+
+O chat usa o mesmo akpedia-ml (`EMBEDDING_BASE_URL`), com timeouts próprios: o modelo de linguagem
+leva bem mais que um vetor (o akpedia-ml espera até 120s por ele, `LLM_TIMEOUT_SECONDS`).
+
+| Variável               | Default | Para que serve                                                         |
+|------------------------|---------|------------------------------------------------------------------------|
+| `CHAT_MINIMUM_SCORE`   | `0.80`  | Similaridade mínima para um trecho ir para o modelo                     |
+| `CHAT_MAX_PASSAGES`    | `6`     | Quantos trechos, no máximo, vão para o modelo (o mais próximo primeiro) |
+| `CHAT_CONNECT_TIMEOUT` | `2s`    | Tempo máximo para abrir a conexão com o akpedia-ml                      |
+| `CHAT_READ_TIMEOUT`    | `150s`  | Tempo máximo para a resposta; acima do timeout do LLM no akpedia-ml     |
+
+O nginx dá 180s para `/api/v1/chat` (o resto de `/api/` tem 120s), para não cortar uma resposta
+que ainda está vindo.
+
 ### Conversão de documentos (Gotenberg)
 
 | Variável                     | Default                  | Para que serve                       |
@@ -1495,6 +1510,50 @@ de folga.
 | nem `q` nem `categoryIds`, ou `limit` fora do teto             | 400    | `invalid_request`          |
 | akpedia-ml respondeu algo que não dá para usar                 | 502    | `embedding_service_error`  |
 | akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
+
+---
+
+## Chat
+
+`POST /api/v1/chat` responde uma pergunta com uma resposta curta e as fontes, escrita só a partir
+dos documentos que o usuário pode ver.
+
+```json
+// POST /api/v1/chat
+{ "question": "Qual o prazo de reembolso de despesas?" }
+
+// 200
+{
+  "answer": "O reembolso é feito em até 7 dias corridos [1].",
+  "found": true,
+  "sources": [ { "document_id": 42, "name": "Manual de Reembolso", "category": "Financeiro" } ]
+}
+```
+
+1. A pergunta vira vetor no akpedia-ml, como na busca.
+2. O server procura os trechos mais próximos (`EmbeddingRepository.findTopChunks`) entre os
+   documentos **aprovados e indexados** nas categorias que o setor do usuário vê, as mesmas da
+   busca. Diferente da busca, vários trechos do mesmo documento podem entrar. Ficam até
+   `CHAT_MAX_PASSAGES`, nenhum abaixo de `CHAT_MINIMUM_SCORE`. A comparação é exata, sem o índice
+   HNSW: ele filtra depois de achar os vizinhos mais próximos, e trechos de documentos em revisão ou
+   de categorias proibidas na frente esconderiam os válidos.
+3. **Sem nenhum trecho acima do limite**, a resposta é `found: false` com `sources` vazio, **sem
+   chamar o modelo**. Um usuário cujo setor não vê nenhuma categoria nem chega ao akpedia-ml.
+4. Com trechos, o akpedia-ml (`POST /api/v1/chat/answer`) escreve a resposta, marcando cada
+   afirmação com o número do trecho (`[1]`). Ele não lê o banco nem checa permissões: só vê o que
+   o server mandou.
+5. `sources` são os documentos citados, na ordem da primeira citação, montados a partir dos trechos
+   enviados: um id que o akpedia-ml devolva e não estava entre eles é descartado.
+
+`found` também volta `false` quando os trechos não respondem a pergunta. A pergunta não é gravada: a
+auditoria guarda a requisição, nunca o corpo.
+
+#### Status de erro
+
+| Situação                                                       | Status | `code`             |
+|----------------------------------------------------------------|--------|--------------------|
+| `question` ausente, em branco ou com mais de 1000 caracteres   | 400    | `invalid_request`  |
+| akpedia-ml fora do ar, além do timeout ou o modelo falhou      | 503    | `chat_unavailable` |
 
 ---
 
