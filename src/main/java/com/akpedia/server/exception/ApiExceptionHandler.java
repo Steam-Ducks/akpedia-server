@@ -348,6 +348,32 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse(e.getCode(), e.getMessage()));
     }
 
+    /** 422: the admin would send the breach notice before confirming ANPD was informed. */
+    @ExceptionHandler(AnpdNotInformedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAnpdNotInformed(AnpdNotInformedException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ApiErrorResponse("anpd_not_informed", e.getMessage()));
+    }
+
+    /** 400: the breach notice is missing something, or has something invalid; the message says what. */
+    @ExceptionHandler(InvalidBreachNoticeException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidBreachNotice(InvalidBreachNoticeException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_breach_notice", e.getMessage()));
+    }
+
+    /** 409: another breach notice is being sent, or this one already reached these users moments ago. */
+    @ExceptionHandler(BreachNoticeConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleBreachNoticeConflict(BreachNoticeConflictException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorResponse(e.getCode(), e.getMessage()));
+    }
+
+    /** 404: there is no breach notice with that id. */
+    @ExceptionHandler(BreachNoticeNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleBreachNoticeNotFound(BreachNoticeNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("breach_notice_not_found", e.getMessage()));
+    }
+
     /** 400: a page of a list was asked for out of bounds. */
     @ExceptionHandler(InvalidPageRequestException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidPage(InvalidPageRequestException e) {

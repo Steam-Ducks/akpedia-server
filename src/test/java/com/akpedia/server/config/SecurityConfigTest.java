@@ -145,6 +145,11 @@ class SecurityConfigTest {
             return "ok";
         }
 
+        @GetMapping("/api/v1/admin/breach-notices")
+        String breachNotices() {
+            return "ok";
+        }
+
         @GetMapping("/api/v1/documents")
         String documents() {
             return "ok";
@@ -315,6 +320,9 @@ class SecurityConfigTest {
         mvc.perform(get("/api/v1/admin/profile-requests").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
         mvc.perform(get("/api/v1/me/profile").with(tokenWithRoles("STANDARD"))).andExpect(status().isOk());
         mvc.perform(get("/api/v1/admin/audit").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/breach-notices").with(tokenWithRoles("STANDARD", "APPROVER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/breach-notices").with(tokenWithRoles("ADMIN"))).andExpect(status().isOk());
     }
 
     @Test

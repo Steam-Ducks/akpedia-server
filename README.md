@@ -530,7 +530,7 @@ curl -X POST http://localhost:8080/api/v1/admin/account-deletions/replay -H "Aut
   para o log, nunca para a resposta.
 - **Eventos**: `TERMS_ACCEPTED`, `TERMS_DECLINED`, `TERMS_PUBLISHED`, `DOCUMENT_UPLOADED`,
   `DOCUMENT_APPROVED`, `DOCUMENT_REJECTED`, `USER_ROLES_CHANGED`, `USER_ENABLED`, `USER_DISABLED`,
-  `USER_CREATED` e `ACCOUNT_DELETED`,
+  `USER_CREATED`, `ACCOUNT_DELETED` e `BREACH_NOTICE_SENT`,
   com o que foi afetado (`entity_type`, `entity_id`) e os detalhes. São gravados na mesma transação
   da ação: se ela falha, o evento não fica.
 
@@ -538,6 +538,69 @@ curl -X POST http://localhost:8080/api/v1/admin/account-deletions/replay -H "Aut
 |------|-----------|
 | `GET /api/v1/admin/audit?kind=EVENT&action=&user=&from=&to=&page=0&size=50` | Página da auditoria, da mais nova para a mais antiga. `kind` é `EVENT` (padrão), `REQUEST` ou `ALL`; `user` é parte do email; `from` e `to` são data e hora ISO-8601, inclusivos. `size` até 200. Cada registro traz `user_email` e `user_name`, ou, se a conta foi excluída, os dois `null` e `user_pseudonym` (`Usuário removido #<id>`, o mesmo em todos os registros dela) |
 | `GET /api/v1/admin/audit/actions` | Os eventos já registrados, em ordem alfabética, para o filtro |
+
+#### Aviso de vazamento de dados (admin)
+
+Quando há um incidente de segurança com dados pessoais (LGPD, art. 48), o admin envia por e-mail
+(`MailService`) um aviso aos usuários afetados, dizendo que a ANPD foi comunicada e quais medidas
+estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi comunicada**
+(`anpd_informed: true`); sem ela a rota responde `422` e nada é enviado nem gravado.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/breach-notices/template` | Assunto e texto sugeridos (`subject`, `body`). O texto tem lacunas `[PREENCHER: ...]` para o que é próprio do incidente |
+| `POST /api/v1/admin/breach-notices` | Envia o aviso. Responde `201` com quantos saíram e quais falharam |
+| `GET /api/v1/admin/breach-notices?page=0&size=20` | Página dos avisos enviados, do mais novo para o mais antigo, com as contagens. `size` até 100 |
+| `GET /api/v1/admin/breach-notices/{id}` | O aviso como foi enviado, com o status de cada destinatário |
+
+```json
+// POST /api/v1/admin/breach-notices
+{
+  "subject": "Comunicado sobre incidente de segurança envolvendo seus dados pessoais",
+  "body": "Olá, ...",
+  "all_users": true,            // ou "user_ids": [10, 11] -- um dos dois
+  "anpd_informed": true
+}
+
+// 201
+{
+  "id": 5, "total": 120, "sent": 119, "failed": 1,
+  "failures": [
+    { "user_id": 11, "email": "bruno@akaer.com.br", "reason": "REJECTED", "error": "REJECTED: 550 no such user" }
+  ]
+}
+```
+
+- **Destinatários**: usuários de `users` ligados a uma conta do Keycloak e não excluídos, inclusive
+  os desativados (os dados deles também estão no sistema). Com `user_ids`, um id que não existe,
+  foi excluído ou não tem conta no Keycloak é recusado (`400`, com os ids na mensagem).
+- **Texto**: assunto de uma linha só, até 200 caracteres; texto puro, até 50.000. Um aviso que
+  ainda tem `[PREENCHER` no assunto ou no texto é recusado (`400`).
+- **Registro**: o aviso (`breach_notices`) e uma linha por destinatário (`breach_notice_recipients`)
+  são gravados como `PENDING` antes do envio; cada linha vira `SENT` ou `FAILED` (com o motivo em
+  `error`) depois. Um envio interrompido no meio deixa as linhas restantes `PENDING`, visíveis no
+  aviso. Um e-mail que falha não impede os outros. Na auditoria fica `BREACH_NOTICE_SENT`, com as
+  contagens.
+- **Sem envio duplicado**: enquanto um aviso está sendo enviado, outro envio responde `409
+  breach_notice_in_progress`; o mesmo aviso (assunto e texto iguais) já entregue a algum destes
+  usuários nos últimos 30 minutos responde `409 breach_notice_duplicate`. Isso cobre o segundo
+  clique e a tela tentando de novo. Reenviar o mesmo texto só para quem falhou (`user_ids`) é
+  permitido. Um envio interrompido no meio deixa de bloquear depois de 30 minutos.
+- O envio é feito antes da resposta, que já traz o resultado de cada e-mail; por isso o nginx dá
+  600s para `/api/v1/admin/breach-notices` (o resto de `/api/` tem 120s).
+- Os avisos não são alterados nem apagados. Se o usuário excluir a conta, as linhas dele ficam
+  (como registro de que foi avisado), mas com o e-mail anonimizado.
+
+> **Texto provisório:** o modelo em `src/main/resources/breach-notice/` é um rascunho a partir do
+> art. 48, §1º da LGPD, até o texto definitivo do aviso ser entregue pela documentação.
+
+| Situação                                                         | Status | `code`                    |
+|------------------------------------------------------------------|--------|---------------------------|
+| `anpd_informed` diferente de `true`                              | 422    | `anpd_not_informed`       |
+| assunto ou texto inválido, lacuna `[PREENCHER` sobrando, nenhum ou os dois entre `all_users` e `user_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
+| outro aviso sendo enviado agora                                  | 409    | `breach_notice_in_progress` |
+| o mesmo aviso já entregue a algum destes usuários nos últimos 30 min | 409 | `breach_notice_duplicate` |
+| aviso inexistente                                                | 404    | `breach_notice_not_found` |
 
 ### Serviço de embeddings
 

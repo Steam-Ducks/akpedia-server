@@ -21,6 +21,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT u FROM User u JOIN FETCH u.sector WHERE u.id = :id")
     Optional<User> findWithSectorById(@Param("id") Long id);
 
+    /**
+     * Every user who can receive a notice: linked to a Keycloak account and not deleted. Disabled
+     * accounts are included, since their data is in the system all the same.
+     */
+    List<User> findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById();
+
     /** Whether the row linked to this Keycloak account was disabled by an admin. */
     boolean existsByKeycloakIdAndActiveFalse(String keycloakId);
 
