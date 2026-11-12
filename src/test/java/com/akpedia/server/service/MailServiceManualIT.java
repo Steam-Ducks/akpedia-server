@@ -35,7 +35,7 @@ import com.akpedia.server.config.MailProperties;
  * message in a real inbox. It only runs when {@code MAIL_TEST_TO} is set:
  *
  * <pre>
- * MAIL_TEST_TO=voce@empresa.com ./mvnw test -Dtest=MailServiceManualIT#sendsOneSampleTo
+ * MAIL_TEST_TO=voce@example.com ./mvnw test -Dtest=MailServiceManualIT#sendsOneSampleTo
  * </pre>
  */
 class MailServiceManualIT {
@@ -57,11 +57,13 @@ class MailServiceManualIT {
         MailService service = new MailService(sender, new MailProperties("nao-responda@akpedia.local", "Akpedia", 50));
         String marker = UUID.randomUUID().toString().substring(0, 8);
 
+        // example.com is reserved (RFC 2606) and receives no mail: run with a real server's MAIL_*,
+        // this batch still reaches nobody.
         List<MailResult> results = service.sendAll(List.of(
-                new OutgoingMail("ana@empresa.com", "Aviso de incidente de segurança " + marker,
+                new OutgoingMail("ana@example.com", "Aviso de incidente de segurança " + marker,
                         "Olá, Ana.\n\nIdentificamos um incidente de segurança. Ação recomendada: troque sua senha."),
                 new OutgoingMail("nao-e-um-email", "Aviso de incidente de segurança " + marker, "corpo"),
-                new OutgoingMail("bruno@empresa.com", "Aviso de incidente de segurança " + marker,
+                new OutgoingMail("bruno@example.com", "Aviso de incidente de segurança " + marker,
                         "Olá, Bruno.\n\nIdentificamos um incidente de segurança.")));
         results.forEach(result -> System.out.println("[manual] " + result));
 
@@ -70,7 +72,7 @@ class MailServiceManualIT {
                 HttpRequest.newBuilder(URI.create(MAILPIT_API + "/api/v1/search?query=" + marker)).build(),
                 HttpResponse.BodyHandlers.ofString());
         System.out.println("[manual] Mailpit: " + inbox.body());
-        assertThat(inbox.body()).contains("\"messages_count\":2", "ana@empresa.com", "bruno@empresa.com",
+        assertThat(inbox.body()).contains("\"messages_count\":2", "ana@example.com", "bruno@example.com",
                 "Aviso de incidente de segurança " + marker);
     }
 

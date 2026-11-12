@@ -231,6 +231,16 @@ class MailServiceTest {
     }
 
     @Test
+    @DisplayName("an invalid recipient is masked whole, leaving nothing of the mailbox but its first letter")
+    void invalidRecipientsAreMaskedWhole() {
+        assertThat(MailService.mask("ana silva@empresa.com")).isEqualTo("a***@empresa.com");
+        assertThat(MailService.mask("ana@empresa.com, outro@empresa.com")).isEqualTo("a***@empresa.com");
+        assertThat(MailService.mask("ana.silva")).isEqualTo("a***");
+        assertThat(MailService.mask("@empresa.com")).isEqualTo("***@empresa.com");
+        assertThat(MailService.mask("ana@")).isEqualTo("a***@");
+    }
+
+    @Test
     @DisplayName("each message is named after the sender's domain, not the machine, and Sent carries that Message-ID")
     void messageIdIsTheSendersDomain() throws Exception {
         List<MailResult> results = service().sendAll(List.of(notice("ana@empresa.com"), notice("bruno@empresa.com")));

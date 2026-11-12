@@ -55,7 +55,6 @@ import jakarta.mail.internet.MimeMessage;
  * <p>The logs carry no full e-mail address: who was notified of a breach is personal data in itself,
  * so recipients appear masked ({@code a***@empresa.com}).
  */
-@SuppressWarnings("unused")
 @Service
 public class MailService {
 
@@ -317,12 +316,22 @@ public class MailService {
         return new Failed(to, reason, detail);
     }
 
-    /** The address with all but the first letter of the mailbox hidden, for the logs. */
+    /**
+     * The recipient with all but the first letter of the mailbox hidden, for the logs.
+     *
+     * <p>Everything before the last {@code @} is the mailbox, valid or not: a pattern for valid
+     * addresses would leave the rest of an invalid one in the clear ({@code ana silva@empresa.com}
+     * would log {@code ana s***@empresa.com}). Without an {@code @}, only the first letter shows.
+     */
     static String mask(String address) {
         if (address == null || address.isBlank()) {
             return "(sem destinatario)";
         }
-        return maskEmails(address.strip());
+        String stripped = address.strip();
+        int at = stripped.lastIndexOf('@');
+        String mailbox = at < 0 ? stripped : stripped.substring(0, at);
+        String domain = at < 0 ? "" : stripped.substring(at);
+        return (mailbox.isEmpty() ? "" : mailbox.substring(0, 1)) + "***" + domain;
     }
 
     /** Every e-mail address in the text, masked: servers quote the refused address in their answer. */

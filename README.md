@@ -420,7 +420,8 @@ Recursos Humanos, Financeiro e Jurídico veem `Regulatorio` e `Juridico`.
 A lista de setores fica em três lugares, que andam juntos: o atributo `sector` do realm
 (`keycloak/akpedia-realm.json`), `AdminUserService.SECTORS` e a migration V13. Um Keycloak que
 já tinha o realm importado não relê o arquivo: para pegar os setores novos, troque as opções do
-atributo `sector` no console (*Realm settings > User profile*) ou recrie o volume do Keycloak.
+atributo `sector` no console (*Realm settings > User profile*) ou reimporte o realm (ver
+[Reimportar o realm](#reimportar-o-realm)).
 
 | Variável                        | Default                     | Para que serve |
 |---------------------------------|-----------------------------|----------------|
@@ -630,7 +631,23 @@ o resto do server funciona, e cada envio que falha já é reportado pelo `MailSe
 **desligadas** (`verifyEmail` e `resetPasswordAllowed`): ligá-las é decisão de produto, em
 *Realm settings > Login*. Como o realm só é importado na primeira subida, um Keycloak que já existia
 não recebe o SMTP: configure em *Realm settings > Email* (host `mailpit`, porta `1025`, remetente
-`nao-responda@akpedia.local`) ou recrie o volume do Keycloak.
+`nao-responda@akpedia.local`) ou reimporte o realm.
+
+#### Reimportar o realm
+
+O Keycloak não tem volume próprio: guarda tudo no banco `keycloak` do mesmo Postgres do app, no
+volume `postgres_data`. **Não apague esse volume**, que leva junto o banco `akpedia`. Para o realm
+ser importado de novo do `keycloak/akpedia-realm.json`, apague só o banco do Keycloak:
+
+```bash
+docker compose stop keycloak
+docker compose exec db dropdb -U akpedia keycloak
+docker compose up -d --build keycloak
+```
+
+O `keycloak-db-init` recria o banco vazio, e o `--build` copia o arquivo do realm atual para a imagem.
+Isso apaga tudo o que só existe no Keycloak: usuários, senhas e sessões do realm `akpedia`, e o admin
+do realm `master`, recriado com o `KEYCLOAK_ADMIN_PASSWORD` do `.env`.
 
 ### Fila de indexação (Redis)
 
