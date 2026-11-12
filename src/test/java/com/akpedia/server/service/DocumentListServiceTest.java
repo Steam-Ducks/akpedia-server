@@ -6,10 +6,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -45,13 +47,20 @@ class DocumentListServiceTest {
     private DocumentRepository documents;
     @Mock
     private EmbeddingRepository embeddings;
+    @Mock
+    private CategoryAccessService categoryAccess;
 
     private DocumentListService service;
+
+    private static final long USER_ID = 20L;
+    private static final Set<Long> ALLOWED = Set.of(1L, 3L);
 
     @BeforeEach
     void setUp() {
         service = new DocumentListService(
-                documents, embeddings, new SearchProperties(10, 50, 0.85, SNIPPET_LENGTH));
+                documents, embeddings, new SearchProperties(10, 50, 0.85, SNIPPET_LENGTH), categoryAccess);
+        // Lenient: the review queue and the refused limits never read the sector.
+        lenient().when(categoryAccess.allowedCategoryIds(USER_ID)).thenReturn(ALLOWED);
     }
 
     private static Document document(long id) {
@@ -65,11 +74,11 @@ class DocumentListServiceTest {
     @Test
     @DisplayName("each document carries the start of its text, trimmed like a search snippet")
     void excerptIsTheTrimmedFirstChunk() {
-        given(documents.findRecent(any(), any())).willReturn(List.of(document(1L), document(2L)));
+        given(documents.findRecent(any(), any(), any())).willReturn(List.of(document(1L), document(2L)));
         given(embeddings.findFirstChunks(List.of(1L, 2L)))
                 .willReturn(List.<Object[]>of(new Object[] {1L, "  Como configurar\n a VPN " + "palavra ".repeat(30)}));
 
-        List<DocumentSummary> recent = service.recent(null);
+        List<DocumentSummary> recent = service.recent(null, USER_ID);
 
         assertThat(recent.get(0).excerpt())
                 .startsWith("Como configurar a VPN palavra")
@@ -85,20 +94,41 @@ class DocumentListServiceTest {
     void defaultsToFive() {
         // Only approved documents are listed, but that filter lives in the query itself and is
         // checked against the database in RecentDocumentsQueryTest.
-        given(documents.findRecent(any(), any())).willReturn(List.of());
+        given(documents.findRecent(any(), any(), any())).willReturn(List.of());
 
-        service.recent(null);
+        service.recent(null, USER_ID);
 
-        then(documents).should().findRecent(eq(ProcessingStatus.COMPLETED), eq(PageRequest.of(0, 5)));
+        then(documents).should().findRecent(eq(ProcessingStatus.COMPLETED), any(), eq(PageRequest.of(0, 5)));
+    }
+
+    @Test
+    @DisplayName("only the categories the user's sector sees are listed")
+    void listsOnlyTheSectorsCategories() {
+        given(documents.findRecent(any(), any(), any())).willReturn(List.of());
+
+        service.recent(null, USER_ID);
+
+        then(documents).should().findRecent(eq(ProcessingStatus.COMPLETED), eq(ALLOWED), any());
+    }
+
+    @Test
+    @DisplayName("a sector with no category gets an empty list, without querying the documents")
+    void sectorWithNoCategoryGetsAnEmptyList() {
+        given(categoryAccess.allowedCategoryIds(USER_ID)).willReturn(Set.of());
+
+        assertThat(service.recent(null, USER_ID)).isEmpty();
+
+        then(documents).shouldHaveNoInteractions();
+        then(embeddings).shouldHaveNoInteractions();
     }
 
     @Test
     @DisplayName("a limit outside 1..50 is refused before reaching the database")
     void limitMustStayWithinBounds() {
-        assertThatThrownBy(() -> service.recent(0)).isInstanceOf(InvalidDocumentListRequestException.class);
-        assertThatThrownBy(() -> service.recent(51)).isInstanceOf(InvalidDocumentListRequestException.class);
+        assertThatThrownBy(() -> service.recent(0, USER_ID)).isInstanceOf(InvalidDocumentListRequestException.class);
+        assertThatThrownBy(() -> service.recent(51, USER_ID)).isInstanceOf(InvalidDocumentListRequestException.class);
 
-        then(documents).should(never()).findRecent(any(), any());
+        then(documents).should(never()).findRecent(any(), any(), any());
     }
 
     @Test

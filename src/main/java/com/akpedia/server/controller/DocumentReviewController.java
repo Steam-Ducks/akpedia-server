@@ -1,5 +1,8 @@
 package com.akpedia.server.controller;
 
+import java.util.List;
+
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -8,8 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.ApproveDocumentRequest;
+import com.akpedia.server.dto.CategoryResponse;
 import com.akpedia.server.dto.DocumentReviewResponse;
 import com.akpedia.server.dto.RejectDocumentRequest;
+import com.akpedia.server.repository.CategoryRepository;
 import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentReviewService;
 
@@ -37,10 +42,28 @@ public class DocumentReviewController {
 
     private final DocumentReviewService reviewService;
     private final CurrentUser currentUser;
+    private final CategoryRepository categories;
 
-    public DocumentReviewController(DocumentReviewService reviewService, CurrentUser currentUser) {
+    public DocumentReviewController(
+            DocumentReviewService reviewService, CurrentUser currentUser, CategoryRepository categories) {
         this.reviewService = reviewService;
         this.currentUser = currentUser;
+        this.categories = categories;
+    }
+
+    @Operation(
+            summary = "List every category, for correcting a document under review",
+            description = """
+                    The whole catalog, by name. `GET /categories` answers only the categories the caller's
+                    sector may see, which is right for searching but not for reviewing: the queue holds
+                    documents of every category, and the approver may file one under any of them on
+                    approval (`categoryId`). Only for `APPROVER` or `ADMIN`.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Every category, ordered by name.")
+    })
+    @GetMapping("/documents/pending/categories")
+    public List<CategoryResponse> reviewCategories() {
+        return categories.findAllByOrderByNameAsc().stream().map(CategoryResponse::from).toList();
     }
 
     @Operation(

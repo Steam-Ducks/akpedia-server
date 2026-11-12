@@ -71,6 +71,8 @@ import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
+import com.akpedia.server.exception.CategoryForbiddenException;
+import com.akpedia.server.security.Viewer;
 
 /**
  * Exercises the HTTP layer with {@link DocumentUploadService} mocked. What matters here is
@@ -302,7 +304,7 @@ class DocumentControllerTest {
     private DocumentFileDescriptor storedPdf(String filename, byte[] content) {
         DocumentFileDescriptor file = new DocumentFileDescriptor(
                 1L, filename, MediaType.APPLICATION_PDF, content.length, LAST_MODIFIED, ETAG);
-        given(fileService.describe(1L)).willReturn(file);
+        given(fileService.describe(eq(1L), any())).willReturn(file);
         given(fileService.contentOf(file)).willReturn(content);
         return file;
     }
@@ -406,7 +408,7 @@ class DocumentControllerTest {
         byte[] markup = "<script>alert(1)</script>".getBytes();
         DocumentFileDescriptor file = new DocumentFileDescriptor(
                 1L, "pagina.html", MediaType.TEXT_HTML, markup.length, LAST_MODIFIED, ETAG);
-        given(fileService.describe(1L)).willReturn(file);
+        given(fileService.describe(eq(1L), any())).willReturn(file);
         given(fileService.contentOf(file)).willReturn(markup);
 
         mvc.perform(get("/api/v1/documents/1/file"))
@@ -417,7 +419,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("an unknown document answers 404, not 500")
     void unknownDocumentFileBecomes404() throws Exception {
-        willThrow(new DocumentNotFoundException(999L)).given(fileService).describe(999L);
+        willThrow(new DocumentNotFoundException(999L)).given(fileService).describe(eq(999L), any());
 
         mvc.perform(get("/api/v1/documents/999/file"))
                 .andExpect(status().isNotFound())
@@ -429,7 +431,7 @@ class DocumentControllerTest {
     void documentWithoutStoredFileBecomes404() throws Exception {
         DocumentFileDescriptor file = new DocumentFileDescriptor(
                 1L, "relatorio.pdf", MediaType.APPLICATION_PDF, 8L, LAST_MODIFIED, ETAG);
-        given(fileService.describe(1L)).willReturn(file);
+        given(fileService.describe(eq(1L), any())).willReturn(file);
         willThrow(new DocumentFileNotFoundException(1L)).given(fileService).contentOf(file);
 
         mvc.perform(get("/api/v1/documents/1/file"))
@@ -440,7 +442,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("an archived document answers 403")
     void archivedDocumentBecomes403() throws Exception {
-        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(1L);
+        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(eq(1L), any());
 
         mvc.perform(get("/api/v1/documents/1/file"))
                 .andExpect(status().isForbidden())
@@ -450,7 +452,7 @@ class DocumentControllerTest {
     @Test
     @DisplayName("a document akpedia-ml is still indexing answers 409, so a retry makes sense")
     void notIndexedDocumentBecomes409() throws Exception {
-        willThrow(new DocumentNotProcessedException(1L, ProcessingStatus.PROCESSING)).given(fileService).describe(1L);
+        willThrow(new DocumentNotProcessedException(1L, ProcessingStatus.PROCESSING)).given(fileService).describe(eq(1L), any());
 
         mvc.perform(get("/api/v1/documents/1/file"))
                 .andExpect(status().isConflict())
@@ -678,6 +680,18 @@ class DocumentControllerTest {
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("unknown_suggested_category"))
                 .andExpect(jsonPath("$.message", containsString("Financeiro")));
+    }
+
+    @Test
+    @DisplayName("the file is described for the logged-in viewer, with their reviewer flag")
+    void fileIsDescribedForTheViewer() throws Exception {
+        Viewer viewer = new Viewer(20L, true);
+        given(currentUser.viewer()).willReturn(viewer);
+        willThrow(new CategoryForbiddenException(1L)).given(fileService).describe(1L, viewer);
+
+        mvc.perform(get("/api/v1/documents/1/file"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("category_forbidden"));
     }
 
 }

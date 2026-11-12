@@ -101,7 +101,10 @@ public class DocumentController {
                     the document: `category`, the `responsible_name` of the user who uploaded it, and
                     `updated_at`.
 
-                    A document still under review, rejected or archived is never listed, even once indexed.""")
+                    A document still under review, rejected or archived is never listed, even once indexed.
+
+                    Only documents in a category the caller's sector may see are listed, read from the sector's
+                    permissions on every request: a sector with no category answers an empty list.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Documents, most recently changed first; the list may be empty."),
         @ApiResponse(responseCode = "400", description = "The limit is invalid.",
@@ -109,7 +112,7 @@ public class DocumentController {
     })
     @GetMapping("/documents")
     public List<DocumentSummary> recent(@RequestParam(required = false) Integer limit) {
-        return listService.recent(limit);
+        return listService.recent(limit, currentUser.id());
     }
 
     @Operation(
@@ -284,6 +287,10 @@ public class DocumentController {
                     so pointing a browser at this URL renders the document instead of downloading it. The file
                     name carries the `.pdf` extension even when the document was named without one.
 
+                    A document in a category the caller's sector may not see answers 403 `category_forbidden`,
+                    before anything about its state. Two exceptions open it anyway: its author, and an `APPROVER`
+                    or `ADMIN` while it awaits approval, since the review queue lists every pending document.
+
                     Two documents are not openable: an archived one (403), which is out of circulation, and one
                     akpedia-ml is indexing right now (409) -- the same request works once the indexing lands.
                     A document awaiting approval opens, since the approver has to read it, and so does one
@@ -292,7 +299,8 @@ public class DocumentController {
                     The response is private and revalidated on every use, and carries an `ETag` and
                     `Last-Modified`: a browser that already holds the document asks again and gets a 304 with no
                     bytes, while one whose document has since been archived is refused instead of going on
-                    showing its copy. `Accept-Ranges: bytes` is advertised and a `Range` request answers 206, so
+                    showing its copy -- and so is one whose category has since been taken from the sector.
+                    `Accept-Ranges: bytes` is advertised and a `Range` request answers 206, so
                     a PDF viewer can fetch a document by parts instead of waiting for the whole file.
                     `X-Content-Type-Options: nosniff` keeps the browser on the declared type.""")
     @ApiResponses({
@@ -305,7 +313,7 @@ public class DocumentController {
         @ApiResponse(responseCode = "304", description = "The caller's copy is current; no body is sent."),
         @ApiResponse(responseCode = "400", description = "The id in the path is not a number.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "403", description = "The document is archived.",
+        @ApiResponse(responseCode = "403", description = "Category hidden from the caller's sector (`category_forbidden`), or archived (`document_archived`).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "No such document, or the document has no stored file.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -320,7 +328,7 @@ public class DocumentController {
             Long id,
             WebRequest request) {
 
-        DocumentFileDescriptor file = fileService.describe(id);
+        DocumentFileDescriptor file = fileService.describe(id, currentUser.viewer());
         if (isUnchanged(file, request)) {
             return null;
         }
@@ -351,7 +359,7 @@ public class DocumentController {
             @RequestHeader(HttpHeaders.RANGE) String range,
             WebRequest request) {
 
-        DocumentFileDescriptor file = fileService.describe(id);
+        DocumentFileDescriptor file = fileService.describe(id, currentUser.viewer());
         if (isUnchanged(file, request)) {
             return null;
         }
@@ -373,8 +381,8 @@ public class DocumentController {
     /**
      * Whether the caller's copy is still the current one.
      *
-     * <p>Asked only after the document has been described, so an archived document is refused
-     * instead of having its cached copy confirmed -- which is what makes caching this response
+     * <p>Asked only after the document has been described, so an archived document -- or one the
+     * caller's sector may no longer see -- is refused instead of having its cached copy confirmed -- which is what makes caching this response
      * safe in the first place.
      */
     private static boolean isUnchanged(DocumentFileDescriptor file, WebRequest request) {

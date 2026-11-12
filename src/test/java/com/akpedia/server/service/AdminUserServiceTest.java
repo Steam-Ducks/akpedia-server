@@ -90,6 +90,7 @@ class AdminUserServiceTest {
     }
 
     /** Ana's direct mappings before the change, and her effective roles before and after it. */
+    @SuppressWarnings("unchecked")
     private void anaHas(List<KeycloakRole> direct, List<KeycloakRole> effectiveBefore, List<KeycloakRole> effectiveAfter) {
         given(keycloak.realmRoles(ANA_ID)).willReturn(direct);
         given(keycloak.effectiveRealmRoles(ANA_ID)).willReturn(effectiveBefore, effectiveAfter);

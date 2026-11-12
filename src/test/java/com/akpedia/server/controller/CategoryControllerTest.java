@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,25 +17,36 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.akpedia.server.entity.Category;
-import com.akpedia.server.repository.CategoryRepository;
+import com.akpedia.server.security.CurrentUser;
+import com.akpedia.server.service.CategoryAccessService;
 
 @WebMvcTest(controllers = CategoryController.class)
 // The endpoint is under test, not who may call it: SecurityConfigTest covers that.
 @AutoConfigureMockMvc(addFilters = false)
 class CategoryControllerTest {
 
+    private static final long USER_ID = 20L;
+
     @Autowired
     private MockMvc mvc;
 
     @MockBean
-    private CategoryRepository categories;
+    private CategoryAccessService categoryAccess;
+
+    @MockBean
+    private CurrentUser currentUser;
+
+    @BeforeEach
+    void logIn() {
+        given(currentUser.id()).willReturn(USER_ID);
+    }
 
     @Test
-    @DisplayName("GET /api/v1/categories lists every category, ordered by name")
-    void listsEveryCategoryOrderedByName() throws Exception {
+    @DisplayName("GET /api/v1/categories lists the categories the caller's sector sees, ordered by name")
+    void listsTheSectorsCategoriesOrderedByName() throws Exception {
         Category engenharia = new Category("Engenharia", "documentos de engenharia");
         Category tecnica = new Category("Tecnica", null);
-        given(categories.findAllByOrderByNameAsc()).willReturn(List.of(engenharia, tecnica));
+        given(categoryAccess.allowedCategories(USER_ID)).willReturn(List.of(engenharia, tecnica));
 
         mvc.perform(get("/api/v1/categories"))
                 .andExpect(status().isOk())
@@ -46,9 +58,9 @@ class CategoryControllerTest {
     }
 
     @Test
-    @DisplayName("an empty catalog answers 200 with an empty list, not 404")
-    void emptyCatalogIsAnEmptyList() throws Exception {
-        given(categories.findAllByOrderByNameAsc()).willReturn(List.of());
+    @DisplayName("a sector that sees no category answers 200 with an empty list, not 404")
+    void sectorWithNoCategoryIsAnEmptyList() throws Exception {
+        given(categoryAccess.allowedCategories(USER_ID)).willReturn(List.of());
 
         mvc.perform(get("/api/v1/categories"))
                 .andExpect(status().isOk())

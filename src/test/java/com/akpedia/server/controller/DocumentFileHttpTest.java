@@ -3,6 +3,8 @@ package com.akpedia.server.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.io.IOException;
 import java.net.URI;
@@ -44,6 +46,7 @@ import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
 import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
+import com.akpedia.server.exception.CategoryForbiddenException;
 
 /**
  * Serves the route over a real HTTP connection, with a real PDF, and checks what a browser would
@@ -111,7 +114,7 @@ class DocumentFileHttpTest {
         pdf = Files.readAllBytes(Path.of("src/test/resources/manual-sample.pdf"));
         DocumentFileDescriptor file = new DocumentFileDescriptor(
                 1L, "manual de integração.pdf", MediaType.APPLICATION_PDF, pdf.length, LAST_MODIFIED, ETAG);
-        given(fileService.describe(1L)).willReturn(file);
+        given(fileService.describe(eq(1L), any())).willReturn(file);
         given(fileService.contentOf(file)).willReturn(pdf);
     }
 
@@ -212,7 +215,7 @@ class DocumentFileHttpTest {
     @Test
     @DisplayName("a restricted document is refused over the wire as JSON, not as a broken PDF")
     void refusesAnArchivedDocumentAsJson() throws Exception {
-        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(1L);
+        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(eq(1L), any());
 
         HttpResponse<byte[]> response = get();
 
@@ -224,7 +227,7 @@ class DocumentFileHttpTest {
     @Test
     @DisplayName("a caller that accepts only PDF, as Swagger UI does, still gets the JSON error instead of a 500")
     void refusesAsJsonEvenWhenOnlyPdfIsAccepted() throws Exception {
-        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(1L);
+        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(eq(1L), any());
 
         HttpResponse<byte[]> response = get(HttpHeaders.ACCEPT, MediaType.APPLICATION_PDF_VALUE);
 
@@ -246,6 +249,18 @@ class DocumentFileHttpTest {
         assertThat(response.statusCode()).isEqualTo(400);
         assertThat(header(response, HttpHeaders.CONTENT_TYPE)).startsWith(MediaType.APPLICATION_JSON_VALUE);
         assertThat(response.body()).contains("invalid_request");
+    }
+
+    @Test
+    @DisplayName("a document of a category the caller's sector does not see is refused as JSON 403 category_forbidden")
+    void refusesABlockedCategoryAsJson() throws Exception {
+        willThrow(new CategoryForbiddenException(1L)).given(fileService).describe(eq(1L), any());
+
+        HttpResponse<byte[]> response = get(HttpHeaders.ACCEPT, MediaType.APPLICATION_PDF_VALUE);
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(header(response, HttpHeaders.CONTENT_TYPE)).startsWith(MediaType.APPLICATION_JSON_VALUE);
+        assertThat(new String(response.body(), StandardCharsets.UTF_8)).contains("category_forbidden");
     }
 
 }

@@ -2,6 +2,7 @@ package com.akpedia.server.service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
@@ -24,7 +25,8 @@ import com.akpedia.server.repository.EmbeddingRepository;
  *
  * <p>The recent list holds the same documents search can return: approved and indexed. A
  * document still awaiting approval, returned for a fix, still being indexed or archived would be
- * offered there and then refused when opened.
+ * offered there and then refused when opened. And, like search, it only holds the categories the
+ * user's sector may see.
  *
  * <p>Each recent document carries an excerpt of its first chunk, cut to the same length as a search
  * snippet, so a card can say what the document is about even when it was uploaded without a
@@ -42,25 +44,40 @@ public class DocumentListService {
     private final DocumentRepository documents;
     private final EmbeddingRepository embeddings;
     private final SearchProperties searchProperties;
+    private final CategoryAccessService categoryAccess;
 
     public DocumentListService(
             DocumentRepository documents,
             EmbeddingRepository embeddings,
-            SearchProperties searchProperties) {
+            SearchProperties searchProperties,
+            CategoryAccessService categoryAccess) {
         this.documents = documents;
         this.embeddings = embeddings;
         this.searchProperties = searchProperties;
+        this.categoryAccess = categoryAccess;
     }
 
+    /**
+     * The most recently changed documents the user may see.
+     *
+     * @param requestedLimit how many at most, {@value #DEFAULT_LIMIT} when null
+     * @param userId         who is listing; only their sector's categories are listed
+     * @throws InvalidDocumentListRequestException if the limit is out of range
+     */
     @Transactional(readOnly = true)
-    public List<DocumentSummary> recent(Integer requestedLimit) {
+    public List<DocumentSummary> recent(Integer requestedLimit, Long userId) {
         int limit = requestedLimit == null ? DEFAULT_LIMIT : requestedLimit;
         if (limit < 1 || limit > MAX_LIMIT) {
             throw new InvalidDocumentListRequestException(
                     "limit must be between 1 and %d.".formatted(MAX_LIMIT));
         }
 
-        List<Document> recent = documents.findRecent(ProcessingStatus.COMPLETED, PageRequest.of(0, limit));
+        Set<Long> allowed = categoryAccess.allowedCategoryIds(userId);
+        if (allowed.isEmpty()) {
+            return List.of();
+        }
+
+        List<Document> recent = documents.findRecent(ProcessingStatus.COMPLETED, allowed, PageRequest.of(0, limit));
         Map<Long, String> excerpts = excerptsOf(recent);
 
         return recent.stream()

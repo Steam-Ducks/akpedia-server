@@ -6,6 +6,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
+import com.akpedia.server.config.SecurityConfig;
 import com.akpedia.server.exception.AccountCpfException;
 
 /** The user behind the current request, as a row in {@code users}. */
@@ -49,6 +50,16 @@ public class CurrentUser {
             // the row (or the sector) first. It is there now.
             return provisioning.provision(account);
         }
+    }
+
+    /**
+     * The logged-in user as someone opening a document: their row and whether they review documents.
+     *
+     * @throws AccountCpfException as {@link #id()} does
+     */
+    public Viewer viewer() {
+        Long id = id();
+        return new Viewer(id, SecurityConfig.isReviewer(SecurityContextHolder.getContext().getAuthentication().getAuthorities()));
     }
 
     /** The Keycloak account id (the token's {@code sub}), without creating the user's row. */

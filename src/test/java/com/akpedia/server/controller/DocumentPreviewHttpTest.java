@@ -3,6 +3,8 @@ package com.akpedia.server.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -42,6 +44,8 @@ import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentPreviewService;
+import com.akpedia.server.exception.CategoryForbiddenException;
+import com.akpedia.server.security.CurrentUser;
 
 /**
  * Renders the real sample PDF through the preview routes over HTTP, with only the file lookup
@@ -72,6 +76,9 @@ class DocumentPreviewHttpTest {
     @MockBean
     private DocumentFileService fileService;
 
+    @MockBean
+    private CurrentUser currentUser;
+
     private final HttpClient http = HttpClient.newHttpClient();
 
     @BeforeEach
@@ -79,7 +86,7 @@ class DocumentPreviewHttpTest {
         byte[] pdf = Files.readAllBytes(Path.of("src/test/resources/manual-sample.pdf"));
         DocumentFileDescriptor file = new DocumentFileDescriptor(
                 1L, "manual.pdf", MediaType.APPLICATION_PDF, pdf.length, Instant.EPOCH, "\"1\"");
-        given(fileService.describe(1L)).willReturn(file);
+        given(fileService.describe(eq(1L), any())).willReturn(file);
         given(fileService.contentOf(file)).willReturn(pdf);
     }
 
@@ -132,12 +139,26 @@ class DocumentPreviewHttpTest {
     @Test
     @DisplayName("an archived document shows no pages")
     void refusesAnArchivedDocument() throws Exception {
-        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(1L);
+        willThrow(new DocumentArchivedException(1L)).given(fileService).describe(eq(1L), any());
 
         HttpResponse<byte[]> response = get("/pages/1");
 
         assertThat(response.statusCode()).isEqualTo(403);
         assertThat(new String(response.body(), StandardCharsets.UTF_8)).contains("document_archived");
+    }
+
+    @Test
+    @DisplayName("a document of a category the caller's sector does not see shows neither its page count nor its pages")
+    void refusesABlockedCategory() throws Exception {
+        willThrow(new CategoryForbiddenException(1L)).given(fileService).describe(eq(1L), any());
+
+        for (String path : new String[] {"", "/pages/1"}) {
+            HttpResponse<byte[]> response = get(path);
+
+            assertThat(response.statusCode()).isEqualTo(403);
+            assertThat(header(response, HttpHeaders.CONTENT_TYPE)).startsWith(MediaType.APPLICATION_JSON_VALUE);
+            assertThat(new String(response.body(), StandardCharsets.UTF_8)).contains("category_forbidden");
+        }
     }
 
 }

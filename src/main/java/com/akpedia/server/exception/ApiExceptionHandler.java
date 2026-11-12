@@ -214,6 +214,19 @@ public class ApiExceptionHandler {
     }
 
     /**
+     * 403: the document is in a category the user's sector may not see.
+     *
+     * <p>Checked before the document's state, so a blocked user learns nothing about it beyond
+     * that it exists -- not whether it is archived, nor whether it is being indexed.
+     */
+    @ExceptionHandler(CategoryForbiddenException.class)
+    public ResponseEntity<ApiErrorResponse> handleCategoryForbidden(CategoryForbiddenException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new ApiErrorResponse("category_forbidden", e.getMessage()));
+    }
+
+    /**
      * 409: the document exists but akpedia-ml is indexing it right now.
      *
      * <p>A conflict with the document's current state, not a refusal of the request: unlike the

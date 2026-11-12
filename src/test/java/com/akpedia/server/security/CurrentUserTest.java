@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -31,7 +34,7 @@ class CurrentUserTest {
         SecurityContextHolder.clearContext();
     }
 
-    private static void logIn() {
+    private static void logIn(String... roles) {
         Jwt jwt = Jwt.withTokenValue("token")
                 .header("alg", "RS256")
                 .subject("3f1c2a9e-0000-4000-8000-000000000001")
@@ -42,7 +45,10 @@ class CurrentUserTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(300))
                 .build();
-        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+        List<SimpleGrantedAuthority> authorities = Arrays.stream(roles)
+                .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                .toList();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt, authorities));
     }
 
     @Test
@@ -81,5 +87,28 @@ class CurrentUserTest {
     @DisplayName("fails when the request carries no token")
     void failsWithoutToken() {
         assertThatThrownBy(() -> new CurrentUser(provisioning).id()).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("the viewer is the user's row, flagged as a reviewer for APPROVER or ADMIN only")
+    void viewerCarriesTheReviewerFlag() {
+        given(provisioning.provision(any())).willReturn(new ProvisionedUser(7L, null));
+        CurrentUser currentUser = new CurrentUser(provisioning);
+
+        logIn("STANDARD");
+        assertThat(currentUser.viewer()).isEqualTo(new Viewer(7L, false));
+        logIn("STANDARD", "APPROVER");
+        assertThat(currentUser.viewer()).isEqualTo(new Viewer(7L, true));
+        logIn("ADMIN");
+        assertThat(currentUser.viewer()).isEqualTo(new Viewer(7L, true));
+    }
+
+    @Test
+    @DisplayName("a refused CPF fails viewer() the way it fails id()")
+    void viewerRefusesAnAccountWithARefusedCpf() {
+        logIn("APPROVER");
+        given(provisioning.provision(any())).willReturn(new ProvisionedUser(7L, CpfProblem.INVALID));
+
+        assertThatThrownBy(new CurrentUser(provisioning)::viewer).isInstanceOf(AccountCpfException.class);
     }
 }

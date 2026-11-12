@@ -80,6 +80,11 @@ class SecurityConfigTest {
             return "ok";
         }
 
+        @GetMapping("/api/v1/documents/pending/categories")
+        String reviewCategories() {
+            return "ok";
+        }
+
         @PostMapping("/api/v1/documents/1/approve")
         String approve() {
             return "ok";
@@ -253,6 +258,8 @@ class SecurityConfigTest {
     void standardUserCannotReview() throws Exception {
         mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/documents/pending/categories").with(tokenWithRoles("STANDARD")))
+                .andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/documents/1/approve").with(tokenWithRoles("STANDARD")))
                 .andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/documents/1/reject").with(tokenWithRoles("STANDARD")))
@@ -264,6 +271,8 @@ class SecurityConfigTest {
     void approverCanReview() throws Exception {
         mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("STANDARD", "APPROVER")))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/documents/pending/categories").with(tokenWithRoles("APPROVER")))
+                .andExpect(status().isOk());
         mvc.perform(post("/api/v1/documents/1/approve").with(tokenWithRoles("APPROVER")))
                 .andExpect(status().isOk());
         mvc.perform(post("/api/v1/documents/1/reject").with(tokenWithRoles("APPROVER")))
@@ -274,6 +283,8 @@ class SecurityConfigTest {
     @DisplayName("an ADMIN reviews too")
     void adminCanReview() throws Exception {
         mvc.perform(get("/api/v1/documents/pending").with(tokenWithRoles("ADMIN")))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/documents/pending/categories").with(tokenWithRoles("ADMIN")))
                 .andExpect(status().isOk());
         mvc.perform(post("/api/v1/documents/1/approve").with(tokenWithRoles("ADMIN")))
                 .andExpect(status().isOk());
