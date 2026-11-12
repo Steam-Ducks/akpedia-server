@@ -50,6 +50,33 @@ spring:
       repositories:
         enabled: false
 
+  # Outgoing e-mail (MailService). The default is the compose's Mailpit, a test server that keeps
+  # every message for http://localhost:8025 instead of delivering it. Keycloak's realm points at the
+  # same server, for verifying e-mails and resetting passwords.
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          # Mailpit takes anything; a real server wants both on, with a username and password.
+          auth: ${MAIL_SMTP_AUTH:false}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS:false}
+            required: ${MAIL_SMTP_STARTTLS:false}
+          # Jakarta Mail waits forever by default: a server that accepts the connection and then goes
+          # quiet would hold the send, and every send queued behind it. In milliseconds.
+          connectiontimeout: ${MAIL_CONNECT_TIMEOUT_MS:5000}
+          timeout: ${MAIL_READ_TIMEOUT_MS:10000}
+          writetimeout: ${MAIL_WRITE_TIMEOUT_MS:10000}
+          # The name the server introduces itself with (EHLO). Without it Jakarta Mail sends the
+          # machine's or container's own name, which gives that name away. Set it to the server's
+          # real domain in production.
+          localhost: ${MAIL_SMTP_LOCALHOST:akpedia.local}
+
 server:
   port: ${SERVER_PORT:8080}
 
@@ -99,6 +126,12 @@ akpedia:
     base-url: ${GOTENBERG_BASE_URL:http://localhost:3000}
     connect-timeout: ${GOTENBERG_CONNECT_TIMEOUT:5s}
     read-timeout: ${GOTENBERG_READ_TIMEOUT:90s}
+  mail:
+    # Sender of every e-mail the server sends. Many servers refuse a From outside their domain.
+    from: ${MAIL_FROM:nao-responda@akpedia.local}
+    from-name: ${MAIL_FROM_NAME:Akpedia}
+    # How many messages sendAll sends over one SMTP connection before opening the next.
+    batch-size: ${MAIL_BATCH_SIZE:50}
 
 springdoc:
   swagger-ui:
@@ -116,3 +149,8 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+  health:
+    mail:
+      # The server works without e-mail: an SMTP server down must not mark the whole app DOWN.
+      # MailService reports each failed send instead.
+      enabled: false

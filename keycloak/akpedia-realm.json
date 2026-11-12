@@ -11,6 +11,17 @@
   "editUsernameAllowed": false,
   "resetPasswordAllowed": false,
   "verifyEmail": false,
+  "smtpServer": {
+    "host": "${MAIL_HOST}",
+    "port": "${MAIL_PORT}",
+    "from": "${MAIL_FROM}",
+    "fromDisplayName": "${MAIL_FROM_NAME}",
+    "auth": "${MAIL_SMTP_AUTH}",
+    "user": "${MAIL_USERNAME}",
+    "password": "${MAIL_PASSWORD}",
+    "starttls": "${MAIL_SMTP_STARTTLS}",
+    "ssl": "false"
+  },
   "bruteForceProtected": true,
   "internationalizationEnabled": true,
   "supportedLocales": [
