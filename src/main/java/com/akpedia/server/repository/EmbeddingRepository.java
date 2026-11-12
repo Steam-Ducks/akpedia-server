@@ -118,6 +118,56 @@ public interface EmbeddingRepository extends JpaRepository<Embedding, Long> {
                         @Param("resultLimit") int resultLimit);
 
     /**
+     * The {@code passageLimit} chunks closest to the question, closest first, for the chat to answer from.
+     *
+     * <p>Unlike {@link #search}, several chunks of one document may come back: the chat needs the
+     * passages that answer, wherever they are, not one card per document.
+     *
+     * <p>Eligible means the same as for {@link #search} -- approved, indexed, by the same model, in
+     * one of the {@code categoryIds} the user may see -- and the three queries move together. That
+     * list is required and must not be empty, for the same reasons given there.
+     *
+     * <p>Columns, in this order: {@code content, document_id, name, category, score, chunk_index}.
+     *
+     * <p>The search is exact on purpose, ordered by the score rather than by the distance operator,
+     * which keeps Postgres off the HNSW index. That index finds the nearest chunks first and filters
+     * them afterwards: only the {@code hnsw.ef_search} nearest (40 by default) are looked at, so when
+     * those belong to documents under review or to categories the user may not see, the valid chunks
+     * right behind them would never come back, and the chat would answer "not found" with the answer
+     * sitting in the database. Scoring every eligible chunk is what {@link #search} does already.
+     */
+    @Query(value = """
+            SELECT content, document_id, name, category, score, chunk_index
+            FROM (
+                    SELECT e.id AS embedding_id,
+                           e.content,
+                           d.id AS document_id,
+                           d.name,
+                           c.name AS category,
+                           1 - (e.vector <=> CAST(:queryVector AS vector)) AS score,
+                           e.chunk_index
+                    FROM embeddings e
+                    JOIN documents d ON d.id = e.document_id
+                    JOIN categories c ON c.id = d.category_id
+                    WHERE d.processing_status = 'COMPLETED'
+                      AND d.status = 'APPROVED'
+                      AND e.model_name = :modelName
+                      AND e.dimensions = :dimensions
+                      AND d.category_id IN (:categoryIds)
+            ) candidates
+            WHERE score >= :minimumScore
+            ORDER BY score DESC, embedding_id
+            LIMIT :passageLimit
+            """, nativeQuery = true)
+    List<Object[]> findTopChunks(
+            @Param("queryVector") String queryVector,
+            @Param("modelName") String modelName,
+            @Param("dimensions") int dimensions,
+            @Param("minimumScore") double minimumScore,
+            @Param("categoryIds") Collection<Long> categoryIds,
+            @Param("passageLimit") int passageLimit);
+
+    /**
      * The text of the first chunk of each given document, as {@code [document_id, content]} rows:
      * the start of the document, which is what an excerpt of it shows. Should the document hold
      * vectors of more than one model, one of their first chunks is picked.
