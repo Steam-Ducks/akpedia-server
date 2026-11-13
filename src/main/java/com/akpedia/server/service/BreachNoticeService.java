@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.akpedia.server.dto.BreachNoticeDetail;
+import com.akpedia.server.dto.BreachNoticePreview;
 import com.akpedia.server.dto.BreachNoticeRequest;
 import com.akpedia.server.dto.BreachNoticeSendResult;
 import com.akpedia.server.dto.BreachNoticeSummary;
@@ -47,9 +49,15 @@ import com.akpedia.server.service.MailResult.Failed;
  * The data breach notice (LGPD art. 48): the admin sends the affected users an e-mail saying what
  * happened, that ANPD has been informed, and what is being done.
  *
- * <p>It only goes out once the admin confirms ANPD was informed, and never with a gap of the
- * template ({@value #GAP_MARKER}) left unfilled. The recipients are users with a row linked to a
- * Keycloak account and not deleted -- every one of them, or the ones the admin picked.
+ * <p>It only goes out once the admin confirms ANPD was informed. The text is the notice document's
+ * template ({@code breach-notice/} in the resources): its {@code {{ }}} fields are filled at send time
+ * by {@link BreachNoticeText} -- the admin's values, and each recipient's own name in
+ * {@code {{nome_titular}}}, so every recipient gets an e-mail of their own. A required field left
+ * blank refuses the notice; an optional one takes its line out. The recipients are users with a row
+ * linked to a Keycloak account and not deleted -- every one of them, or the ones the admin picked.
+ *
+ * <p>What is saved is the text as filled, with {@code {{nome_titular}}} in place of the name: each
+ * recipient's row says who they are, so each e-mail can be told exactly from the two.
  *
  * <p>Sending is done in three steps, so the record never says more than what happened: the notice
  * and one {@code PENDING} row per recipient are saved first; then the e-mails go out through
@@ -62,9 +70,6 @@ import com.akpedia.server.service.MailResult.Failed;
  */
 @Service
 public class BreachNoticeService {
-
-    /** What marks a gap of the template the admin has to fill in. */
-    static final String GAP_MARKER = "[PREENCHER";
 
     static final int MAX_BODY = 50_000;
 
@@ -101,10 +106,14 @@ public class BreachNoticeService {
         this.audit = audit;
         this.transaction = new TransactionTemplate(transactionManager);
         // Read once, at startup: a template missing from the build fails the boot, not the incident.
-        this.template = new BreachNoticeTemplate(read(TEMPLATE_SUBJECT).strip(), read(TEMPLATE_BODY).strip());
+        this.template = new BreachNoticeTemplate(read(TEMPLATE_SUBJECT).strip(), read(TEMPLATE_BODY).strip(),
+                Arrays.stream(BreachNoticeField.values())
+                        .map(field -> new BreachNoticeTemplate.Field(
+                                field.key(), field.required(), field.automatic(), field.description(), field.example()))
+                        .toList());
     }
 
-    /** The suggested subject and text, for the admin to complete. */
+    /** The template's subject and text, with every field and what goes in it. */
     public BreachNoticeTemplate template() {
         return template;
     }
@@ -115,7 +124,8 @@ public class BreachNoticeService {
      * @param request the notice
      * @param adminId the admin sending it
      * @throws AnpdNotInformedException     if {@code anpd_informed} is not {@code true}; checked first
-     * @throws InvalidBreachNoticeException if the subject, text or recipients are missing or invalid
+     * @throws InvalidBreachNoticeException if the subject, text, fields or recipients are missing or
+     *         invalid: a required field blank, or a field the template does not have, included
      * @throws BreachNoticeConflictException if another notice is being sent, or this one already
      *         reached some of these users in the last {@value #REPEAT_WINDOW_MINUTES} minutes; nothing
      *         is sent nor saved then
@@ -124,8 +134,9 @@ public class BreachNoticeService {
         if (!Boolean.TRUE.equals(request.anpdInformed())) {
             throw new AnpdNotInformedException();
         }
-        String subject = validSubject(request.subject());
-        String body = validBody(request.body());
+        Composed composed = compose(request);
+        String subject = composed.subject();
+        String body = composed.body();
         List<User> to = recipientsOf(request);
 
         // 1. The notice and its recipients, all PENDING -- unless it would repeat or overlap another.
@@ -138,9 +149,12 @@ public class BreachNoticeService {
         });
         Long noticeId = rows.get(0).getNotice().getId();
 
-        // 2. The e-mails, one result per recipient in the same order. MailService never throws.
+        // 2. The e-mails, one per recipient with their name, one result each in the same order.
+        //    MailService never throws.
         List<MailResult> results = mail.sendAll(rows.stream()
-                .map(row -> new OutgoingMail(row.getEmail(), subject, body))
+                .map(row -> new OutgoingMail(row.getEmail(),
+                        BreachNoticeText.personalize(subject, row.getUser().getName()),
+                        BreachNoticeText.personalize(body, row.getUser().getName())))
                 .toList());
 
         // 3. How it went.
@@ -165,6 +179,42 @@ public class BreachNoticeService {
 
         return new BreachNoticeSendResult(
                 noticeId, rows.size(), rows.size() - failures.size(), failures.size(), List.copyOf(failures));
+    }
+
+    /**
+     * The e-mail as one recipient will get it -- the admin's own name standing in for theirs -- with
+     * nothing sent nor saved. Checked exactly as {@link #send} checks it, so what previews is what
+     * goes out; but ANPD need not be informed yet, for the text to be drafted while waiting on it.
+     *
+     * @param request the notice; its recipients and {@code anpd_informed} are not looked at
+     * @param adminId the admin, whose name fills {@code {{nome_titular}}}
+     * @throws InvalidBreachNoticeException as {@link #send} would, for the subject, text or fields
+     */
+    @Transactional(readOnly = true)
+    public BreachNoticePreview preview(BreachNoticeRequest request, Long adminId) {
+        Composed composed = compose(request);
+        String name = users.findById(adminId).map(User::getName).orElse(BreachNoticeField.NOME_TITULAR.example());
+        return new BreachNoticePreview(
+                BreachNoticeText.personalize(composed.subject(), name),
+                BreachNoticeText.personalize(composed.body(), name));
+    }
+
+    /** The subject and text as filled, {@code {{nome_titular}}} kept for each recipient. */
+    private record Composed(String subject, String body) {
+    }
+
+    /**
+     * Fills and checks the subject and text: every required field kept in the text and given a
+     * value, no field the template does not have, and a subject and text that fit once filled.
+     */
+    private static Composed compose(BreachNoticeRequest request) {
+        String subject = present(request.subject(), "subject");
+        String body = present(request.body(), "body");
+        BreachNoticeText.requireFields(subject, body);
+        Map<BreachNoticeField, String> values = BreachNoticeText.values(request.fields());
+        return new Composed(
+                validSubject(BreachNoticeText.fill(subject, values, "subject")),
+                validBody(BreachNoticeText.fill(body, values, "body")));
     }
 
     /**
@@ -249,9 +299,17 @@ public class BreachNoticeService {
                 list);
     }
 
+    private static String present(String text, String what) {
+        if (text == null || text.isBlank()) {
+            throw new InvalidBreachNoticeException(what + " e obrigatorio.");
+        }
+        return text;
+    }
+
+    /** The subject as filled: still there, a single line, and short. */
     private static String validSubject(String subject) {
-        if (subject == null || subject.isBlank()) {
-            throw new InvalidBreachNoticeException("subject e obrigatorio.");
+        if (subject.isBlank()) {
+            throw new InvalidBreachNoticeException("subject ficou em branco depois de preenchido.");
         }
         String stripped = subject.strip();
         // A line break in a header would let the text add headers of its own.
@@ -262,23 +320,17 @@ public class BreachNoticeService {
             throw new InvalidBreachNoticeException(
                     "subject deve ter no maximo %d caracteres.".formatted(BreachNotice.MAX_SUBJECT));
         }
-        if (stripped.contains(GAP_MARKER)) {
-            throw new InvalidBreachNoticeException("subject ainda tem um trecho [PREENCHER: ...] do modelo.");
-        }
         return stripped;
     }
 
+    /** The text as filled: still there, and not past the limit. */
     private static String validBody(String body) {
-        if (body == null || body.isBlank()) {
-            throw new InvalidBreachNoticeException("body e obrigatorio.");
+        if (body.isBlank()) {
+            throw new InvalidBreachNoticeException("body ficou em branco depois de preenchido.");
         }
         String stripped = body.strip();
         if (stripped.length() > MAX_BODY) {
             throw new InvalidBreachNoticeException("body deve ter no maximo %d caracteres.".formatted(MAX_BODY));
-        }
-        if (stripped.contains(GAP_MARKER)) {
-            throw new InvalidBreachNoticeException(
-                    "body ainda tem trechos [PREENCHER: ...] do modelo: complete-os antes de enviar.");
         }
         return stripped;
     }

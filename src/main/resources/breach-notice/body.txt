@@ -1,26 +1,35 @@
-Olá,
+Olá, {{nome_titular}}.
 
-A Akaer identificou um incidente de segurança que pode ter afetado dados pessoais seus tratados no Akpedia. Por transparência, e conforme o art. 48 da Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018), explicamos abaixo o que aconteceu e o que está sendo feito.
+Estamos entrando em contato para informar sobre um incidente de segurança que envolveu dados pessoais seus cadastrados no Akpedia.
 
 O que aconteceu
-[PREENCHER: o que aconteceu e quando o incidente foi identificado]
+Em {{data_descoberta}}, identificamos {{descricao_incidente}}. O incidente ocorreu em {{data_incidente}}.
 
-Quais dados podem ter sido afetados
-[PREENCHER: a natureza dos dados pessoais afetados, por exemplo nome, e-mail, CPF e setor]
+Quais dados foram envolvidos
+Os dados pessoais seus que podem ter sido expostos são: {{dados_afetados}}
+{{dados_nao_envolvidos}}
 
-Quais são os riscos para você
-[PREENCHER: os riscos relacionados ao incidente]
+Quais são os riscos
+Com esses dados, terceiros podem tentar se passar por você ou pela empresa, por exemplo enviando e-mails falsos (phishing) que pedem senhas, códigos ou pagamentos, ou tentando usar seu CPF em cadastros.
 
-O que já foi feito
-A Autoridade Nacional de Proteção de Dados (ANPD) já foi comunicada sobre o incidente.
-[PREENCHER: as medidas técnicas e de segurança adotadas para conter o incidente e reverter ou reduzir seus efeitos]
+Como seus dados eram protegidos
+{{medidas_protecao}}
+
+O que já fizemos
+Comunicamos o incidente à Autoridade Nacional de Proteção de Dados (ANPD) em {{data_comunicacao_anpd}}, como determina a Lei Geral de Proteção de Dados (Lei nº 13.709/2018).
+Também estamos adotando as seguintes medidas: {{medidas_adotadas}}
+{{motivo_atraso}}
 
 O que recomendamos que você faça
-[PREENCHER: as recomendações, por exemplo trocar a senha e desconfiar de mensagens que peçam seus dados]
+- Desconfie de mensagens que peçam sua senha, códigos de verificação ou dados pessoais, mesmo que pareçam vir da empresa. Nós nunca pedimos sua senha por e-mail.
+- Troque sua senha do Akpedia se ela for igual à de outros serviços.
+- Se notar uso indevido do seu CPF, você pode consultar contas e operações em seu nome no Registrato, serviço gratuito do Banco Central.
 
-Dúvidas
-Fale com o encarregado pelo tratamento de dados pessoais da Akaer: [PREENCHER: nome e contato do encarregado].
+Contato
+Se tiver dúvidas ou quiser exercer seus direitos como titular de dados, fale com {{nome_encarregado}}, encarregado(a) pelo tratamento de dados pessoais, pelo e-mail {{email_encarregado}}.
 
-Este é um e-mail automático; não é preciso respondê-lo.
+Este e-mail foi enviado de um endereço automático, e respostas a ele não são lidas.
 
-Akaer
+Lamentamos o ocorrido e seguimos à disposição.
+
+Equipe Akpedia

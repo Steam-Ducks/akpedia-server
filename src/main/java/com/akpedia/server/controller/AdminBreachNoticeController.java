@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.BreachNoticeDetail;
+import com.akpedia.server.dto.BreachNoticePreview;
 import com.akpedia.server.dto.BreachNoticeRequest;
 import com.akpedia.server.dto.BreachNoticeSendResult;
 import com.akpedia.server.dto.BreachNoticeSummary;
@@ -44,23 +45,49 @@ public class AdminBreachNoticeController {
     }
 
     @Operation(
-            summary = "The suggested text of the notice (ADMIN)",
+            summary = "The notice template, with its fields (ADMIN)",
             description = """
-                    A subject and a text to start from. The text has `[PREENCHER: ...]` where what is particular
-                    to the incident goes -- what happened, which data, the risks, the measures taken; a notice
-                    sent with one of them left is refused.""")
+                    The subject and the plain text of the data breach notice document, with `{{campo}}` where each
+                    field goes, and the list of fields: name, whether it is required, what goes in it and an
+                    example. `nome_titular` is `automatic`: the server writes each recipient's name in it. An
+                    optional field left blank takes its line out of the e-mail.""")
     @GetMapping("/template")
     public BreachNoticeTemplate template() {
         return breachNotices.template();
     }
 
     @Operation(
+            summary = "Preview the notice e-mail, without sending it (ADMIN)",
+            description = """
+                    The same `subject`, `body` and `fields` as sending, checked the same way, answered as a
+                    recipient will read them -- with the caller's own name in `{{nome_titular}}`. Nothing is
+                    sent nor saved, and `anpd_informed` is not required, so the text can be drafted while ANPD
+                    is being informed. Recipients are not looked at.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "The e-mail, filled."),
+        @ApiResponse(responseCode = "400",
+                description = "`invalid_breach_notice`: subject or body missing or invalid, a required field blank or "
+                        + "removed from the text, or a field the template does not have.",
+                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    @PostMapping("/preview")
+    public BreachNoticePreview preview(@RequestBody BreachNoticeRequest request) {
+        return breachNotices.preview(request, currentUser.id());
+    }
+
+    @Operation(
             summary = "Send the notice (ADMIN)",
             description = """
                     E-mails `subject` and `body` (plain text) to every user (`all_users: true`) or to the ones in
-                    `user_ids`, never both. A recipient is a user linked to a Keycloak account and not deleted;
-                    disabled accounts included. `anpd_informed: true` confirms ANPD was informed: without it,
-                    nothing is sent and the answer is 422, whatever else the request has.
+                    `user_ids`, never both. `fields` has the value of each `{{campo}}`, by name; each recipient gets
+                    an e-mail of their own, with their name in `{{nome_titular}}`. A required field left blank, a
+                    field the template does not have, `nome_titular` in `fields`, or a text that dropped a required
+                    field (each stands for an item the law asks the notice to carry) is refused (400). Try it with
+                    `POST .../preview` first.
+
+                    A recipient is a user linked to a Keycloak account and not deleted; disabled accounts included.
+                    `anpd_informed: true` confirms ANPD was informed: without it, nothing is sent and the answer is
+                    422, whatever else the request has.
 
                     One e-mail failing does not stop the others. The answer says how many went out and which did
                     not, and why; each recipient's status stays on the notice (`GET .../{id}`). Recorded in the
@@ -68,8 +95,8 @@ public class AdminBreachNoticeController {
     @ApiResponses({
         @ApiResponse(responseCode = "201", description = "Sent; how it went, failures included."),
         @ApiResponse(responseCode = "400",
-                description = "`invalid_breach_notice`: subject or body missing or invalid, a `[PREENCHER` gap left, "
-                        + "both or neither of `all_users` and `user_ids`, or a user that cannot be notified.",
+                description = "`invalid_breach_notice`: subject or body missing or invalid, a required field blank or an "
+                        + "unknown one, both or neither of `all_users` and `user_ids`, or a user that cannot be notified.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "`anpd_not_informed`: `anpd_informed` is not `true`.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))

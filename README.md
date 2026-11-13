@@ -548,7 +548,8 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 
 | Rota | O que faz |
 |------|-----------|
-| `GET /api/v1/admin/breach-notices/template` | Assunto e texto sugeridos (`subject`, `body`). O texto tem lacunas `[PREENCHER: ...]` para o que é próprio do incidente |
+| `GET /api/v1/admin/breach-notices/template` | O modelo do documento de aviso: `subject`, `body` com os campos `{{campo}}`, e `fields`, cada campo com `name`, `required`, `automatic`, `description` e `example` |
+| `POST /api/v1/admin/breach-notices/preview` | O e-mail como o destinatário vai receber, com o nome do próprio admin no lugar do dele. Valida igual ao envio, mas não envia nem grava nada e não exige `anpd_informed`, para montar o texto enquanto a ANPD é comunicada |
 | `POST /api/v1/admin/breach-notices` | Envia o aviso. Responde `201` com quantos saíram e quais falharam |
 | `GET /api/v1/admin/breach-notices?page=0&size=20` | Página dos avisos enviados, do mais novo para o mais antigo, com as contagens. `size` até 100 |
 | `GET /api/v1/admin/breach-notices/{id}` | O aviso como foi enviado, com o status de cada destinatário |
@@ -556,8 +557,19 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 ```json
 // POST /api/v1/admin/breach-notices
 {
-  "subject": "Comunicado sobre incidente de segurança envolvendo seus dados pessoais",
-  "body": "Olá, ...",
+  "subject": "Aviso importante: incidente de segurança envolvendo seus dados no Akpedia",
+  "body": "Olá, {{nome_titular}}. ...",   // o body do template, normalmente sem mudança
+  "fields": {
+    "data_descoberta": "10/11/2026",
+    "data_incidente": "08/11 a 09/11/2026",
+    "descricao_incidente": "acesso não autorizado a uma cópia da base de usuários",
+    "dados_afetados": "Nome, e-mail e CPF",
+    "medidas_protecao": "Servidor com acesso restrito",
+    "data_comunicacao_anpd": "11/11/2026",
+    "medidas_adotadas": "Bloqueio do acesso indevido",
+    "nome_encarregado": "...",
+    "email_encarregado": "..."
+  },
   "all_users": true,            // ou "user_ids": [10, 11] -- um dos dois
   "anpd_informed": true
 }
@@ -574,8 +586,25 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 - **Destinatários**: usuários de `users` ligados a uma conta do Keycloak e não excluídos, inclusive
   os desativados (os dados deles também estão no sistema). Com `user_ids`, um id que não existe,
   foi excluído ou não tem conta no Keycloak é recusado (`400`, com os ids na mensagem).
-- **Texto**: assunto de uma linha só, até 200 caracteres; texto puro, até 50.000. Um aviso que
-  ainda tem `[PREENCHER` no assunto ou no texto é recusado (`400`).
+- **Texto e campos**: o modelo é o do documento de aviso de vazamento, em
+  `src/main/resources/breach-notice/` (texto puro, sem negrito, links nem tabelas). Os campos
+  `{{campo}}` são preenchidos no envio:
+  - `{{nome_titular}}` é automático: cada destinatário recebe um e-mail só dele, com o próprio nome.
+    Mandá-lo em `fields` é recusado.
+  - Os demais vêm em `fields`. Um obrigatório em branco é recusado (`400`, com todos os que faltam);
+    os opcionais (`dados_nao_envolvidos`, `motivo_atraso`) em branco tiram a linha inteira do e-mail.
+  - O admin pode reescrever o texto em volta dos campos, mas **não pode tirar um obrigatório**: cada um
+    corresponde a um item do art. 9º da Resolução CD/ANPD nº 15/2024 (o que aconteceu, quais dados,
+    as medidas de proteção, a data da comunicação à ANPD, as medidas adotadas, o contato do
+    encarregado), e o `{{nome_titular}}` à comunicação individual do § 1º. Um texto sem algum deles é
+    recusado (`400`), mesmo com o valor em `fields`.
+  - Um campo que o modelo não tem, em `fields` ou escrito no texto, é recusado. Um valor pode ter
+    várias linhas (como `dados_afetados`, "um por linha"), mas não `{{` nem `}}`; uma lista assim
+    começa na linha de baixo da frase ("...são:" e, embaixo, um item por linha).
+  - Fica gravado o texto preenchido com `{{nome_titular}}` no lugar do nome: cada linha de
+    destinatário já diz quem ele é.
+
+  Assunto de uma linha só, até 200 caracteres; texto até 50.000, já preenchido.
 - **Registro**: o aviso (`breach_notices`) e uma linha por destinatário (`breach_notice_recipients`)
   são gravados como `PENDING` antes do envio; cada linha vira `SENT` ou `FAILED` (com o motivo em
   `error`) depois. Um envio interrompido no meio deixa as linhas restantes `PENDING`, visíveis no
@@ -591,13 +620,16 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 - Os avisos não são alterados nem apagados. Se o usuário excluir a conta, as linhas dele ficam
   (como registro de que foi avisado), mas com o e-mail anonimizado.
 
-> **Texto provisório:** o modelo em `src/main/resources/breach-notice/` é um rascunho a partir do
-> art. 48, §1º da LGPD, até o texto definitivo do aviso ser entregue pela documentação.
+> **Decisões pendentes do documento**, fora deste server por enquanto: quem é o encarregado (DPO) e
+> o canal dele (obrigatórios para o envio); onde publicar o aviso para quem não tem e-mail válido
+> (art. 9º, § 3º, por 3 meses); a declaração à ANPD (art. 9º, § 4º), que pode partir do registro de
+> envio (`GET /api/v1/admin/breach-notices/{id}`); e o prazo em dobro para agente de pequeno porte.
+> O aviso deve chegar ao titular em até 3 dias úteis (Resolução CD/ANPD nº 15/2024, art. 9º).
 
 | Situação                                                         | Status | `code`                    |
 |------------------------------------------------------------------|--------|---------------------------|
 | `anpd_informed` diferente de `true`                              | 422    | `anpd_not_informed`       |
-| assunto ou texto inválido, lacuna `[PREENCHER` sobrando, nenhum ou os dois entre `all_users` e `user_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
+| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, `nome_titular` em `fields`, nenhum ou os dois entre `all_users` e `user_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
 | outro aviso sendo enviado agora                                  | 409    | `breach_notice_in_progress` |
 | o mesmo aviso já entregue a algum destes usuários nos últimos 30 min | 409 | `breach_notice_duplicate` |
 | aviso inexistente                                                | 404    | `breach_notice_not_found` |

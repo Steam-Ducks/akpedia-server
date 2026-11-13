@@ -50,7 +50,21 @@ class BreachNoticeServiceTest {
     private static final long ADMIN_ID = 1L;
     private static final long NOTICE_ID = 77L;
     private static final String SUBJECT = "Comunicado sobre incidente de segurança";
-    private static final String BODY = "A ANPD foi comunicada. Troque sua senha.";
+    /** A short text that keeps every required field, as the law asks. */
+    private static final String BODY = "Olá, {{nome_titular}}. Em {{data_descoberta}}, identificamos {{descricao_incidente}} "
+            + "({{data_incidente}}). Dados: {{dados_afetados}}. Proteção: {{medidas_protecao}}. "
+            + "ANPD em {{data_comunicacao_anpd}}. Medidas: {{medidas_adotadas}}. "
+            + "Contato: {{nome_encarregado}}, {{email_encarregado}}.";
+    private static final Map<String, String> FIELDS = Map.copyOf(documentExamples());
+    /** {@link #BODY} with {@link #FIELDS} in, as it is saved: the name kept as a field. */
+    private static final String FILLED = "Olá, {{nome_titular}}. Em 10/11/2026, identificamos Acesso não autorizado a "
+            + "uma cópia da base de usuários (08/11 a 09/11/2026). Dados: Nome, e-mail e CPF. Proteção: Servidor com "
+            + "acesso restrito. ANPD em 11/11/2026. Medidas: Bloqueio do acesso indevido. Contato: A definir, A definir.";
+
+    /** What one recipient gets. */
+    private static String bodyFor(String name) {
+        return FILLED.replace("{{nome_titular}}", name);
+    }
 
     @Mock
     private BreachNoticeRepository notices;
@@ -93,16 +107,106 @@ class BreachNoticeServiceTest {
     }
 
     private static BreachNoticeRequest toAll() {
-        return new BreachNoticeRequest(SUBJECT, BODY, true, null, true);
+        return new BreachNoticeRequest(SUBJECT, BODY, FIELDS, true, null, true);
+    }
+
+    /** Every field the admin fills, as the document's examples; the two optional ones included. */
+    private static Map<String, String> documentExamples() {
+        Map<String, String> fields = new java.util.LinkedHashMap<>();
+        for (BreachNoticeField field : BreachNoticeField.values()) {
+            if (!field.automatic()) {
+                fields.put(field.key(), field.example());
+            }
+        }
+        return fields;
     }
 
     @Test
-    @DisplayName("the template has a subject and a text with the gaps to fill in")
-    void templateHasGaps() {
+    @DisplayName("the template is the notice document's: its subject, its text, and its fields in order")
+    void templateIsTheDocuments() {
         BreachNoticeTemplate template = service.template();
 
-        assertThat(template.subject()).isNotBlank().doesNotContain("\n");
-        assertThat(template.body()).contains("ANPD").contains(BreachNoticeService.GAP_MARKER);
+        assertThat(template.subject())
+                .isEqualTo("Aviso importante: incidente de segurança envolvendo seus dados no Akpedia");
+        assertThat(template.body())
+                .startsWith("Olá, {{nome_titular}}.")
+                .contains("Comunicamos o incidente à Autoridade Nacional de Proteção de Dados (ANPD) em {{data_comunicacao_anpd}}")
+                .contains("{{dados_nao_envolvidos}}", "{{motivo_atraso}}", "{{email_encarregado}}")
+                .endsWith("Equipe Akpedia");
+        assertThat(template.fields()).extracting(BreachNoticeTemplate.Field::name).containsExactly(
+                "nome_titular", "data_descoberta", "data_incidente", "descricao_incidente", "dados_afetados",
+                "dados_nao_envolvidos", "medidas_protecao", "data_comunicacao_anpd", "medidas_adotadas",
+                "motivo_atraso", "nome_encarregado", "email_encarregado");
+        assertThat(template.fields()).filteredOn(field -> !field.required())
+                .extracting(BreachNoticeTemplate.Field::name).containsExactly("dados_nao_envolvidos", "motivo_atraso");
+        assertThat(template.fields()).filteredOn(BreachNoticeTemplate.Field::automatic)
+                .extracting(BreachNoticeTemplate.Field::name).containsExactly("nome_titular");
+    }
+
+    @Test
+    @DisplayName("every field of the template text is one of the fields listed, and every one listed is in the text")
+    void templateTextAndFieldsAgree() {
+        BreachNoticeTemplate template = service.template();
+        java.util.Set<String> inText = new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{\\{(\\w+)}}").matcher(template.body());
+        while (matcher.find()) {
+            inText.add(matcher.group(1));
+        }
+
+        assertThat(inText).containsExactlyInAnyOrderElementsOf(
+                template.fields().stream().map(BreachNoticeTemplate.Field::name).toList());
+    }
+
+    @Test
+    @DisplayName("the document's template, filled: each recipient gets an e-mail with their own name")
+    void documentTemplateIsFilledPerRecipient() {
+        given(users.findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById()).willReturn(List.of(ana, bruno));
+        given(mail.sendAll(anyCollection())).willReturn(List.of(
+                new MailResult.Sent("ana@akaer.com.br", "<1@x>"), new MailResult.Sent("bruno@akaer.com.br", "<2@x>")));
+        BreachNoticeTemplate template = service.template();
+
+        service.send(new BreachNoticeRequest(template.subject(), template.body(), documentExamples(), true, null, true),
+                ADMIN_ID);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<OutgoingMail>> sent = ArgumentCaptor.forClass(List.class);
+        then(mail).should().sendAll(sent.capture());
+        OutgoingMail toAna = sent.getValue().get(0);
+        assertThat(toAna.subject()).isEqualTo(template.subject());
+        assertThat(toAna.body())
+                .startsWith("Olá, Usuario 10.")
+                .contains("Em 10/11/2026, identificamos Acesso não autorizado a uma cópia da base de usuários. "
+                        + "O incidente ocorreu em 08/11 a 09/11/2026.")
+                .contains("Nenhuma senha foi exposta")
+                .contains("em 11/11/2026, como determina")
+                .doesNotContain("{{", "}}");
+        assertThat(sent.getValue().get(1).body()).startsWith("Olá, Usuario 11.");
+
+        // What is kept is the filled text, the name left as a field: each row says whose it was.
+        ArgumentCaptor<BreachNotice> saved = ArgumentCaptor.forClass(BreachNotice.class);
+        then(notices).should().save(saved.capture());
+        assertThat(saved.getValue().getBody()).startsWith("Olá, {{nome_titular}}.").contains("10/11/2026");
+    }
+
+    @Test
+    @DisplayName("an optional field left blank takes its line out, and no blank run is left behind")
+    void blankOptionalFieldDropsItsLine() {
+        given(users.findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById()).willReturn(List.of(ana));
+        given(mail.sendAll(anyCollection())).willReturn(List.of(new MailResult.Sent("ana@akaer.com.br", "<1@x>")));
+        Map<String, String> fields = documentExamples();
+        fields.put("dados_nao_envolvidos", "  ");
+        fields.remove("motivo_atraso");
+        BreachNoticeTemplate template = service.template();
+
+        service.send(new BreachNoticeRequest(template.subject(), template.body(), fields, true, null, true), ADMIN_ID);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<OutgoingMail>> sent = ArgumentCaptor.forClass(List.class);
+        then(mail).should().sendAll(sent.capture());
+        String body = sent.getValue().get(0).body();
+        assertThat(body).doesNotContain("Nenhuma senha", "Extensão confirmada", "{{").doesNotContain("\n\n\n");
+        assertThat(body).contains("são: Nome, e-mail e CPF\n\nQuais são os riscos")
+                .contains("medidas: Bloqueio do acesso indevido\n\nO que recomendamos");
     }
 
     @Test
@@ -110,7 +214,7 @@ class BreachNoticeServiceTest {
     void anpdNotInformedIsRefusedFirst() {
         for (Boolean informed : new Boolean[] {null, false}) {
             // Everything else is wrong too: the ANPD confirmation is what is answered.
-            BreachNoticeRequest request = new BreachNoticeRequest(null, null, null, null, informed);
+            BreachNoticeRequest request = new BreachNoticeRequest(null, null, null, null, null, informed);
             assertThatThrownBy(() -> service.send(request, ADMIN_ID)).isInstanceOf(AnpdNotInformedException.class);
         }
         then(users).shouldHaveNoInteractions();
@@ -139,8 +243,8 @@ class BreachNoticeServiceTest {
         ArgumentCaptor<List<OutgoingMail>> sent = ArgumentCaptor.forClass(List.class);
         then(mail).should().sendAll(sent.capture());
         assertThat(sent.getValue()).containsExactly(
-                new OutgoingMail("ana@akaer.com.br", SUBJECT, BODY),
-                new OutgoingMail("bruno@akaer.com.br", SUBJECT, BODY));
+                new OutgoingMail("ana@akaer.com.br", SUBJECT, bodyFor("Usuario 10")),
+                new OutgoingMail("bruno@akaer.com.br", SUBJECT, bodyFor("Usuario 11")));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<BreachNoticeRecipient>> saved = ArgumentCaptor.forClass(List.class);
@@ -160,12 +264,12 @@ class BreachNoticeServiceTest {
         given(users.findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById()).willReturn(List.of(ana));
         given(mail.sendAll(anyCollection())).willReturn(List.of(new MailResult.Sent("ana@akaer.com.br", "<1@x>")));
 
-        service.send(new BreachNoticeRequest("  " + SUBJECT + "  ", "\n" + BODY + "\n", true, null, true), ADMIN_ID);
+        service.send(new BreachNoticeRequest("  " + SUBJECT + "  ", "\n" + BODY + "\n", FIELDS, true, null, true), ADMIN_ID);
 
         ArgumentCaptor<BreachNotice> saved = ArgumentCaptor.forClass(BreachNotice.class);
         then(notices).should().save(saved.capture());
         assertThat(saved.getValue().getSubject()).isEqualTo(SUBJECT);
-        assertThat(saved.getValue().getBody()).isEqualTo(BODY);
+        assertThat(saved.getValue().getBody()).isEqualTo(FILLED);
         assertThat(saved.getValue().isAnpdInformed()).isTrue();
         then(users).should().getReferenceById(ADMIN_ID);
     }
@@ -177,7 +281,7 @@ class BreachNoticeServiceTest {
         given(mail.sendAll(anyCollection())).willReturn(List.of(new MailResult.Sent("bruno@akaer.com.br", "<1@x>")));
 
         BreachNoticeSendResult result =
-                service.send(new BreachNoticeRequest(SUBJECT, BODY, null, List.of(11L, 11L), true), ADMIN_ID);
+                service.send(new BreachNoticeRequest(SUBJECT, BODY, FIELDS, null, List.of(11L, 11L), true), ADMIN_ID);
 
         assertThat(result.total()).isEqualTo(1);
         then(users).should(never()).findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById();
@@ -193,7 +297,7 @@ class BreachNoticeServiceTest {
         given(users.findAllById(any())).willReturn(List.of(ana, deleted, unlinked));
 
         assertThatThrownBy(() -> service.send(
-                new BreachNoticeRequest(SUBJECT, BODY, null, List.of(10L, 12L, 13L, 99L), true), ADMIN_ID))
+                new BreachNoticeRequest(SUBJECT, BODY, FIELDS, null, List.of(10L, 12L, 13L, 99L), true), ADMIN_ID))
                 .isInstanceOf(InvalidBreachNoticeException.class)
                 .hasMessageContaining("12, 13, 99");
         then(mail).shouldHaveNoInteractions();
@@ -202,24 +306,125 @@ class BreachNoticeServiceTest {
     @Test
     @DisplayName("both or neither of all_users and user_ids is refused")
     void exactlyOneWayOfPickingRecipients() {
-        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, true, List.of(10L), true), ADMIN_ID))
+        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, FIELDS, true, List.of(10L), true), ADMIN_ID))
                 .isInstanceOf(InvalidBreachNoticeException.class);
-        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, false, List.of(), true), ADMIN_ID))
+        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, FIELDS, false, List.of(), true), ADMIN_ID))
                 .isInstanceOf(InvalidBreachNoticeException.class);
         then(mail).shouldHaveNoInteractions();
     }
 
     @Test
-    @DisplayName("a text with a template gap left, a blank or multi-line subject, or a blank body is refused")
+    @DisplayName("a required field blank is refused, naming every one missing, before anything is looked up")
+    void blankRequiredFieldsAreNamed() {
+        Map<String, String> fields = documentExamples();
+        fields.remove("data_descoberta");
+        fields.put("email_encarregado", " ");
+        BreachNoticeTemplate template = service.template();
+
+        assertThatThrownBy(() -> service.send(
+                new BreachNoticeRequest(template.subject(), template.body(), fields, true, null, true), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("data_descoberta")
+                .hasMessageContaining("email_encarregado");
+        then(users).shouldHaveNoInteractions();
+        then(mail).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("a field the template does not have, the automatic name, or braces in a value are refused")
+    void invalidFieldsAreRefused() {
+        BreachNoticeTemplate template = service.template();
+        List<Map<String, String>> invalid = List.of(
+                Map.of("data_descobreta", "10/11/2026"),
+                Map.of("nome_titular", "Fulano"),
+                Map.of("descricao_incidente", "algo {{nome_titular}}"));
+        for (Map<String, String> fields : invalid) {
+            Map<String, String> all = documentExamples();
+            all.putAll(fields);
+            assertThatThrownBy(() -> service.send(
+                    new BreachNoticeRequest(template.subject(), template.body(), all, true, null, true), ADMIN_ID))
+                    .isInstanceOf(InvalidBreachNoticeException.class);
+        }
+        // A field the admin typed into the text that the template does not have.
+        assertThatThrownBy(() -> service.send(
+                new BreachNoticeRequest(SUBJECT, BODY + " Prazo: {{prazo_resposta}}", FIELDS, true, null, true), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("prazo_resposta");
+        then(mail).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("a text that dropped a required field is refused, naming them, even with every value given")
+    void textMustKeepTheRequiredFields() {
+        BreachNoticeTemplate template = service.template();
+        String withoutContact = template.body().replace("{{nome_encarregado}}", "o encarregado")
+                .replace("{{email_encarregado}}", "dpo@akaer.com.br");
+        String withoutName = template.body().replace("Olá, {{nome_titular}}.", "Olá.");
+
+        assertThatThrownBy(() -> service.send(
+                new BreachNoticeRequest(template.subject(), withoutContact, documentExamples(), true, null, true), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("nome_encarregado, email_encarregado");
+        assertThatThrownBy(() -> service.send(
+                new BreachNoticeRequest(template.subject(), withoutName, documentExamples(), true, null, true), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("nome_titular");
+        then(users).shouldHaveNoInteractions();
+        then(mail).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("the affected data, one per line, starts on a line of its own under the sentence")
+    void affectedDataListStartsOnItsOwnLine() {
+        given(users.findById(ADMIN_ID)).willReturn(java.util.Optional.of(user(ADMIN_ID, "admin@akaer.com.br")));
+        Map<String, String> fields = documentExamples();
+        fields.put("dados_afetados", "Nome\nE-mail\nCPF");
+        BreachNoticeTemplate template = service.template();
+
+        String body = service.preview(
+                new BreachNoticeRequest(template.subject(), template.body(), fields, null, null, null), ADMIN_ID).body();
+
+        assertThat(body).contains("Os dados pessoais seus que podem ter sido expostos são:\nNome\nE-mail\nCPF\n");
+    }
+
+    @Test
+    @DisplayName("the preview is the e-mail filled, with the admin's name; nothing sent nor saved, ANPD not needed yet")
+    void previewSendsAndSavesNothing() {
+        given(users.findById(ADMIN_ID)).willReturn(java.util.Optional.of(user(ADMIN_ID, "admin@akaer.com.br")));
+        BreachNoticeTemplate template = service.template();
+
+        var preview = service.preview(
+                new BreachNoticeRequest(template.subject(), template.body(), documentExamples(), null, null, false), ADMIN_ID);
+
+        assertThat(preview.subject()).isEqualTo(template.subject());
+        assertThat(preview.body()).startsWith("Olá, Usuario 1.").contains("em 11/11/2026").doesNotContain("{{");
+        then(mail).shouldHaveNoInteractions();
+        then(notices).shouldHaveNoInteractions();
+        then(recipients).shouldHaveNoInteractions();
+        then(audit).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("the preview refuses what sending would: a required field blank")
+    void previewChecksLikeSending() {
+        Map<String, String> fields = documentExamples();
+        fields.remove("medidas_adotadas");
+        BreachNoticeTemplate template = service.template();
+
+        assertThatThrownBy(() -> service.preview(
+                new BreachNoticeRequest(template.subject(), template.body(), fields, null, null, null), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("medidas_adotadas");
+    }
+
+    @Test
+    @DisplayName("a blank, multi-line or too long subject, or a blank body, is refused")
     void invalidTextIsRefused() {
-        String gap = "Dados afetados: [PREENCHER: a natureza dos dados]";
         for (BreachNoticeRequest request : List.of(
-                new BreachNoticeRequest(SUBJECT, gap, true, null, true),
-                new BreachNoticeRequest("[PREENCHER: assunto]", BODY, true, null, true),
-                new BreachNoticeRequest(" ", BODY, true, null, true),
-                new BreachNoticeRequest("linha 1\nBcc: alguem@x.com", BODY, true, null, true),
-                new BreachNoticeRequest("a".repeat(201), BODY, true, null, true),
-                new BreachNoticeRequest(SUBJECT, "  ", true, null, true))) {
+                new BreachNoticeRequest(" ", BODY, FIELDS, true, null, true),
+                new BreachNoticeRequest("linha 1\nBcc: alguem@x.com", BODY, FIELDS, true, null, true),
+                new BreachNoticeRequest("a".repeat(201), BODY, FIELDS, true, null, true),
+                new BreachNoticeRequest(SUBJECT, "  ", FIELDS, true, null, true))) {
             assertThatThrownBy(() -> service.send(request, ADMIN_ID)).isInstanceOf(InvalidBreachNoticeException.class);
         }
         then(mail).shouldHaveNoInteractions();
@@ -236,7 +441,7 @@ class BreachNoticeServiceTest {
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(recipients, notices, mail);
         order.verify(recipients).lockSending(BreachNoticeService.SEND_LOCK_KEY);
         order.verify(recipients).existsPendingSince(any());
-        order.verify(recipients).countAlreadySent(eq(SUBJECT), eq(BODY), eq(List.of(10L)), any());
+        order.verify(recipients).countAlreadySent(eq(SUBJECT), eq(FILLED), eq(List.of(10L)), any());
         order.verify(notices).save(any());
         order.verify(mail).sendAll(anyCollection());
     }
@@ -274,9 +479,9 @@ class BreachNoticeServiceTest {
     @DisplayName("the same notice already sent to some of these users is 409 duplicate: nothing saved nor sent")
     void sameNoticeAlreadySentIsRefused() {
         given(users.findAllById(any())).willReturn(List.of(ana, bruno));
-        given(recipients.countAlreadySent(eq(SUBJECT), eq(BODY), eq(List.of(10L, 11L)), any())).willReturn(1L);
+        given(recipients.countAlreadySent(eq(SUBJECT), eq(FILLED), eq(List.of(10L, 11L)), any())).willReturn(1L);
 
-        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, null, List.of(10L, 11L), true), ADMIN_ID))
+        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, FIELDS, null, List.of(10L, 11L), true), ADMIN_ID))
                 .isInstanceOf(BreachNoticeConflictException.class)
                 .hasMessageContaining("1 destes usuarios")
                 .extracting("code").isEqualTo(BreachNoticeConflictException.DUPLICATE);

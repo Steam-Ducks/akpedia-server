@@ -63,25 +63,65 @@ class AdminBreachNoticeControllerTest {
     }
 
     @Test
-    @DisplayName("GET /template answers the subject and the text")
+    @DisplayName("GET /template answers the subject, the text and each field with what goes in it")
     void template() throws Exception {
-        given(breachNotices.template()).willReturn(new BreachNoticeTemplate("Assunto", "Texto [PREENCHER: x]"));
+        given(breachNotices.template()).willReturn(new BreachNoticeTemplate("Assunto", "Olá, {{nome_titular}}.",
+                List.of(new BreachNoticeTemplate.Field("nome_titular", true, true, "Nome do funcionário", "Ana Silva"),
+                        new BreachNoticeTemplate.Field("motivo_atraso", false, false, "Justificativa", "Extensão"))));
 
         mvc.perform(get("/api/v1/admin/breach-notices/template"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.subject").value("Assunto"))
-                .andExpect(jsonPath("$.body").value("Texto [PREENCHER: x]"));
+                .andExpect(jsonPath("$.body").value("Olá, {{nome_titular}}."))
+                .andExpect(jsonPath("$.fields[0].name").value("nome_titular"))
+                .andExpect(jsonPath("$.fields[0].required").value(true))
+                .andExpect(jsonPath("$.fields[0].automatic").value(true))
+                .andExpect(jsonPath("$.fields[0].description").value("Nome do funcionário"))
+                .andExpect(jsonPath("$.fields[0].example").value("Ana Silva"))
+                .andExpect(jsonPath("$.fields[1].required").value(false));
+    }
+
+    @Test
+    @DisplayName("POST /preview answers the filled subject and text, 200, as the admin's own e-mail")
+    void preview() throws Exception {
+        BreachNoticeRequest expected = new BreachNoticeRequest(
+                "Assunto", "Olá, {{nome_titular}}. Em {{data_descoberta}}", java.util.Map.of("data_descoberta", "10/11/2026"),
+                null, null, null);
+        given(breachNotices.preview(eq(expected), eq(ADMIN_ID)))
+                .willReturn(new com.akpedia.server.dto.BreachNoticePreview("Assunto", "Olá, Admin. Em 10/11/2026"));
+
+        mvc.perform(post("/api/v1/admin/breach-notices/preview").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"subject": "Assunto", "body": "Olá, {{nome_titular}}. Em {{data_descoberta}}",
+                         "fields": {"data_descoberta": "10/11/2026"}}
+                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subject").value("Assunto"))
+                .andExpect(jsonPath("$.body").value("Olá, Admin. Em 10/11/2026"));
+    }
+
+    @Test
+    @DisplayName("POST /preview of an invalid notice is 400 invalid_breach_notice")
+    void previewInvalidIs400() throws Exception {
+        given(breachNotices.preview(any(), eq(ADMIN_ID)))
+                .willThrow(new InvalidBreachNoticeException("Campos obrigatorios em branco: data_descoberta."));
+
+        mvc.perform(post("/api/v1/admin/breach-notices/preview").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_breach_notice"));
     }
 
     @Test
     @DisplayName("POST reads snake_case, answers 201 with the counts and the failures")
     void sendReadsSnakeCase() throws Exception {
-        BreachNoticeRequest expected = new BreachNoticeRequest("Assunto", "Texto", null, List.of(10L, 11L), true);
+        BreachNoticeRequest expected = new BreachNoticeRequest(
+                "Assunto", "Em {{data_descoberta}}", java.util.Map.of("data_descoberta", "10/11/2026"),
+                null, List.of(10L, 11L), true);
         given(breachNotices.send(eq(expected), eq(ADMIN_ID))).willReturn(new BreachNoticeSendResult(5L, 2, 1, 1,
                 List.of(new BreachNoticeSendResult.Failure(11L, "b@x.com", "REJECTED", "REJECTED: 550"))));
 
         mvc.perform(post("/api/v1/admin/breach-notices").contentType(MediaType.APPLICATION_JSON).content("""
-                        {"subject": "Assunto", "body": "Texto", "user_ids": [10, 11], "anpd_informed": true}
+                        {"subject": "Assunto", "body": "Em {{data_descoberta}}", "fields": {"data_descoberta": "10/11/2026"},
+                         "user_ids": [10, 11], "anpd_informed": true}
                         """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(5))
@@ -104,7 +144,7 @@ class AdminBreachNoticeControllerTest {
                         """))
                 .andExpect(status().isCreated());
 
-        then(breachNotices).should().send(new BreachNoticeRequest("Assunto", "Texto", true, null, true), ADMIN_ID);
+        then(breachNotices).should().send(new BreachNoticeRequest("Assunto", "Texto", null, true, null, true), ADMIN_ID);
     }
 
     @Test
