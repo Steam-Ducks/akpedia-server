@@ -22,6 +22,7 @@ import com.akpedia.server.entity.User;
 import com.akpedia.server.exception.LastAdminException;
 import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.repository.AuditLogRepository;
+import com.akpedia.server.repository.BreachNoticeRecipientRepository;
 import com.akpedia.server.repository.ProfileChangeRequestRepository;
 import com.akpedia.server.repository.UserRepository;
 
@@ -50,6 +51,7 @@ public class AccountDeletionService {
     private final UserRepository users;
     private final AuditLogRepository auditLogs;
     private final ProfileChangeRequestRepository changeRequests;
+    private final BreachNoticeRecipientRepository breachRecipients;
     private final AuditService audit;
     private final TransactionTemplate transaction;
     private final Clock clock;
@@ -57,18 +59,22 @@ public class AccountDeletionService {
     @Autowired
     public AccountDeletionService(AccountDeletionLog deletions, KeycloakAdminClient keycloak,
             UserRepository users, AuditLogRepository auditLogs, ProfileChangeRequestRepository changeRequests,
-            AuditService audit, PlatformTransactionManager transactionManager) {
-        this(deletions, keycloak, users, auditLogs, changeRequests, audit, transactionManager, Clock.systemUTC());
+            BreachNoticeRecipientRepository breachRecipients, AuditService audit,
+            PlatformTransactionManager transactionManager) {
+        this(deletions, keycloak, users, auditLogs, changeRequests, breachRecipients, audit, transactionManager,
+                Clock.systemUTC());
     }
 
     AccountDeletionService(AccountDeletionLog deletions, KeycloakAdminClient keycloak,
             UserRepository users, AuditLogRepository auditLogs, ProfileChangeRequestRepository changeRequests,
-            AuditService audit, PlatformTransactionManager transactionManager, Clock clock) {
+            BreachNoticeRecipientRepository breachRecipients, AuditService audit,
+            PlatformTransactionManager transactionManager, Clock clock) {
         this.deletions = deletions;
         this.keycloak = keycloak;
         this.users = users;
         this.auditLogs = auditLogs;
         this.changeRequests = changeRequests;
+        this.breachRecipients = breachRecipients;
         this.audit = audit;
         this.transaction = new TransactionTemplate(transactionManager);
         this.clock = clock;
@@ -101,8 +107,8 @@ public class AccountDeletionService {
 
     /**
      * Anonymizes the account's row, if it is still there, and pseudonymizes the audit entries by
-     * and about it, and deletes its e-mail and CPF change requests. Safe to run again: what is
-     * already done stays as it is.
+     * and about it, deletes its e-mail and CPF change requests, and takes its address off the breach
+     * notices it received. Safe to run again: what is already done stays as it is.
      *
      * @return the row's id, or {@code null} if the account has none
      */
@@ -134,6 +140,8 @@ public class AccountDeletionService {
             // took as an admin stay, without its name.
             changeRequests.deleteByUserId(anonymized);
             changeRequests.clearDecidedBy(anonymized);
+            // The breach notices stay as the record that the user was notified, without the address.
+            users.findById(anonymized).ifPresent(row -> breachRecipients.replaceEmailOf(row.getId(), row.getEmail()));
         }
         auditLogs.stripTargetEmail(keycloakId);
         for (String email : emails) {

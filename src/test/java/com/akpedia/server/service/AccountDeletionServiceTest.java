@@ -39,14 +39,18 @@ import com.akpedia.server.dto.AccountDeletionReplayResponse;
 import com.akpedia.server.dto.AuditEntry;
 import com.akpedia.server.dto.AuditKind;
 import com.akpedia.server.entity.AuditLog;
+import com.akpedia.server.entity.BreachNotice;
+import com.akpedia.server.entity.BreachNoticeRecipient;
 import com.akpedia.server.entity.ProfileChangeRequest;
 import com.akpedia.server.entity.Sector;
 import com.akpedia.server.entity.User;
+import com.akpedia.server.entity.enums.BreachNoticeRecipientStatus;
 import com.akpedia.server.entity.enums.ChangeRequestStatus;
 import com.akpedia.server.entity.enums.ProfileField;
 import com.akpedia.server.exception.KeycloakUnavailableException;
 import com.akpedia.server.exception.LastAdminException;
 import com.akpedia.server.repository.AuditLogRepository;
+import com.akpedia.server.repository.BreachNoticeRecipientRepository;
 import com.akpedia.server.repository.ProfileChangeRequestRepository;
 import com.akpedia.server.repository.UserRepository;
 import com.akpedia.server.security.KeycloakAccount;
@@ -90,6 +94,9 @@ class AccountDeletionServiceTest {
 
     @Autowired
     private ProfileChangeRequestRepository changeRequests;
+
+    @Autowired
+    private BreachNoticeRecipientRepository breachRecipients;
 
     @Autowired
     private TestEntityManager entityManager;
@@ -288,6 +295,26 @@ class AccountDeletionServiceTest {
         assertThat(kept.getDecidedBy()).isNull();
         assertThat(kept.getStatus()).isEqualTo(ChangeRequestStatus.REJECTED);
         assertThat(kept.getDecisionNote()).isEqualTo("Confira o CPF");
+    }
+
+    @Test
+    @DisplayName("the breach notices the account received stay, as proof it was notified, without its address")
+    void anonymizesBreachNoticeRecipients() {
+        User bia = persistUser("Bia Lima", UUID.randomUUID().toString());
+        BreachNotice notice = entityManager.persist(new BreachNotice(bia, "Assunto", "Texto", true));
+        BreachNoticeRecipient toAna = entityManager.persist(new BreachNoticeRecipient(notice, ana, ana.getEmail()));
+        toAna.markSent();
+        BreachNoticeRecipient toBia = entityManager.persist(new BreachNoticeRecipient(notice, bia, bia.getEmail()));
+        entityManager.flush();
+        anaIsCalling();
+
+        accounts.deleteOwnAccount(ana.getKeycloakId());
+
+        entityManager.clear();
+        BreachNoticeRecipient kept = breachRecipients.findById(toAna.getId()).orElseThrow();
+        assertThat(kept.getEmail()).isEqualTo("removido-" + ana.getId() + "@removido.invalid");
+        assertThat(kept.getStatus()).isEqualTo(BreachNoticeRecipientStatus.SENT);
+        assertThat(breachRecipients.findById(toBia.getId()).orElseThrow().getEmail()).isEqualTo(bia.getEmail());
     }
 
     @Test

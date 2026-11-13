@@ -17,8 +17,6 @@ import com.akpedia.server.client.EmbeddingClient;
 import com.akpedia.server.config.SearchProperties;
 import com.akpedia.server.dto.QueryEmbeddingResponse;
 import com.akpedia.server.dto.SearchResult;
-import com.akpedia.server.entity.Embedding;
-import com.akpedia.server.exception.EmbeddingException;
 import com.akpedia.server.exception.InvalidSearchRequestException;
 import com.akpedia.server.repository.EmbeddingRepository;
 
@@ -89,10 +87,10 @@ public class SearchService {
         }
 
         QueryEmbeddingResponse embedding = embeddingClient.embedQuery(query.trim());
-        validateEmbedding(embedding);
+        QueryVectors.validate(embedding);
 
         return embeddings.search(
-                        vectorLiteral(embedding.embedding()),
+                        QueryVectors.literal(embedding.embedding()),
                         embedding.model().name(),
                         embedding.model().dimensions(),
                         properties.minimumScore(),
@@ -131,26 +129,6 @@ public class SearchService {
         if (!hasQuery && !hasCategories) {
             throw new InvalidSearchRequestException("q or categoryIds must be present.");
         }
-    }
-
-    private static void validateEmbedding(QueryEmbeddingResponse response) {
-        if (response == null || response.model() == null || response.embedding() == null) {
-            throw new EmbeddingException("The embedding service returned an incomplete query vector.");
-        }
-        if (response.model().dimensions() != Embedding.VECTOR_DIMENSIONS
-                || response.embedding().size() != Embedding.VECTOR_DIMENSIONS) {
-            throw new EmbeddingException(
-                    "The query vector dimensions do not match the indexed vectors.");
-        }
-        if (response.model().name() == null || response.model().name().isBlank()) {
-            throw new EmbeddingException("The query vector has no model name.");
-        }
-    }
-
-    private static String vectorLiteral(List<Float> values) {
-        return values.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(",", "[", "]"));
     }
 
     /**

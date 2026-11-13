@@ -1,0 +1,35 @@
+Olá, {{nome_titular}}.
+
+Estamos entrando em contato para informar sobre um incidente de segurança que envolveu dados pessoais seus cadastrados no Akpedia.
+
+O que aconteceu
+Em {{data_descoberta}}, identificamos {{descricao_incidente}}. O incidente ocorreu em {{data_incidente}}.
+
+Quais dados foram envolvidos
+Os dados pessoais seus que podem ter sido expostos são: {{dados_afetados}}
+{{dados_nao_envolvidos}}
+
+Quais são os riscos
+Com esses dados, terceiros podem tentar se passar por você ou pela empresa, por exemplo enviando e-mails falsos (phishing) que pedem senhas, códigos ou pagamentos, ou tentando usar seu CPF em cadastros.
+
+Como seus dados eram protegidos
+{{medidas_protecao}}
+
+O que já fizemos
+Comunicamos o incidente à Autoridade Nacional de Proteção de Dados (ANPD) em {{data_comunicacao_anpd}}, como determina a Lei Geral de Proteção de Dados (Lei nº 13.709/2018).
+Também estamos adotando as seguintes medidas: {{medidas_adotadas}}
+{{motivo_atraso}}
+
+O que recomendamos que você faça
+- Desconfie de mensagens que peçam sua senha, códigos de verificação ou dados pessoais, mesmo que pareçam vir da empresa. Nós nunca pedimos sua senha por e-mail.
+- Troque sua senha do Akpedia se ela for igual à de outros serviços.
+- Se notar uso indevido do seu CPF, você pode consultar contas e operações em seu nome no Registrato, serviço gratuito do Banco Central.
+
+Contato
+Se tiver dúvidas ou quiser exercer seus direitos como titular de dados, fale com {{nome_encarregado}}, encarregado(a) pelo tratamento de dados pessoais, pelo e-mail {{email_encarregado}}.
+
+Este e-mail foi enviado de um endereço automático, e respostas a ele não são lidas.
+
+Lamentamos o ocorrido e seguimos à disposição.
+
+Equipe Akpedia

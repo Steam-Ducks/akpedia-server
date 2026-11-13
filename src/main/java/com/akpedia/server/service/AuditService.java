@@ -63,12 +63,14 @@ public class AuditService {
     public static final String PROFILE_CHANGE_APPROVED = "PROFILE_CHANGE_APPROVED";
     public static final String PROFILE_CHANGE_REJECTED = "PROFILE_CHANGE_REJECTED";
     public static final String SECTOR_CATEGORIES_CHANGED = "SECTOR_CATEGORIES_CHANGED";
+    public static final String BREACH_NOTICE_SENT = "BREACH_NOTICE_SENT";
 
     public static final String TERMS_VERSION = "TERMS_VERSION";
     public static final String DOCUMENT = "DOCUMENT";
     public static final String USER = "USER";
     public static final String PROFILE_CHANGE_REQUEST = "PROFILE_CHANGE_REQUEST";
     public static final String SECTOR = "SECTOR";
+    public static final String BREACH_NOTICE = "BREACH_NOTICE";
 
     static final int DEFAULT_PAGE_SIZE = 50;
     static final int MAX_PAGE_SIZE = 200;

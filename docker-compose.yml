@@ -186,6 +186,11 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:8000}
       EMBEDDING_CONNECT_TIMEOUT: ${EMBEDDING_CONNECT_TIMEOUT:-2s}
       EMBEDDING_READ_TIMEOUT: ${EMBEDDING_READ_TIMEOUT:-30s}
+      # Chat (same akpedia-ml): the answer waits on its language model, up to 120s there.
+      CHAT_MINIMUM_SCORE: ${CHAT_MINIMUM_SCORE:-0.80}
+      CHAT_MAX_PASSAGES: ${CHAT_MAX_PASSAGES:-6}
+      CHAT_CONNECT_TIMEOUT: ${CHAT_CONNECT_TIMEOUT:-2s}
+      CHAT_READ_TIMEOUT: ${CHAT_READ_TIMEOUT:-150s}
       # Gotenberg (document to PDF conversion). Comes up as the sibling service above,
       # reached by its service name on the compose network.
       GOTENBERG_BASE_URL: ${GOTENBERG_BASE_URL:-http://gotenberg:3000}

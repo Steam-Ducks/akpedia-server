@@ -40,11 +40,28 @@ server {
     proxy_busy_buffers_size 256k;
   }
 
+  # The breach notice is e-mailed to every user before the answer goes out, with how it went for
+  # each: hundreds of messages, more with the SMTP server slow. Cutting it at 120s would leave the
+  # admin with a 504 for a notice that is still being sent.
+  location = /api/v1/admin/breach-notices {
+    set $server ${SERVER_UPSTREAM};
+    proxy_pass http://$server;
+    proxy_read_timeout 600s;
+  }
+
   location /api/ {
     set $server ${SERVER_UPSTREAM};
     proxy_pass http://$server;
     # Document processing and uploads can take a while.
     proxy_read_timeout 120s;
+  }
+
+  # The chat waits on akpedia-ml's language model, up to CHAT_READ_TIMEOUT (150s) on the server:
+  # past /api/'s 120s, nginx would cut an answer that was still coming.
+  location = /api/v1/chat {
+    set $server ${SERVER_UPSTREAM};
+    proxy_pass http://$server;
+    proxy_read_timeout 180s;
   }
 
   location ^~ /health {

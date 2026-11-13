@@ -530,7 +530,7 @@ curl -X POST http://localhost:8080/api/v1/admin/account-deletions/replay -H "Aut
   para o log, nunca para a resposta.
 - **Eventos**: `TERMS_ACCEPTED`, `TERMS_DECLINED`, `TERMS_PUBLISHED`, `DOCUMENT_UPLOADED`,
   `DOCUMENT_APPROVED`, `DOCUMENT_REJECTED`, `USER_ROLES_CHANGED`, `USER_ENABLED`, `USER_DISABLED`,
-  `USER_CREATED` e `ACCOUNT_DELETED`,
+  `USER_CREATED`, `ACCOUNT_DELETED` e `BREACH_NOTICE_SENT`,
   com o que foi afetado (`entity_type`, `entity_id`) e os detalhes. São gravados na mesma transação
   da ação: se ela falha, o evento não fica.
 
@@ -538,6 +538,101 @@ curl -X POST http://localhost:8080/api/v1/admin/account-deletions/replay -H "Aut
 |------|-----------|
 | `GET /api/v1/admin/audit?kind=EVENT&action=&user=&from=&to=&page=0&size=50` | Página da auditoria, da mais nova para a mais antiga. `kind` é `EVENT` (padrão), `REQUEST` ou `ALL`; `user` é parte do email; `from` e `to` são data e hora ISO-8601, inclusivos. `size` até 200. Cada registro traz `user_email` e `user_name`, ou, se a conta foi excluída, os dois `null` e `user_pseudonym` (`Usuário removido #<id>`, o mesmo em todos os registros dela) |
 | `GET /api/v1/admin/audit/actions` | Os eventos já registrados, em ordem alfabética, para o filtro |
+
+#### Aviso de vazamento de dados (admin)
+
+Quando há um incidente de segurança com dados pessoais (LGPD, art. 48), o admin envia por e-mail
+(`MailService`) um aviso aos usuários afetados, dizendo que a ANPD foi comunicada e quais medidas
+estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi comunicada**
+(`anpd_informed: true`); sem ela a rota responde `422` e nada é enviado nem gravado.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/breach-notices/template` | O modelo do documento de aviso: `subject`, `body` com os campos `{{campo}}`, e `fields`, cada campo com `name`, `required`, `automatic`, `description` e `example` |
+| `POST /api/v1/admin/breach-notices/preview` | O e-mail como o destinatário vai receber, com o nome do próprio admin no lugar do dele. Valida igual ao envio, mas não envia nem grava nada e não exige `anpd_informed`, para montar o texto enquanto a ANPD é comunicada |
+| `POST /api/v1/admin/breach-notices` | Envia o aviso. Responde `201` com quantos saíram e quais falharam |
+| `GET /api/v1/admin/breach-notices?page=0&size=20` | Página dos avisos enviados, do mais novo para o mais antigo, com as contagens. `size` até 100 |
+| `GET /api/v1/admin/breach-notices/{id}` | O aviso como foi enviado, com o status de cada destinatário |
+
+```json
+// POST /api/v1/admin/breach-notices
+{
+  "subject": "Aviso importante: incidente de segurança envolvendo seus dados no Akpedia",
+  "body": "Olá, {{nome_titular}}. ...",   // o body do template, normalmente sem mudança
+  "fields": {
+    "data_descoberta": "10/11/2026",
+    "data_incidente": "08/11 a 09/11/2026",
+    "descricao_incidente": "acesso não autorizado a uma cópia da base de usuários",
+    "dados_afetados": "Nome, e-mail e CPF",
+    "medidas_protecao": "Servidor com acesso restrito",
+    "data_comunicacao_anpd": "11/11/2026",
+    "medidas_adotadas": "Bloqueio do acesso indevido",
+    "nome_encarregado": "...",
+    "email_encarregado": "..."
+  },
+  "all_users": true,            // ou "user_ids": [10, 11] -- um dos dois
+  "anpd_informed": true
+}
+
+// 201
+{
+  "id": 5, "total": 120, "sent": 119, "failed": 1,
+  "failures": [
+    { "user_id": 11, "email": "bruno@akaer.com.br", "reason": "REJECTED", "error": "REJECTED: 550 no such user" }
+  ]
+}
+```
+
+- **Destinatários**: usuários de `users` ligados a uma conta do Keycloak e não excluídos, inclusive
+  os desativados (os dados deles também estão no sistema). Com `user_ids`, um id que não existe,
+  foi excluído ou não tem conta no Keycloak é recusado (`400`, com os ids na mensagem).
+- **Texto e campos**: o modelo é o do documento de aviso de vazamento, em
+  `src/main/resources/breach-notice/` (texto puro, sem negrito, links nem tabelas). Os campos
+  `{{campo}}` são preenchidos no envio:
+  - `{{nome_titular}}` é automático: cada destinatário recebe um e-mail só dele, com o próprio nome.
+    Mandá-lo em `fields` é recusado.
+  - Os demais vêm em `fields`. Um obrigatório em branco é recusado (`400`, com todos os que faltam);
+    os opcionais (`dados_nao_envolvidos`, `motivo_atraso`) em branco tiram a linha inteira do e-mail.
+  - O admin pode reescrever o texto em volta dos campos, mas **não pode tirar um obrigatório**: cada um
+    corresponde a um item do art. 9º da Resolução CD/ANPD nº 15/2024 (o que aconteceu, quais dados,
+    as medidas de proteção, a data da comunicação à ANPD, as medidas adotadas, o contato do
+    encarregado), e o `{{nome_titular}}` à comunicação individual do § 1º. Um texto sem algum deles é
+    recusado (`400`), mesmo com o valor em `fields`.
+  - Um campo que o modelo não tem, em `fields` ou escrito no texto, é recusado. Um valor pode ter
+    várias linhas (como `dados_afetados`, "um por linha"), mas não `{{` nem `}}`; uma lista assim
+    começa na linha de baixo da frase ("...são:" e, embaixo, um item por linha).
+  - Fica gravado o texto preenchido com `{{nome_titular}}` no lugar do nome: cada linha de
+    destinatário já diz quem ele é.
+
+  Assunto de uma linha só, até 200 caracteres; texto até 50.000, já preenchido.
+- **Registro**: o aviso (`breach_notices`) e uma linha por destinatário (`breach_notice_recipients`)
+  são gravados como `PENDING` antes do envio; cada linha vira `SENT` ou `FAILED` (com o motivo em
+  `error`) depois. Um envio interrompido no meio deixa as linhas restantes `PENDING`, visíveis no
+  aviso. Um e-mail que falha não impede os outros. Na auditoria fica `BREACH_NOTICE_SENT`, com as
+  contagens.
+- **Sem envio duplicado**: enquanto um aviso está sendo enviado, outro envio responde `409
+  breach_notice_in_progress`; o mesmo aviso (assunto e texto iguais) já entregue a algum destes
+  usuários nos últimos 30 minutos responde `409 breach_notice_duplicate`. Isso cobre o segundo
+  clique e a tela tentando de novo. Reenviar o mesmo texto só para quem falhou (`user_ids`) é
+  permitido. Um envio interrompido no meio deixa de bloquear depois de 30 minutos.
+- O envio é feito antes da resposta, que já traz o resultado de cada e-mail; por isso o nginx dá
+  600s para `/api/v1/admin/breach-notices` (o resto de `/api/` tem 120s).
+- Os avisos não são alterados nem apagados. Se o usuário excluir a conta, as linhas dele ficam
+  (como registro de que foi avisado), mas com o e-mail anonimizado.
+
+> **Decisões pendentes do documento**, fora deste server por enquanto: quem é o encarregado (DPO) e
+> o canal dele (obrigatórios para o envio); onde publicar o aviso para quem não tem e-mail válido
+> (art. 9º, § 3º, por 3 meses); a declaração à ANPD (art. 9º, § 4º), que pode partir do registro de
+> envio (`GET /api/v1/admin/breach-notices/{id}`); e o prazo em dobro para agente de pequeno porte.
+> O aviso deve chegar ao titular em até 3 dias úteis (Resolução CD/ANPD nº 15/2024, art. 9º).
+
+| Situação                                                         | Status | `code`                    |
+|------------------------------------------------------------------|--------|---------------------------|
+| `anpd_informed` diferente de `true`                              | 422    | `anpd_not_informed`       |
+| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, `nome_titular` em `fields`, nenhum ou os dois entre `all_users` e `user_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
+| outro aviso sendo enviado agora                                  | 409    | `breach_notice_in_progress` |
+| o mesmo aviso já entregue a algum destes usuários nos últimos 30 min | 409 | `breach_notice_duplicate` |
+| aviso inexistente                                                | 404    | `breach_notice_not_found` |
 
 ### Serviço de embeddings
 
@@ -562,6 +657,21 @@ em outra rede Docker.
 | `SEARCH_MAX_LIMIT`        | `50`    | Maior `limit` que a rota aceita (acima disso, 400)               |
 | `SEARCH_MINIMUM_SCORE`    | `0.85`  | Similaridade mínima para um trecho valer um resultado            |
 | `SEARCH_SNIPPET_LENGTH`   | `300`   | Tamanho máximo do trecho devolvido, em caracteres (ver [Busca](#busca)) |
+
+### Chat
+
+O chat usa o mesmo akpedia-ml (`EMBEDDING_BASE_URL`), com timeouts próprios: o modelo de linguagem
+leva bem mais que um vetor (o akpedia-ml espera até 120s por ele, `LLM_TIMEOUT_SECONDS`).
+
+| Variável               | Default | Para que serve                                                         |
+|------------------------|---------|------------------------------------------------------------------------|
+| `CHAT_MINIMUM_SCORE`   | `0.80`  | Similaridade mínima para um trecho ir para o modelo                     |
+| `CHAT_MAX_PASSAGES`    | `6`     | Quantos trechos, no máximo, vão para o modelo (o mais próximo primeiro) |
+| `CHAT_CONNECT_TIMEOUT` | `2s`    | Tempo máximo para abrir a conexão com o akpedia-ml                      |
+| `CHAT_READ_TIMEOUT`    | `150s`  | Tempo máximo para a resposta; acima do timeout do LLM no akpedia-ml     |
+
+O nginx dá 180s para `/api/v1/chat` (o resto de `/api/` tem 120s), para não cortar uma resposta
+que ainda está vindo.
 
 ### Conversão de documentos (Gotenberg)
 
@@ -1495,6 +1605,50 @@ de folga.
 | nem `q` nem `categoryIds`, ou `limit` fora do teto             | 400    | `invalid_request`          |
 | akpedia-ml respondeu algo que não dá para usar                 | 502    | `embedding_service_error`  |
 | akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
+
+---
+
+## Chat
+
+`POST /api/v1/chat` responde uma pergunta com uma resposta curta e as fontes, escrita só a partir
+dos documentos que o usuário pode ver.
+
+```json
+// POST /api/v1/chat
+{ "question": "Qual o prazo de reembolso de despesas?" }
+
+// 200
+{
+  "answer": "O reembolso é feito em até 7 dias corridos [1].",
+  "found": true,
+  "sources": [ { "document_id": 42, "name": "Manual de Reembolso", "category": "Financeiro" } ]
+}
+```
+
+1. A pergunta vira vetor no akpedia-ml, como na busca.
+2. O server procura os trechos mais próximos (`EmbeddingRepository.findTopChunks`) entre os
+   documentos **aprovados e indexados** nas categorias que o setor do usuário vê, as mesmas da
+   busca. Diferente da busca, vários trechos do mesmo documento podem entrar. Ficam até
+   `CHAT_MAX_PASSAGES`, nenhum abaixo de `CHAT_MINIMUM_SCORE`. A comparação é exata, sem o índice
+   HNSW: ele filtra depois de achar os vizinhos mais próximos, e trechos de documentos em revisão ou
+   de categorias proibidas na frente esconderiam os válidos.
+3. **Sem nenhum trecho acima do limite**, a resposta é `found: false` com `sources` vazio, **sem
+   chamar o modelo**. Um usuário cujo setor não vê nenhuma categoria nem chega ao akpedia-ml.
+4. Com trechos, o akpedia-ml (`POST /api/v1/chat/answer`) escreve a resposta, marcando cada
+   afirmação com o número do trecho (`[1]`). Ele não lê o banco nem checa permissões: só vê o que
+   o server mandou.
+5. `sources` são os documentos citados, na ordem da primeira citação, montados a partir dos trechos
+   enviados: um id que o akpedia-ml devolva e não estava entre eles é descartado.
+
+`found` também volta `false` quando os trechos não respondem a pergunta. A pergunta não é gravada: a
+auditoria guarda a requisição, nunca o corpo.
+
+#### Status de erro
+
+| Situação                                                       | Status | `code`             |
+|----------------------------------------------------------------|--------|--------------------|
+| `question` ausente, em branco ou com mais de 1000 caracteres   | 400    | `invalid_request`  |
+| akpedia-ml fora do ar, além do timeout ou o modelo falhou      | 503    | `chat_unavailable` |
 
 ---
 
