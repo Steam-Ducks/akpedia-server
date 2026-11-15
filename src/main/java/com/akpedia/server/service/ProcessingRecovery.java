@@ -103,12 +103,7 @@ public class ProcessingRecovery implements SchedulingConfigurer {
             if (message.getElapsedTimeSinceLastDelivery().compareTo(properties.recoveryIdle()) < 0) {
                 continue;
             }
-            String messageId = message.getIdAsString();
-            if (message.getTotalDeliveryCount() >= properties.maxDeliveries()) {
-                giveUp(messageId);
-            } else {
-                redeliver(messageId);
-            }
+            handle(message);
             handled++;
         }
         if (handled > 0) {
@@ -118,12 +113,32 @@ public class ProcessingRecovery implements SchedulingConfigurer {
         return handled;
     }
 
-    /**
-     * Claims the stuck message, publishes its document as a new message, and acknowledges the
-     * claimed one: from here on the new message is the one tracked, with its own fresh delivery
-     * count.
-     */
-    private void redeliver(String messageId) {
+    private void handle(PendingMessage message) {
+        String messageId = message.getIdAsString();
+        List<MapRecord<String, String, String>> entries;
+        try {
+            entries = streamOps().range(properties.stream(), Range.just(messageId));
+        } catch (DataAccessException e) {
+            LOG.warn("Nao foi possivel ler a mensagem {} em {}; tentando na proxima rodada.",
+                    messageId, properties.stream(), e);
+            return;
+        }
+        MapRecord<String, String, String> entry = entries.isEmpty() ? null : entries.get(0);
+        Long documentId = entry == null ? null : documentIdOf(entry);
+        if (documentId == null) {
+            queue.acknowledge(messageId);
+            return;
+        }
+
+        long attempts = attemptsOf(entry) + message.getTotalDeliveryCount();
+        if (attempts >= properties.maxDeliveries()) {
+            giveUp(messageId, documentId);
+        } else {
+            redeliver(messageId, documentId, (int) attempts);
+        }
+    }
+
+    private void redeliver(String messageId, Long documentId, int attempts) {
         List<MapRecord<String, String, String>> claimed;
         try {
             claimed = streamOps().claim(properties.stream(), properties.group(), RECOVERY_CONSUMER,
@@ -134,35 +149,14 @@ public class ProcessingRecovery implements SchedulingConfigurer {
             return;
         }
         if (claimed.isEmpty()) {
-            // Claimed, acknowledged or trimmed by something else between the scan and this call.
             return;
         }
-
-        Long documentId = documentIdOf(claimed.get(0));
-        if (documentId == null) {
+        if (queue.publish(documentId, attempts)) {
             queue.acknowledge(messageId);
-            return;
         }
-        queue.publish(documentId);
-        queue.acknowledge(messageId);
     }
 
-    /** Marks the document FAILED and acknowledges the message, without claiming it. */
-    private void giveUp(String messageId) {
-        List<MapRecord<String, String, String>> entries;
-        try {
-            entries = streamOps().range(properties.stream(), Range.just(messageId));
-        } catch (DataAccessException e) {
-            LOG.warn("Nao foi possivel ler a mensagem {} em {}; tentando na proxima rodada.",
-                    messageId, properties.stream(), e);
-            return;
-        }
-        Long documentId = entries.isEmpty() ? null : documentIdOf(entries.get(0));
-        if (documentId == null) {
-            queue.acknowledge(messageId);
-            return;
-        }
-
+    private void giveUp(String messageId, Long documentId) {
         LOG.warn("Mensagem {} do documento {} excedeu o limite de {} entregas.",
                 messageId, documentId, properties.maxDeliveries());
         try {
@@ -170,6 +164,18 @@ public class ProcessingRecovery implements SchedulingConfigurer {
                     GIVE_UP_CODE, GIVE_UP_MESSAGE, messageId));
         } catch (DocumentNotFoundException e) {
             LOG.warn("Documento {} nao existe mais; mensagem {} ja foi confirmada.", documentId, messageId);
+        }
+    }
+
+    private long attemptsOf(MapRecord<String, String, String> record) {
+        String value = record.getValue().get(ProcessingQueue.ATTEMPT_FIELD);
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 

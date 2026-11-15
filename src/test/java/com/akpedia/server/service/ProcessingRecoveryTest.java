@@ -76,6 +76,12 @@ class ProcessingRecoveryTest {
                 .withId(RecordId.of(messageId));
     }
 
+    private static MapRecord<String, String, String> recordWithAttempt(String messageId, Long documentId, int attempt) {
+        return MapRecord.<String, String, String>create(STREAM,
+                Map.of("documentId", documentId.toString(), "attempt", Integer.toString(attempt)))
+                .withId(RecordId.of(messageId));
+    }
+
     @Test
     @DisplayName("with nothing pending, nothing is touched")
     void nothingPending() {
@@ -101,14 +107,60 @@ class ProcessingRecoveryTest {
     void redeliversAnIdleMessageUnderTheLimit() {
         given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L)))
                 .willReturn(new PendingMessages(GROUP, List.of(pending(MESSAGE_ID, Duration.ofMinutes(15), 1))));
+        given(stream.range(eq(STREAM), any())).willReturn(List.of(recordOf(MESSAGE_ID, 7L)));
         given(stream.claim(eq(STREAM), eq(GROUP), eq(ProcessingRecovery.RECOVERY_CONSUMER), any(XClaimOptions.class)))
                 .willReturn(List.of(recordOf(MESSAGE_ID, 7L)));
+        given(queue.publish(7L, 1)).willReturn(true);
 
         assertThat(recovery.recover()).isEqualTo(1);
 
-        verify(queue).publish(7L);
+        verify(queue).publish(7L, 1);
         verify(queue).acknowledge(MESSAGE_ID);
         verifyNoInteractions(indexingService);
+    }
+
+    @Test
+    @DisplayName("the attempts of earlier messages count toward the limit, so a crashing document is eventually given up")
+    void attemptsCarriedOverCountTowardTheLimit() {
+        given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L)))
+                .willReturn(new PendingMessages(GROUP, List.of(pending(MESSAGE_ID, Duration.ofMinutes(15), 1))));
+        given(stream.range(eq(STREAM), any())).willReturn(List.of(recordWithAttempt(MESSAGE_ID, 7L, 2)));
+
+        recovery.recover();
+
+        verify(indexingService).recordFailure(eq(7L), any());
+        verify(stream, never()).claim(any(), any(), any(), any(XClaimOptions.class));
+        verify(queue, never()).publish(any(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    @DisplayName("a redelivery carries the attempts used so far")
+    void redeliveryCarriesAttempts() {
+        given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L)))
+                .willReturn(new PendingMessages(GROUP, List.of(pending(MESSAGE_ID, Duration.ofMinutes(15), 1))));
+        given(stream.range(eq(STREAM), any())).willReturn(List.of(recordWithAttempt(MESSAGE_ID, 7L, 1)));
+        given(stream.claim(eq(STREAM), eq(GROUP), eq(ProcessingRecovery.RECOVERY_CONSUMER), any(XClaimOptions.class)))
+                .willReturn(List.of(recordOf(MESSAGE_ID, 7L)));
+        given(queue.publish(7L, 2)).willReturn(true);
+
+        recovery.recover();
+
+        verify(queue).publish(7L, 2);
+    }
+
+    @Test
+    @DisplayName("when publishing fails the old message is not acknowledged, so it is not lost")
+    void failedPublishKeepsTheMessagePending() {
+        given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L)))
+                .willReturn(new PendingMessages(GROUP, List.of(pending(MESSAGE_ID, Duration.ofMinutes(15), 1))));
+        given(stream.range(eq(STREAM), any())).willReturn(List.of(recordOf(MESSAGE_ID, 7L)));
+        given(stream.claim(eq(STREAM), eq(GROUP), eq(ProcessingRecovery.RECOVERY_CONSUMER), any(XClaimOptions.class)))
+                .willReturn(List.of(recordOf(MESSAGE_ID, 7L)));
+        given(queue.publish(7L, 1)).willReturn(false);
+
+        recovery.recover();
+
+        verify(queue, never()).acknowledge(any());
     }
 
     @Test
@@ -121,7 +173,7 @@ class ProcessingRecoveryTest {
         recovery.recover();
 
         verify(stream, never()).claim(any(), any(), any(), any(XClaimOptions.class));
-        verify(queue, never()).publish(any());
+        verify(queue, never()).publish(any(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
@@ -156,6 +208,7 @@ class ProcessingRecoveryTest {
     void aRaceThatLosesTheClaimPublishesNothing() {
         given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L)))
                 .willReturn(new PendingMessages(GROUP, List.of(pending(MESSAGE_ID, Duration.ofMinutes(15), 1))));
+        given(stream.range(eq(STREAM), any())).willReturn(List.of(recordOf(MESSAGE_ID, 7L)));
         given(stream.claim(eq(STREAM), eq(GROUP), eq(ProcessingRecovery.RECOVERY_CONSUMER), any(XClaimOptions.class)))
                 .willReturn(List.of());
 
@@ -169,12 +222,11 @@ class ProcessingRecoveryTest {
     void aClaimedMessageWithNoDocumentIdIsOnlyAcknowledged() {
         given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L)))
                 .willReturn(new PendingMessages(GROUP, List.of(pending(MESSAGE_ID, Duration.ofMinutes(15), 1))));
-        given(stream.claim(eq(STREAM), eq(GROUP), eq(ProcessingRecovery.RECOVERY_CONSUMER), any(XClaimOptions.class)))
-                .willReturn(List.of(recordOf(MESSAGE_ID, null)));
+        given(stream.range(eq(STREAM), any())).willReturn(List.of(recordOf(MESSAGE_ID, null)));
 
         recovery.recover();
 
-        verify(queue, never()).publish(any());
+        verify(queue, never()).publish(any(), org.mockito.ArgumentMatchers.anyInt());
         verify(queue).acknowledge(MESSAGE_ID);
     }
 
@@ -184,14 +236,17 @@ class ProcessingRecoveryTest {
         given(stream.pending(eq(STREAM), eq(GROUP), any(), eq(50L))).willReturn(new PendingMessages(GROUP, List.of(
                 pending("1-0", Duration.ofMinutes(15), 1),
                 pending("2-0", Duration.ofMinutes(15), 1))));
+        given(stream.range(eq(STREAM), any()))
+                .willReturn(List.of(recordOf("1-0", 1L)))
+                .willReturn(List.of(recordOf("2-0", 2L)));
         given(stream.claim(eq(STREAM), eq(GROUP), eq(ProcessingRecovery.RECOVERY_CONSUMER), any(XClaimOptions.class)))
                 .willReturn(List.of(recordOf("1-0", 1L)))
                 .willReturn(List.of(recordOf("2-0", 2L)));
 
         assertThat(recovery.recover()).isEqualTo(2);
 
-        verify(queue).publish(1L);
-        verify(queue).publish(2L);
+        verify(queue).publish(1L, 1);
+        verify(queue).publish(2L, 1);
     }
 
     @Test

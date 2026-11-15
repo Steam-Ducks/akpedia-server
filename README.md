@@ -820,10 +820,13 @@ akpedia-ml); se ele nunca voltar, nada além deste servidor olha de novo para es
 cada `PROCESSING_RECOVERY_INTERVAL`, ele lista (`XPENDING`) as mensagens pendentes de qualquer
 consumidor, e para cada uma parada (sem entrega) há mais de `PROCESSING_RECOVERY_IDLE`:
 
-- se já foi entregue menos que `PROCESSING_MAX_DELIVERIES` vezes, ele a reivindica (`XCLAIM`) e
+- se as entregas somadas são menos que `PROCESSING_MAX_DELIVERIES`, ele a reivindica (`XCLAIM`) e
   publica o documento como uma mensagem nova (`XADD`), do mesmo jeito que uma aprovação -- a
-  mensagem antiga é então confirmada (`XACK`), já que é a nova que passa a ser acompanhada;
-- se já foi entregue `PROCESSING_MAX_DELIVERIES` vezes, o documento é marcado
+  mensagem antiga é então confirmada (`XACK`), já que é a nova que passa a ser acompanhada. A
+  mensagem nova leva o campo `attempt`, as entregas já gastas pelas anteriores, que somam ao
+  limite -- assim um documento que derruba o worker sempre acaba em `FAILED`. Se a publicação
+  falhar, a mensagem antiga não é confirmada e continua pendente para a próxima rodada;
+- se as entregas somadas já chegaram a `PROCESSING_MAX_DELIVERIES`, o documento é marcado
   `processing_status: FAILED` (`processing_error: "retry_limit_exceeded: Retry limit exceeded"`)
   e a mensagem é confirmada sem ser reivindicada -- o mesmo caminho que uma falha relatada pelo
   próprio worker, pois é esse quem grava e confirma (ver [Indexação pelo
