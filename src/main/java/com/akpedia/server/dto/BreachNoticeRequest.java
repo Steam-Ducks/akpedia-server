@@ -18,8 +18,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param body         the e-mail's text, plain, with its {@code {{campo}}} fields; normally the template's
  * @param fields       the value of each field, by its name ({@code data_descoberta}, ...);
  *                     {@code nome_titular} is filled for each recipient and is not sent here
- * @param allUsers     {@code true} to send to every user; or else {@code userIds}
+ * @param allUsers     {@code true} to send to every user; or else {@code userIds} or {@code keycloakIds},
+ *                     exactly one of the three
  * @param userIds      the users to send to, by their row id; or else {@code allUsers}
+ * @param keycloakIds  the users to send to, by their Keycloak account id, which is all the users screen
+ *                     knows; or else one of the other two
  * @param anpdInformed must be {@code true}: the notice only goes out once ANPD was informed
  */
 public record BreachNoticeRequest(
@@ -30,5 +33,6 @@ public record BreachNoticeRequest(
         Map<String, String> fields,
         @JsonProperty("all_users") @JsonAlias("allUsers") Boolean allUsers,
         @JsonProperty("user_ids") @JsonAlias("userIds") List<Long> userIds,
+        @JsonProperty("keycloak_ids") @JsonAlias("keycloakIds") List<String> keycloakIds,
         @JsonProperty("anpd_informed") @JsonAlias("anpdInformed") Boolean anpdInformed) {
 }

@@ -86,7 +86,7 @@ class AdminBreachNoticeControllerTest {
     void preview() throws Exception {
         BreachNoticeRequest expected = new BreachNoticeRequest(
                 "Assunto", "Olá, {{nome_titular}}. Em {{data_descoberta}}", java.util.Map.of("data_descoberta", "10/11/2026"),
-                null, null, null);
+                null, null, null, null);
         given(breachNotices.preview(eq(expected), eq(ADMIN_ID)))
                 .willReturn(new com.akpedia.server.dto.BreachNoticePreview("Assunto", "Olá, Admin. Em 10/11/2026"));
 
@@ -111,11 +111,26 @@ class AdminBreachNoticeControllerTest {
     }
 
     @Test
+    @DisplayName("POST reads keycloak_ids")
+    void sendReadsKeycloakIds() throws Exception {
+        BreachNoticeRequest expected = new BreachNoticeRequest(
+                "Assunto", "Texto", null, null, null, List.of("kc-1", "kc-2"), true);
+        given(breachNotices.send(eq(expected), eq(ADMIN_ID)))
+                .willReturn(new BreachNoticeSendResult(6L, 2, 2, 0, List.of()));
+
+        mvc.perform(post("/api/v1/admin/breach-notices").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"subject": "Assunto", "body": "Texto", "keycloak_ids": ["kc-1", "kc-2"], "anpd_informed": true}
+                        """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.total").value(2));
+    }
+
+    @Test
     @DisplayName("POST reads snake_case, answers 201 with the counts and the failures")
     void sendReadsSnakeCase() throws Exception {
         BreachNoticeRequest expected = new BreachNoticeRequest(
                 "Assunto", "Em {{data_descoberta}}", java.util.Map.of("data_descoberta", "10/11/2026"),
-                null, List.of(10L, 11L), true);
+                null, List.of(10L, 11L), null, true);
         given(breachNotices.send(eq(expected), eq(ADMIN_ID))).willReturn(new BreachNoticeSendResult(5L, 2, 1, 1,
                 List.of(new BreachNoticeSendResult.Failure(11L, "b@x.com", "REJECTED", "REJECTED: 550"))));
 
@@ -144,7 +159,7 @@ class AdminBreachNoticeControllerTest {
                         """))
                 .andExpect(status().isCreated());
 
-        then(breachNotices).should().send(new BreachNoticeRequest("Assunto", "Texto", null, true, null, true), ADMIN_ID);
+        then(breachNotices).should().send(new BreachNoticeRequest("Assunto", "Texto", null, true, null, null, true), ADMIN_ID);
     }
 
     @Test

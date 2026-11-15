@@ -78,8 +78,10 @@ public class AdminBreachNoticeController {
     @Operation(
             summary = "Send the notice (ADMIN)",
             description = """
-                    E-mails `subject` and `body` (plain text) to every user (`all_users: true`) or to the ones in
-                    `user_ids`, never both. `fields` has the value of each `{{campo}}`, by name; each recipient gets
+                    E-mails `subject` and `body` (plain text) to every user (`all_users: true`), to the ones in
+                    `user_ids` (row ids) or to the ones in `keycloak_ids` (Keycloak account ids); exactly one of
+                    the three. A Keycloak id with no Akpedia user, because the account never logged in, or a
+                    deleted one, is refused (400), naming it. `fields` has the value of each `{{campo}}`, by name; each recipient gets
                     an e-mail of their own, with their name in `{{nome_titular}}`. A required field left blank, a
                     field the template does not have, `nome_titular` in `fields`, or a text that dropped a required
                     field (each stands for an item the law asks the notice to carry) is refused (400). Try it with
@@ -96,7 +98,7 @@ public class AdminBreachNoticeController {
         @ApiResponse(responseCode = "201", description = "Sent; how it went, failures included."),
         @ApiResponse(responseCode = "400",
                 description = "`invalid_breach_notice`: subject or body missing or invalid, a required field blank or an "
-                        + "unknown one, both or neither of `all_users` and `user_ids`, or a user that cannot be notified.",
+                        + "unknown one, none or more than one of `all_users`, `user_ids` and `keycloak_ids`, or a user that cannot be notified.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "`anpd_not_informed`: `anpd_informed` is not `true`.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))

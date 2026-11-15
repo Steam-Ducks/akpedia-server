@@ -570,7 +570,7 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
     "nome_encarregado": "...",
     "email_encarregado": "..."
   },
-  "all_users": true,            // ou "user_ids": [10, 11] -- um dos dois
+  "all_users": true,            // ou "user_ids": [10, 11] ou "keycloak_ids": ["..."] -- um dos três
   "anpd_informed": true
 }
 
@@ -585,7 +585,9 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 
 - **Destinatários**: usuários de `users` ligados a uma conta do Keycloak e não excluídos, inclusive
   os desativados (os dados deles também estão no sistema). Com `user_ids`, um id que não existe,
-  foi excluído ou não tem conta no Keycloak é recusado (`400`, com os ids na mensagem).
+  foi excluído ou não tem conta no Keycloak é recusado (`400`, com os ids na mensagem). Com
+  `keycloak_ids` (os ids de conta, os únicos que a tela de usuários conhece), um id sem usuário no
+  Akpedia (conta que nunca acessou) ou de usuário excluído é recusado do mesmo jeito.
 - **Texto e campos**: o modelo é o do documento de aviso de vazamento, em
   `src/main/resources/breach-notice/` (texto puro, sem negrito, links nem tabelas). Os campos
   `{{campo}}` são preenchidos no envio:
@@ -613,7 +615,7 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 - **Sem envio duplicado**: enquanto um aviso está sendo enviado, outro envio responde `409
   breach_notice_in_progress`; o mesmo aviso (assunto e texto iguais) já entregue a algum destes
   usuários nos últimos 30 minutos responde `409 breach_notice_duplicate`. Isso cobre o segundo
-  clique e a tela tentando de novo. Reenviar o mesmo texto só para quem falhou (`user_ids`) é
+  clique e a tela tentando de novo. Reenviar o mesmo texto só para quem falhou (`user_ids` ou `keycloak_ids`) é
   permitido. Um envio interrompido no meio deixa de bloquear depois de 30 minutos.
 - O envio é feito antes da resposta, que já traz o resultado de cada e-mail; por isso o nginx dá
   600s para `/api/v1/admin/breach-notices` (o resto de `/api/` tem 120s).
@@ -629,7 +631,7 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 | Situação                                                         | Status | `code`                    |
 |------------------------------------------------------------------|--------|---------------------------|
 | `anpd_informed` diferente de `true`                              | 422    | `anpd_not_informed`       |
-| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, `nome_titular` em `fields`, nenhum ou os dois entre `all_users` e `user_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
+| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, `nome_titular` em `fields`, nenhum ou mais de um entre `all_users`, `user_ids` e `keycloak_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
 | outro aviso sendo enviado agora                                  | 409    | `breach_notice_in_progress` |
 | o mesmo aviso já entregue a algum destes usuários nos últimos 30 min | 409 | `breach_notice_duplicate` |
 | aviso inexistente                                                | 404    | `breach_notice_not_found` |

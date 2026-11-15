@@ -1,6 +1,7 @@
 package com.akpedia.server.repository;
 
 import com.akpedia.server.entity.User;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,6 +13,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
 
     Optional<User> findByKeycloakId(String keycloakId);
+
+    List<User> findByKeycloakIdIn(Collection<String> keycloakIds);
 
     boolean existsByEmail(String email);
 
