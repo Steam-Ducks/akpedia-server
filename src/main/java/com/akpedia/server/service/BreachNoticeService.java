@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.PageRequest;
@@ -335,36 +336,60 @@ public class BreachNoticeService {
         return stripped;
     }
 
-    /** Every user who can be notified, or the ones picked; each one once, in id order. */
+    /** Every user who can be notified, or the ones picked by id or by Keycloak id; each one once, in id order. */
     private List<User> recipientsOf(BreachNoticeRequest request) {
         boolean all = Boolean.TRUE.equals(request.allUsers());
-        boolean picked = request.userIds() != null && !request.userIds().isEmpty();
-        if (all == picked) {
-            throw new InvalidBreachNoticeException("Informe all_users: true ou user_ids, um dos dois.");
+        boolean pickedByUserId = request.userIds() != null && !request.userIds().isEmpty();
+        boolean pickedByKeycloakId = request.keycloakIds() != null && !request.keycloakIds().isEmpty();
+        if (Stream.of(all, pickedByUserId, pickedByKeycloakId).filter(chosen -> chosen).count() != 1) {
+            throw new InvalidBreachNoticeException("Informe um so entre all_users: true, user_ids e keycloak_ids.");
         }
 
         List<User> to;
         if (all) {
             to = users.findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById();
+        } else if (pickedByUserId) {
+            to = pickedByUserId(request.userIds());
         } else {
-            if (request.userIds().stream().anyMatch(Objects::isNull)) {
-                throw new InvalidBreachNoticeException("user_ids nao pode ter valores nulos.");
-            }
-            Set<Long> ids = new LinkedHashSet<>(request.userIds());
-            Map<Long, User> found = new HashMap<>();
-            users.findAllById(ids).stream().filter(BreachNoticeService::canBeNotified)
-                    .forEach(user -> found.put(user.getId(), user));
-            List<Long> unknown = ids.stream().filter(id -> !found.containsKey(id)).toList();
-            if (!unknown.isEmpty()) {
-                throw new InvalidBreachNoticeException("Usuarios nao encontrados, removidos ou sem conta no Keycloak: %s."
-                        .formatted(unknown.stream().map(String::valueOf).collect(Collectors.joining(", "))));
-            }
-            to = found.values().stream().sorted((a, b) -> a.getId().compareTo(b.getId())).toList();
+            to = pickedByKeycloakId(request.keycloakIds());
         }
         if (to.isEmpty()) {
             throw new InvalidBreachNoticeException("Nao ha usuarios para notificar.");
         }
         return to;
+    }
+
+    private List<User> pickedByUserId(List<Long> userIds) {
+        if (userIds.stream().anyMatch(Objects::isNull)) {
+            throw new InvalidBreachNoticeException("user_ids nao pode ter valores nulos.");
+        }
+        Set<Long> ids = new LinkedHashSet<>(userIds);
+        Map<Long, User> found = new HashMap<>();
+        users.findAllById(ids).stream().filter(BreachNoticeService::canBeNotified)
+                .forEach(user -> found.put(user.getId(), user));
+        List<Long> unknown = ids.stream().filter(id -> !found.containsKey(id)).toList();
+        if (!unknown.isEmpty()) {
+            throw new InvalidBreachNoticeException("Usuarios nao encontrados, removidos ou sem conta no Keycloak: %s."
+                    .formatted(unknown.stream().map(String::valueOf).collect(Collectors.joining(", "))));
+        }
+        return found.values().stream().sorted((a, b) -> a.getId().compareTo(b.getId())).toList();
+    }
+
+    private List<User> pickedByKeycloakId(List<String> keycloakIds) {
+        if (keycloakIds.stream().anyMatch(id -> id == null || id.isBlank())) {
+            throw new InvalidBreachNoticeException("keycloak_ids nao pode ter valores nulos ou em branco.");
+        }
+        Set<String> ids = new LinkedHashSet<>(keycloakIds);
+        Map<String, User> found = new HashMap<>();
+        users.findByKeycloakIdIn(ids).stream().filter(BreachNoticeService::canBeNotified)
+                .forEach(user -> found.put(user.getKeycloakId(), user));
+        List<String> unknown = ids.stream().filter(id -> !found.containsKey(id)).toList();
+        if (!unknown.isEmpty()) {
+            throw new InvalidBreachNoticeException(
+                    "Contas do Keycloak sem usuario no Akpedia (nunca acessaram) ou removidas: %s."
+                            .formatted(String.join(", ", unknown)));
+        }
+        return found.values().stream().sorted((a, b) -> a.getId().compareTo(b.getId())).toList();
     }
 
     private static boolean canBeNotified(User user) {

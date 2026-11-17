@@ -31,7 +31,7 @@ public class BreachNoticeConflictException extends RuntimeException {
 
     public static BreachNoticeConflictException duplicate(long alreadySent, int minutes) {
         return new BreachNoticeConflictException(DUPLICATE, ("Este aviso ja foi enviado a %d destes usuarios nos ultimos %d minutos. "
-                + "Para reenviar so a quem falhou, use user_ids com esses usuarios.").formatted(alreadySent, minutes));
+                + "Para reenviar so a quem falhou, use user_ids ou keycloak_ids com esses usuarios.").formatted(alreadySent, minutes));
     }
 
     /** {@link #IN_PROGRESS} or {@link #DUPLICATE}. */
