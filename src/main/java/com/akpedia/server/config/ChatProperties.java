@@ -33,5 +33,5 @@ public record ChatProperties(
         @DefaultValue("2s") @NotNull Duration connectTimeout,
         @DefaultValue("150s") @NotNull Duration readTimeout,
         @DefaultValue("0.80") @DecimalMin("-1.0") @DecimalMax("1.0") double minimumScore,
-        @DefaultValue("6") @Min(1) @Max(20) int maxPassages) {
+        @DefaultValue("3") @Min(1) @Max(20) int maxPassages) {
 }
