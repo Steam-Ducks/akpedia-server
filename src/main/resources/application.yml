@@ -95,7 +95,7 @@ akpedia:
     # Passages the answer is written from: the closest ones above the minimum score, several per
     # document if need be. With none above it the chat answers found: false without asking the model.
     minimum-score: ${CHAT_MINIMUM_SCORE:0.80}
-    max-passages: ${CHAT_MAX_PASSAGES:6}
+    max-passages: ${CHAT_MAX_PASSAGES:3}
     # akpedia-ml is at akpedia.embedding.base-url; its language model takes up to 120s
     # (LLM_TIMEOUT_SECONDS there), so the read timeout stays above that.
     connect-timeout: ${CHAT_CONNECT_TIMEOUT:2s}

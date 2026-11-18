@@ -668,7 +668,7 @@ leva bem mais que um vetor (o akpedia-ml espera até 120s por ele, `LLM_TIMEOUT_
 | Variável               | Default | Para que serve                                                         |
 |------------------------|---------|------------------------------------------------------------------------|
 | `CHAT_MINIMUM_SCORE`   | `0.80`  | Similaridade mínima para um trecho ir para o modelo                     |
-| `CHAT_MAX_PASSAGES`    | `6`     | Quantos trechos, no máximo, vão para o modelo (o mais próximo primeiro) |
+| `CHAT_MAX_PASSAGES`    | `3`     | Quantos trechos, no máximo, vão para o modelo (o mais próximo primeiro). Mais trechos deixam o prompt mais longo: o modelo local passa do timeout e responde sem citar o trecho |
 | `CHAT_CONNECT_TIMEOUT` | `2s`    | Tempo máximo para abrir a conexão com o akpedia-ml                      |
 | `CHAT_READ_TIMEOUT`    | `150s`  | Tempo máximo para a resposta; acima do timeout do LLM no akpedia-ml     |
 
