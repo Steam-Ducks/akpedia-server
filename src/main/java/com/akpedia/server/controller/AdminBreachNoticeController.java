@@ -48,9 +48,13 @@ public class AdminBreachNoticeController {
             summary = "The notice template, with its fields (ADMIN)",
             description = """
                     The subject and the plain text of the data breach notice document, with `{{campo}}` where each
-                    field goes, and the list of fields: name, whether it is required, what goes in it and an
-                    example. `nome_titular` is `automatic`: the server writes each recipient's name in it. An
-                    optional field left blank takes its line out of the e-mail.""")
+                    field goes, and the list of fields: name, whether it is required, its `type`, what goes in
+                    it and an example of a value as it is sent. `nome_titular` is `automatic`: the server writes
+                    each recipient's name in it. An optional field left blank takes its line out of the e-mail.
+
+                    `type` is `TEXT` (one line), `MULTILINE` (may span lines, such as a list, one item per line),
+                    `DATE` (`2026-11-10`, written as 10/11/2026) or `DATE_RANGE` (`2026-11-08`, or
+                    `2026-11-08/2026-11-09`, written as "em 08/11/2026" or "entre 08/11/2026 e 09/11/2026").""")
     @GetMapping("/template")
     public BreachNoticeTemplate template() {
         return breachNotices.template();
@@ -67,7 +71,8 @@ public class AdminBreachNoticeController {
         @ApiResponse(responseCode = "200", description = "The e-mail, filled."),
         @ApiResponse(responseCode = "400",
                 description = "`invalid_breach_notice`: subject or body missing or invalid, a required field blank or "
-                        + "removed from the text, or a field the template does not have.",
+                        + "removed from the text, a field the template does not have, or a value that does not fit "
+                        + "its type, a future date or dates out of order.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @PostMapping("/preview")
@@ -84,7 +89,9 @@ public class AdminBreachNoticeController {
                     deleted one, is refused (400), naming it. `fields` has the value of each `{{campo}}`, by name; each recipient gets
                     an e-mail of their own, with their name in `{{nome_titular}}`. A required field left blank, a
                     field the template does not have, `nome_titular` in `fields`, or a text that dropped a required
-                    field (each stands for an item the law asks the notice to carry) is refused (400). Try it with
+                    field (each stands for an item the law asks the notice to carry) is refused (400). So is a value
+                    that does not fit its field's `type` (see `GET .../template`), a date after today in Brazil, an
+                    incident that starts after `data_descoberta`, or a `data_comunicacao_anpd` before it. Try it with
                     `POST .../preview` first.
 
                     A recipient is a user linked to a Keycloak account and not deleted; disabled accounts included.
@@ -98,7 +105,8 @@ public class AdminBreachNoticeController {
         @ApiResponse(responseCode = "201", description = "Sent; how it went, failures included."),
         @ApiResponse(responseCode = "400",
                 description = "`invalid_breach_notice`: subject or body missing or invalid, a required field blank or an "
-                        + "unknown one, none or more than one of `all_users`, `user_ids` and `keycloak_ids`, or a user that cannot be notified.",
+                        + "unknown one, a value that does not fit its type, a future date or dates out of order, none "
+                        + "or more than one of `all_users`, `user_ids` and `keycloak_ids`, or a user that cannot be notified.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "`anpd_not_informed`: `anpd_informed` is not `true`.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))

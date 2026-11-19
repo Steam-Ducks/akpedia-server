@@ -548,7 +548,7 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 
 | Rota | O que faz |
 |------|-----------|
-| `GET /api/v1/admin/breach-notices/template` | O modelo do documento de aviso: `subject`, `body` com os campos `{{campo}}`, e `fields`, cada campo com `name`, `required`, `automatic`, `description` e `example` |
+| `GET /api/v1/admin/breach-notices/template` | O modelo do documento de aviso: `subject`, `body` com os campos `{{campo}}`, e `fields`, cada campo com `name`, `required`, `automatic`, `type`, `description` e `example` (um valor como é enviado) |
 | `POST /api/v1/admin/breach-notices/preview` | O e-mail como o destinatário vai receber, com o nome do próprio admin no lugar do dele. Valida igual ao envio, mas não envia nem grava nada e não exige `anpd_informed`, para montar o texto enquanto a ANPD é comunicada |
 | `POST /api/v1/admin/breach-notices` | Envia o aviso. Responde `201` com quantos saíram e quais falharam |
 | `GET /api/v1/admin/breach-notices?page=0&size=20` | Página dos avisos enviados, do mais novo para o mais antigo, com as contagens. `size` até 100 |
@@ -560,12 +560,12 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
   "subject": "Aviso importante: incidente de segurança envolvendo seus dados no Akpedia",
   "body": "Olá, {{nome_titular}}. ...",   // o body do template, normalmente sem mudança
   "fields": {
-    "data_descoberta": "10/11/2026",
-    "data_incidente": "08/11 a 09/11/2026",
+    "data_descoberta": "2026-11-10",
+    "data_incidente": "2026-11-08/2026-11-09",   // ou só "2026-11-08"
     "descricao_incidente": "acesso não autorizado a uma cópia da base de usuários",
-    "dados_afetados": "Nome, e-mail e CPF",
+    "dados_afetados": "Nome\nE-mail\nCPF",
     "medidas_protecao": "Servidor com acesso restrito",
-    "data_comunicacao_anpd": "11/11/2026",
+    "data_comunicacao_anpd": "2026-11-11",
     "medidas_adotadas": "Bloqueio do acesso indevido",
     "nome_encarregado": "...",
     "email_encarregado": "..."
@@ -600,9 +600,22 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
     as medidas de proteção, a data da comunicação à ANPD, as medidas adotadas, o contato do
     encarregado), e o `{{nome_titular}}` à comunicação individual do § 1º. Um texto sem algum deles é
     recusado (`400`), mesmo com o valor em `fields`.
-  - Um campo que o modelo não tem, em `fields` ou escrito no texto, é recusado. Um valor pode ter
-    várias linhas (como `dados_afetados`, "um por linha"), mas não `{{` nem `}}`; uma lista assim
-    começa na linha de baixo da frase ("...são:" e, embaixo, um item por linha).
+  - Um campo que o modelo não tem, em `fields` ou escrito no texto, é recusado. Nenhum valor pode ter
+    `{{` nem `}}`.
+  - Cada campo tem um `type`, que diz como o valor vem e como é conferido (recusado com `400`, nomeando
+    o campo, quando não confere):
+
+    | `type` | Campos | Valor enviado | No e-mail |
+    |--------|--------|---------------|-----------|
+    | `TEXT` | `descricao_incidente`, `nome_encarregado`, `email_encarregado` | uma linha só | como veio |
+    | `MULTILINE` | `dados_afetados`, `dados_nao_envolvidos`, `medidas_protecao`, `medidas_adotadas`, `motivo_atraso` | pode ter várias linhas | como veio; uma lista no meio de uma frase começa na linha de baixo ("...são:" e, embaixo, um item por linha) |
+    | `DATE` | `data_descoberta`, `data_comunicacao_anpd` | `2026-11-10` | `10/11/2026` |
+    | `DATE_RANGE` | `data_incidente` | `2026-11-08`, ou o período `2026-11-08/2026-11-09` | `em 08/11/2026`, ou `entre 08/11/2026 e 09/11/2026` |
+
+  - Nenhuma data pode ser depois de hoje no horário de Brasília, nem o fim de um período antes do
+    começo. O incidente não pode começar depois de `data_descoberta`, nem a ANPD ser comunicada antes
+    dela (`data_comunicacao_anpd`). O fim do incidente não é comparado: ele pode continuar depois de
+    descoberto. Só as datas enviadas são comparadas, e uma obrigatória em branco já é recusada.
   - Fica gravado o texto preenchido com `{{nome_titular}}` no lugar do nome: cada linha de
     destinatário já diz quem ele é.
 
@@ -631,7 +644,7 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 | Situação                                                         | Status | `code`                    |
 |------------------------------------------------------------------|--------|---------------------------|
 | `anpd_informed` diferente de `true`                              | 422    | `anpd_not_informed`       |
-| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, `nome_titular` em `fields`, nenhum ou mais de um entre `all_users`, `user_ids` e `keycloak_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
+| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, valor que não confere com o `type` do campo, data futura ou fora de ordem, `nome_titular` em `fields`, nenhum ou mais de um entre `all_users`, `user_ids` e `keycloak_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
 | outro aviso sendo enviado agora                                  | 409    | `breach_notice_in_progress` |
 | o mesmo aviso já entregue a algum destes usuários nos últimos 30 min | 409 | `breach_notice_duplicate` |
 | aviso inexistente                                                | 404    | `breach_notice_not_found` |

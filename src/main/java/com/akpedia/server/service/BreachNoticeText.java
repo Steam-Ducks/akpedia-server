@@ -1,5 +1,8 @@
 package com.akpedia.server.service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
@@ -24,13 +27,16 @@ import com.akpedia.server.exception.InvalidBreachNoticeException;
  *       fill is refused, naming each one -- a notice with a {@code {{ }}} still in it never goes out.</li>
  * </ul>
  *
- * <p>The e-mail is plain text, so values are written in as they are; they may span lines, as the
- * affected data does ("um por linha"), but never carry braces of their own.
+ * <p>The e-mail is plain text, so values are written in as they are, dates as {@code 10/11/2026}; a
+ * {@code MULTILINE} one may span lines, as the affected data does ("um por linha"), but no value
+ * carries braces of its own.
  */
 final class BreachNoticeText {
 
     /** {@code {{campo}}}, spaces inside the braces allowed. */
     private static final Pattern FIELD = Pattern.compile("\\{\\{\\s*([A-Za-z0-9_]+)\\s*}}");
+
+    private static final DateTimeFormatter SHOWN = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private static final String RECIPIENT_NAME = "{{" + BreachNoticeField.NOME_TITULAR.key() + "}}";
 
@@ -38,17 +44,22 @@ final class BreachNoticeText {
     }
 
     /**
-     * The admin's values, checked: only fields the template has, none of the automatic ones, and no
-     * braces in them. Keys are matched as written, blank values count as not given.
+     * The admin's values, checked and written as they go in the text: only fields the template has,
+     * none of the automatic ones, no braces, and each as its {@link BreachNoticeField.Type} says --
+     * one line for {@code TEXT}, a real date for {@code DATE} and {@code DATE_RANGE}, none after
+     * {@code today}, and the dates in order (see {@link #requireDateOrder}). Keys are matched as
+     * written, blank values count as not given.
      *
+     * @param today the day it is in Brazil, the latest date a value may have
      * @throws InvalidBreachNoticeException naming what is wrong
      */
-    static Map<BreachNoticeField, String> values(Map<String, String> given) {
+    static Map<BreachNoticeField, String> values(Map<String, String> given, LocalDate today) {
         Map<BreachNoticeField, String> values = new EnumMap<>(BreachNoticeField.class);
         if (given == null) {
             return values;
         }
         Set<String> unknown = new LinkedHashSet<>();
+        Map<BreachNoticeField, DateRange> dates = new EnumMap<>(BreachNoticeField.class);
         for (Map.Entry<String, String> entry : given.entrySet()) {
             String key = entry.getKey() == null ? "" : entry.getKey().strip();
             Optional<BreachNoticeField> field = BreachNoticeField.byKey(key);
@@ -64,14 +75,85 @@ final class BreachNoticeText {
             if (value.contains("{{") || value.contains("}}")) {
                 throw new InvalidBreachNoticeException("fields.%s nao pode ter {{ ou }}.".formatted(key));
             }
-            if (!value.isEmpty()) {
-                values.put(field.get(), value.replace("\r\n", "\n"));
+            if (value.isEmpty()) {
+                continue;
+            }
+            switch (field.get().type()) {
+                case TEXT -> {
+                    if (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0) {
+                        throw new InvalidBreachNoticeException("fields.%s deve ter uma linha so.".formatted(key));
+                    }
+                    values.put(field.get(), value);
+                }
+                case MULTILINE -> values.put(field.get(), value.replace("\r\n", "\n"));
+                case DATE -> {
+                    LocalDate date = date(key, value, today);
+                    dates.put(field.get(), new DateRange(date, date));
+                    values.put(field.get(), date.format(SHOWN));
+                }
+                case DATE_RANGE -> {
+                    DateRange range = range(key, value, today);
+                    dates.put(field.get(), range);
+                    values.put(field.get(), range.start().equals(range.end())
+                            ? "em " + range.start().format(SHOWN)
+                            : "entre %s e %s".formatted(range.start().format(SHOWN), range.end().format(SHOWN)));
+                }
             }
         }
         if (!unknown.isEmpty()) {
             throw new InvalidBreachNoticeException("Campos que o modelo nao tem: %s.".formatted(String.join(", ", unknown)));
         }
+        requireDateOrder(dates);
         return values;
+    }
+
+    /** A date, or a period from {@code start} to {@code end}; a single date starts and ends on the same day. */
+    private record DateRange(LocalDate start, LocalDate end) {
+    }
+
+    private static LocalDate date(String key, String value, LocalDate today) {
+        LocalDate date;
+        try {
+            date = LocalDate.parse(value);
+        } catch (DateTimeParseException e) {
+            throw new InvalidBreachNoticeException(
+                    "fields.%s deve ser uma data valida no formato AAAA-MM-DD.".formatted(key));
+        }
+        if (date.isAfter(today)) {
+            throw new InvalidBreachNoticeException("fields.%s nao pode ser uma data futura.".formatted(key));
+        }
+        return date;
+    }
+
+    private static DateRange range(String key, String value, LocalDate today) {
+        String[] parts = value.split("/", -1);
+        if (parts.length > 2) {
+            throw new InvalidBreachNoticeException(
+                    "fields.%s deve ser uma data ou um periodo AAAA-MM-DD/AAAA-MM-DD.".formatted(key));
+        }
+        LocalDate start = date(key, parts[0].strip(), today);
+        LocalDate end = parts.length == 2 ? date(key, parts[1].strip(), today) : start;
+        if (end.isBefore(start)) {
+            throw new InvalidBreachNoticeException("fields.%s termina antes de comecar.".formatted(key));
+        }
+        return new DateRange(start, end);
+    }
+
+    /**
+     * The incident starts no later than it was found, and ANPD is told no earlier than that. The
+     * incident may still be going on when it is found, so its end is not compared. Only the dates
+     * given are compared; a required one missing is refused by {@link #fill}.
+     */
+    private static void requireDateOrder(Map<BreachNoticeField, DateRange> dates) {
+        DateRange incident = dates.get(BreachNoticeField.DATA_INCIDENTE);
+        DateRange discovery = dates.get(BreachNoticeField.DATA_DESCOBERTA);
+        DateRange anpd = dates.get(BreachNoticeField.DATA_COMUNICACAO_ANPD);
+        if (incident != null && discovery != null && incident.start().isAfter(discovery.start())) {
+            throw new InvalidBreachNoticeException("data_incidente nao pode comecar depois de data_descoberta.");
+        }
+        if (discovery != null && anpd != null && anpd.start().isBefore(discovery.start())) {
+            throw new InvalidBreachNoticeException("data_comunicacao_anpd nao pode ser antes de data_descoberta.");
+        }
     }
 
     /**

@@ -58,8 +58,8 @@ class BreachNoticeServiceTest {
     private static final Map<String, String> FIELDS = Map.copyOf(documentExamples());
     /** {@link #BODY} with {@link #FIELDS} in, as it is saved: the name kept as a field. */
     private static final String FILLED = "Olá, {{nome_titular}}. Em 10/11/2026, identificamos Acesso não autorizado a "
-            + "uma cópia da base de usuários (08/11 a 09/11/2026). Dados: Nome, e-mail e CPF. Proteção: Servidor com "
-            + "acesso restrito. ANPD em 11/11/2026. Medidas: Bloqueio do acesso indevido. Contato: A definir, A definir.";
+            + "uma cópia da base de usuários (entre 08/11/2026 e 09/11/2026). Dados:\nNome\nE-mail\nCPF. Proteção: "
+            + "Servidor com acesso restrito. ANPD em 11/11/2026. Medidas: Bloqueio do acesso indevido. Contato: A definir, A definir.";
 
     /** What one recipient gets. */
     private static String bodyFor(String name) {
@@ -176,7 +176,7 @@ class BreachNoticeServiceTest {
         assertThat(toAna.body())
                 .startsWith("Olá, Usuario 10.")
                 .contains("Em 10/11/2026, identificamos Acesso não autorizado a uma cópia da base de usuários. "
-                        + "O incidente ocorreu em 08/11 a 09/11/2026.")
+                        + "O incidente ocorreu entre 08/11/2026 e 09/11/2026.")
                 .contains("Nenhuma senha foi exposta")
                 .contains("em 11/11/2026, como determina")
                 .doesNotContain("{{", "}}");
@@ -205,7 +205,7 @@ class BreachNoticeServiceTest {
         then(mail).should().sendAll(sent.capture());
         String body = sent.getValue().get(0).body();
         assertThat(body).doesNotContain("Nenhuma senha", "Extensão confirmada", "{{").doesNotContain("\n\n\n");
-        assertThat(body).contains("são: Nome, e-mail e CPF\n\nQuais são os riscos")
+        assertThat(body).contains("são:\nNome\nE-mail\nCPF\n\nQuais são os riscos")
                 .contains("medidas: Bloqueio do acesso indevido\n\nO que recomendamos");
     }
 
@@ -370,6 +370,22 @@ class BreachNoticeServiceTest {
                 .isInstanceOf(InvalidBreachNoticeException.class);
         assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, FIELDS, false, List.of(), null, true), ADMIN_ID))
                 .isInstanceOf(InvalidBreachNoticeException.class);
+        then(mail).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("a date after today in Brazil is refused, for the preview too, before anything is looked up")
+    void futureDateIsRefused() {
+        Map<String, String> fields = documentExamples();
+        fields.put("data_comunicacao_anpd", java.time.LocalDate.now(BreachNoticeService.BRAZIL).plusDays(1).toString());
+
+        assertThatThrownBy(() -> service.send(new BreachNoticeRequest(SUBJECT, BODY, fields, true, null, null, true), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("data_comunicacao_anpd");
+        assertThatThrownBy(() -> service.preview(new BreachNoticeRequest(SUBJECT, BODY, fields, null, null, null, null), ADMIN_ID))
+                .isInstanceOf(InvalidBreachNoticeException.class)
+                .hasMessageContaining("data_comunicacao_anpd");
+        then(users).shouldHaveNoInteractions();
         then(mail).shouldHaveNoInteractions();
     }
 

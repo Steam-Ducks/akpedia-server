@@ -19,9 +19,12 @@ public record BreachNoticeTemplate(String subject, String body, List<Field> fiel
      *                    blank takes its line out of the e-mail
      * @param automatic   {@code true} for the one the server fills for each recipient
      *                    ({@code nome_titular}); never sent by the admin
+     * @param type        {@code TEXT}, {@code MULTILINE}, {@code DATE} ({@code 2026-11-10}) or
+     *                    {@code DATE_RANGE} ({@code 2026-11-08} or {@code 2026-11-08/2026-11-09})
      * @param description what goes in it
-     * @param example     an illustration only, never sent
+     * @param example     an illustration of a value as it is sent, never sent itself
      */
-    public record Field(String name, boolean required, boolean automatic, String description, String example) {
+    public record Field(String name, boolean required, boolean automatic, String type, String description,
+            String example) {
     }
 }

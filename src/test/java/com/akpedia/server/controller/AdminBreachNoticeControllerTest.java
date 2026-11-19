@@ -66,8 +66,8 @@ class AdminBreachNoticeControllerTest {
     @DisplayName("GET /template answers the subject, the text and each field with what goes in it")
     void template() throws Exception {
         given(breachNotices.template()).willReturn(new BreachNoticeTemplate("Assunto", "Olá, {{nome_titular}}.",
-                List.of(new BreachNoticeTemplate.Field("nome_titular", true, true, "Nome do funcionário", "Ana Silva"),
-                        new BreachNoticeTemplate.Field("motivo_atraso", false, false, "Justificativa", "Extensão"))));
+                List.of(new BreachNoticeTemplate.Field("nome_titular", true, true, "TEXT", "Nome do funcionário", "Ana Silva"),
+                        new BreachNoticeTemplate.Field("data_descoberta", true, false, "DATE", "Data da descoberta", "2026-11-10"))));
 
         mvc.perform(get("/api/v1/admin/breach-notices/template"))
                 .andExpect(status().isOk())
@@ -76,9 +76,11 @@ class AdminBreachNoticeControllerTest {
                 .andExpect(jsonPath("$.fields[0].name").value("nome_titular"))
                 .andExpect(jsonPath("$.fields[0].required").value(true))
                 .andExpect(jsonPath("$.fields[0].automatic").value(true))
+                .andExpect(jsonPath("$.fields[0].type").value("TEXT"))
+                .andExpect(jsonPath("$.fields[1].type").value("DATE"))
                 .andExpect(jsonPath("$.fields[0].description").value("Nome do funcionário"))
                 .andExpect(jsonPath("$.fields[0].example").value("Ana Silva"))
-                .andExpect(jsonPath("$.fields[1].required").value(false));
+                .andExpect(jsonPath("$.fields[1].required").value(true));
     }
 
     @Test
