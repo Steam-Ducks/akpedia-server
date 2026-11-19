@@ -29,6 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.akpedia.server.dto.BreachNoticeDetail;
 import com.akpedia.server.dto.BreachNoticePreview;
+import com.akpedia.server.dto.BreachNoticeRecipientCount;
 import com.akpedia.server.dto.BreachNoticeRequest;
 import com.akpedia.server.dto.BreachNoticeSendResult;
 import com.akpedia.server.dto.BreachNoticeSummary;
@@ -245,6 +246,15 @@ public class BreachNoticeService {
         if (alreadySent > 0) {
             throw BreachNoticeConflictException.duplicate(alreadySent, REPEAT_WINDOW_MINUTES);
         }
+    }
+
+    /**
+     * How many users a notice to everyone would reach now: the same ones {@link #send} picks with
+     * {@code all_users}, for the admin to confirm before sending.
+     */
+    @Transactional(readOnly = true)
+    public BreachNoticeRecipientCount countAllRecipients() {
+        return new BreachNoticeRecipientCount(users.countByDeletedAtIsNullAndKeycloakIdIsNotNull());
     }
 
     /**

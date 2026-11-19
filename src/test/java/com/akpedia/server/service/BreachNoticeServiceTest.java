@@ -374,6 +374,15 @@ class BreachNoticeServiceTest {
     }
 
     @Test
+    @DisplayName("the count of a notice to everyone is the users it would go to")
+    void countsEveryoneWhoCanBeNotified() {
+        given(users.countByDeletedAtIsNullAndKeycloakIdIsNotNull()).willReturn(42L);
+
+        assertThat(service.countAllRecipients().count()).isEqualTo(42L);
+        then(mail).shouldHaveNoInteractions();
+    }
+
+    @Test
     @DisplayName("a date after today in Brazil is refused, for the preview too, before anything is looked up")
     void futureDateIsRefused() {
         Map<String, String> fields = documentExamples();

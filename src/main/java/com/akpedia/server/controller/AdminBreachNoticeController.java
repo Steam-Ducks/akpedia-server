@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.BreachNoticeDetail;
 import com.akpedia.server.dto.BreachNoticePreview;
+import com.akpedia.server.dto.BreachNoticeRecipientCount;
 import com.akpedia.server.dto.BreachNoticeRequest;
 import com.akpedia.server.dto.BreachNoticeSendResult;
 import com.akpedia.server.dto.BreachNoticeSummary;
@@ -115,6 +116,16 @@ public class AdminBreachNoticeController {
     @ResponseStatus(HttpStatus.CREATED)
     public BreachNoticeSendResult send(@RequestBody BreachNoticeRequest request) {
         return breachNotices.send(request, currentUser.id());
+    }
+
+    @Operation(
+            summary = "How many users a notice to everyone would reach (ADMIN)",
+            description = """
+                    The users `all_users: true` sends to right now: linked to a Keycloak account and not deleted,
+                    disabled accounts included. For the admin to confirm the number before sending.""")
+    @GetMapping("/recipients/count")
+    public BreachNoticeRecipientCount countAllRecipients() {
+        return breachNotices.countAllRecipients();
     }
 
     @Operation(

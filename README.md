@@ -550,6 +550,7 @@ estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi
 |------|-----------|
 | `GET /api/v1/admin/breach-notices/template` | O modelo do documento de aviso: `subject`, `body` com os campos `{{campo}}`, e `fields`, cada campo com `name`, `required`, `automatic`, `type`, `description` e `example` (um valor como é enviado) |
 | `POST /api/v1/admin/breach-notices/preview` | O e-mail como o destinatário vai receber, com o nome do próprio admin no lugar do dele. Valida igual ao envio, mas não envia nem grava nada e não exige `anpd_informed`, para montar o texto enquanto a ANPD é comunicada |
+| `GET /api/v1/admin/breach-notices/recipients/count` | Quantos usuários um aviso para todos (`all_users: true`) atinge agora, `{ "count": 42 }`, para o admin confirmar o número antes de enviar |
 | `POST /api/v1/admin/breach-notices` | Envia o aviso. Responde `201` com quantos saíram e quais falharam |
 | `GET /api/v1/admin/breach-notices?page=0&size=20` | Página dos avisos enviados, do mais novo para o mais antigo, com as contagens. `size` até 100 |
 | `GET /api/v1/admin/breach-notices/{id}` | O aviso como foi enviado, com o status de cada destinatário |

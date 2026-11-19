@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.akpedia.server.dto.BreachNoticeDetail;
+import com.akpedia.server.dto.BreachNoticeRecipientCount;
 import com.akpedia.server.dto.BreachNoticeRequest;
 import com.akpedia.server.dto.BreachNoticeSendResult;
 import com.akpedia.server.dto.BreachNoticeSummary;
@@ -149,6 +150,16 @@ class AdminBreachNoticeControllerTest {
                 .andExpect(jsonPath("$.failures[0].email").value("b@x.com"))
                 .andExpect(jsonPath("$.failures[0].reason").value("REJECTED"))
                 .andExpect(jsonPath("$.failures[0].error").value("REJECTED: 550"));
+    }
+
+    @Test
+    @DisplayName("GET /recipients/count answers how many users a notice to everyone reaches")
+    void countAllRecipients() throws Exception {
+        given(breachNotices.countAllRecipients()).willReturn(new BreachNoticeRecipientCount(42));
+
+        mvc.perform(get("/api/v1/admin/breach-notices/recipients/count"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(42));
     }
 
     @Test
