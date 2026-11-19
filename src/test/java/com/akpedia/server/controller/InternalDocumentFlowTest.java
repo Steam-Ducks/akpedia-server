@@ -66,6 +66,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 @SpringBootTest(properties = {
     "akpedia.processing.retry-interval=1h",
+    "akpedia.processing.recovery-interval=1h",
     "akpedia.internal.token=" + InternalDocumentFlowTest.TOKEN})
 @AutoConfigureMockMvc
 class InternalDocumentFlowTest {

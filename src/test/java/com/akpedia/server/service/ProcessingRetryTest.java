@@ -46,7 +46,8 @@ class ProcessingRetryTest {
     @BeforeEach
     void setUp() {
         retry = new ProcessingRetry(documents, queue,
-                new ProcessingProperties("documents:processing", "ml-workers", Duration.ofSeconds(30), Duration.ofMinutes(1), 2));
+                new ProcessingProperties("documents:processing", "ml-workers", Duration.ofSeconds(30), Duration.ofMinutes(1), 2,
+                        Duration.ofMinutes(1), Duration.ofMinutes(10), 50, 3));
     }
 
     @Test

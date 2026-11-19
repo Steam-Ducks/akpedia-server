@@ -115,6 +115,14 @@ akpedia:
     retry-interval: ${PROCESSING_RETRY_INTERVAL:30s}
     retry-grace: ${PROCESSING_RETRY_GRACE:1m}
     retry-batch-size: ${PROCESSING_RETRY_BATCH_SIZE:50}
+    # A message stuck pending (its worker died mid-processing, and never restarted to resume it
+    # itself) is looked for this often, and handed out again once idle past recovery-idle.
+    recovery-interval: ${PROCESSING_RECOVERY_INTERVAL:1m}
+    recovery-idle: ${PROCESSING_RECOVERY_IDLE:10m}
+    recovery-batch-size: ${PROCESSING_RECOVERY_BATCH_SIZE:50}
+    # Past this many deliveries a message is given up on (processing_status: FAILED) instead of
+    # redelivered; same limit the worker uses for the pending entries it resumes itself.
+    max-deliveries: ${PROCESSING_MAX_DELIVERIES:3}
   keycloak:
     # The Admin API, for the admin's users screen, through the akpedia-server client's service
     # account. Inside a container, Keycloak is reached by its container name, not localhost.

@@ -68,7 +68,8 @@ class ProcessingStreamInitializerTest {
     }
 
     private ProcessingStreamInitializer initializerFor(String stream) {
-        return new ProcessingStreamInitializer(redis, new ProcessingProperties(stream, GROUP, Duration.ofSeconds(30), Duration.ofMinutes(1), 50));
+        return new ProcessingStreamInitializer(redis, new ProcessingProperties(stream, GROUP, Duration.ofSeconds(30), Duration.ofMinutes(1), 50,
+                Duration.ofMinutes(1), Duration.ofMinutes(10), 50, 3));
     }
 
     private List<String> groupNames(String stream) {

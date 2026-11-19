@@ -45,6 +45,9 @@ public class ProcessingQueue {
     /** Field of the stream entry that carries the document id. */
     static final String DOCUMENT_ID_FIELD = "documentId";
 
+    /** Field carrying how many deliveries earlier copies of the message already used up. */
+    static final String ATTEMPT_FIELD = "attempt";
+
     private static final Logger LOG = LoggerFactory.getLogger(ProcessingQueue.class);
 
     private final StringRedisTemplate redis;
@@ -71,6 +74,11 @@ public class ProcessingQueue {
         publish(event.documentId());
     }
 
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onReprocessRequested(DocumentReprocessRequestedEvent event) {
+        publish(event.documentId());
+    }
+
     /**
      * Adds the document's id to the stream and records that it was sent.
      *
@@ -82,9 +90,25 @@ public class ProcessingQueue {
      * @return whether Redis accepted the id; {@code false} means it is still waiting to be sent
      */
     public boolean publish(Long documentId) {
+        return publish(documentId, 0);
+    }
+
+    /**
+     * Same as {@link #publish(Long)}, for a message the recovery job hands out again: the new
+     * message carries {@code attempt}, the deliveries its predecessors used up, so the delivery
+     * limit survives the redelivery.
+     *
+     * @param documentId the document to index
+     * @param attempt    deliveries already spent on earlier messages for this document
+     * @return whether Redis accepted the id
+     */
+    public boolean publish(Long documentId, int attempt) {
+        Map<String, String> fields = attempt > 0
+                ? Map.of(DOCUMENT_ID_FIELD, documentId.toString(), ATTEMPT_FIELD, Integer.toString(attempt))
+                : Map.of(DOCUMENT_ID_FIELD, documentId.toString());
         try {
             redis.opsForStream().add(StreamRecords.newRecord()
-                    .ofMap(Map.of(DOCUMENT_ID_FIELD, documentId.toString()))
+                    .ofMap(fields)
                     .withStreamKey(properties.stream()));
         } catch (DataAccessException e) {
             LOG.warn("Documento {} aprovado, mas nao foi possivel publica-lo em {}; sera reenviado.",
