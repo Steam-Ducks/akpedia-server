@@ -26,6 +26,10 @@ public interface TermsVersionRepository extends JpaRepository<TermsVersion, Long
     @Query("SELECT v FROM TermsVersion v WHERE lower(v.version) = lower(:version)")
     Optional<TermsVersion> findByVersionIgnoreCase(@Param("version") String version);
 
+    /** The name of every published version, to number the next one from. */
+    @Query("SELECT v.version FROM TermsVersion v")
+    List<String> findAllVersions();
+
     /** Whether a version with this name, in any case, was published before. */
     @Query("SELECT COUNT(v) > 0 FROM TermsVersion v WHERE lower(v.version) = lower(:version)")
     boolean existsByVersionIgnoreCase(@Param("version") String version);

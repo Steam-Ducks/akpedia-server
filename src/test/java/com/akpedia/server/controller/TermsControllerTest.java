@@ -33,7 +33,6 @@ import com.akpedia.server.dto.TermsAcceptanceResponse;
 import com.akpedia.server.dto.TermsStatusResponse;
 import com.akpedia.server.dto.TermsVersionResponse;
 import com.akpedia.server.exception.ApiExceptionHandler;
-import com.akpedia.server.exception.InvalidTermsException;
 import com.akpedia.server.exception.TermsChangedException;
 import com.akpedia.server.exception.TermsVersionExistsException;
 import com.akpedia.server.security.CurrentUser;
@@ -157,54 +156,38 @@ class TermsControllerTest {
     }
 
     @Test
-    @DisplayName("POST /admin/terms publishes as the logged-in admin and answers 201")
+    @DisplayName("POST /admin/terms publishes as the logged-in admin and answers 201 with the version it got")
     void publishAnswersCreated() throws Exception {
-        given(terms.publish(USER_ID, new PublishTermsRequest("2.1", "Termos de uso", "Texto")))
-                .willReturn(version("2.1"));
+        given(terms.publish(USER_ID, new PublishTermsRequest("Termos de uso", "Texto"))).willReturn(version("3.0"));
 
         mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"version\": \"2.1\", \"title\": \"Termos de uso\", \"content\": \"Texto\"}"))
+                        .content("{\"title\": \"Termos de uso\", \"content\": \"Texto\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.version").value("2.1"));
+                .andExpect(jsonPath("$.version").value("3.0"));
     }
 
     @Test
-    @DisplayName("POST /admin/terms refuses a blank title or content")
+    @DisplayName("POST /admin/terms refuses a blank or too long title, and a blank content")
     void publishValidates() throws Exception {
-        mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"version\": \"1.0\", \"title\": \" \", \"content\": \"Texto\"}"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"version\": \"1.0\", \"title\": \"Termos\", \"content\": \"\"}"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"version\": \"1.0\", \"title\": \"" + "x".repeat(201) + "\", \"content\": \"Texto\"}"))
-                .andExpect(status().isBadRequest());
+        for (String body : new String[] {
+                "{\"title\": \" \", \"content\": \"Texto\"}",
+                "{\"title\": \"Termos\", \"content\": \"\"}",
+                "{\"title\": \"" + "x".repeat(201) + "\", \"content\": \"Texto\"}"}) {
+            mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest());
+        }
         verify(terms, never()).publish(anyLong(), any());
     }
 
     @Test
-    @DisplayName("POST /admin/terms answers 400 invalid_request, in Portuguese, for a version out of format")
-    void publishRefusesBadVersion() throws Exception {
-        given(terms.publish(eq(USER_ID), any())).willThrow(new InvalidTermsException(
-                "Informe a versão (até 20 caracteres: letras, números, ponto, hífen ou sublinhado)."));
-
-        mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"version\": \"1 0\", \"title\": \"Termos\", \"content\": \"Texto\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("invalid_request"))
-                .andExpect(jsonPath("$.message").value(startsWith("Informe a versão")));
-    }
-
-    @Test
-    @DisplayName("POST /admin/terms answers 409 terms_version_exists for a version published before")
+    @DisplayName("POST /admin/terms answers 409 terms_version_exists when the number was taken")
     void publishRefusesRepeatedVersion() throws Exception {
         given(terms.publish(eq(USER_ID), any())).willThrow(new TermsVersionExistsException("1.0"));
 
         mvc.perform(post("/api/v1/admin/terms").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"version\": \"1.0\", \"title\": \"Termos\", \"content\": \"Texto\"}"))
+                        .content("{\"title\": \"Termos\", \"content\": \"Texto\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("terms_version_exists"))
-                .andExpect(jsonPath("$.message").value("Já existe a versão 1.0. Use um número de versão novo."));
+                .andExpect(jsonPath("$.message").value("Já existe a versão 1.0. Recarregue a página e publique de novo."));
     }
 }

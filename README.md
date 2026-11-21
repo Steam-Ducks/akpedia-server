@@ -361,7 +361,7 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
 | `POST /api/v1/terms/decline` | qualquer usuário logado | `{"version": n}`: registra na auditoria que o usuário recusou (**204**). Sem aceitar a versão atual ninguém usa o sistema (um aceite antigo não vale), então o front oferece só aceitar ou recusar e excluir a conta: depois desta rota, chama `DELETE /api/v1/me` e faz o logout |
 | `GET /api/v1/admin/terms` | `ADMIN` | todas as versões publicadas, da mais nova para a mais antiga |
 | `GET /api/v1/admin/terms/acceptances?version=&user=&page=0&size=20` | `ADMIN` | página de aceites, do mais novo para o mais antigo: `version`, `user_id`, `user_name`, `user_email`, `accepted_at`. `version` filtra uma versão; `user` procura no nome ou no e-mail |
-| `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**). `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
+| `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**), numerada pelo servidor em sequência: `1.0`, `2.0`, `3.0`. `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
 
 - **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
   quatro primeiras acima e `DELETE /api/v1/me` (excluir a conta), responde **403** `terms_pending`, inclusive as de admin: quem
@@ -372,6 +372,10 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
   `1.0` com um texto provisório, para que todos aceitem termos desde o primeiro deploy. O texto
   definitivo entra como uma versão nova, publicada pelo admin. A migration só insere em um banco
   sem nenhuma versão: onde o admin já publicou, nada muda.
+- **Numeração**: cada publicação é a próxima `X.0` depois da maior versão, e quem conta é o
+  servidor, travando a tabela para que duas publicações ao mesmo tempo recebam números seguidos.
+  Versões antigas com outros nomes (de antes da numeração) são ignoradas na conta; sem nenhuma
+  numerada, a primeira é `1.0`.
 - **Sem termos publicados, não há bloqueio**: num banco sem versão nenhuma, ninguém é
   perguntado.
 - **Histórico**: `terms_versions` e `terms_acceptances` (migration `V8__terms_of_use.sql`) só
