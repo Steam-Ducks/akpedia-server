@@ -312,15 +312,6 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("terms_changed", e.getMessage()));
     }
 
-    /**
-     * 400: the admin's new version of the terms has a field the server does not take. Same code
-     * as a blank title or content, which bean validation refuses.
-     */
-    @ExceptionHandler(InvalidTermsException.class)
-    public ResponseEntity<ApiErrorResponse> handleInvalidTerms(InvalidTermsException e) {
-        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
-    }
-
     /** 409: the admin's new version of the terms repeats one published before. */
     @ExceptionHandler(TermsVersionExistsException.class)
     public ResponseEntity<ApiErrorResponse> handleTermsVersionExists(TermsVersionExistsException e) {

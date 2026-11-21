@@ -3,7 +3,7 @@ Olá, {{nome_titular}}.
 Estamos entrando em contato para informar sobre um incidente de segurança que envolveu dados pessoais seus cadastrados no Akpedia.
 
 O que aconteceu
-Em {{data_descoberta}}, identificamos {{descricao_incidente}}. O incidente ocorreu em {{data_incidente}}.
+Em {{data_descoberta}}, identificamos {{descricao_incidente}}. O incidente ocorreu {{data_incidente}}.
 
 Quais dados foram envolvidos
 Os dados pessoais seus que podem ter sido expostos são: {{dados_afetados}}

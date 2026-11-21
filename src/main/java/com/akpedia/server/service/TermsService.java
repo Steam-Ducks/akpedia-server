@@ -1,8 +1,10 @@
 package com.akpedia.server.service;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -19,7 +21,6 @@ import com.akpedia.server.dto.TermsVersionResponse;
 import com.akpedia.server.entity.TermsAcceptance;
 import com.akpedia.server.entity.TermsVersion;
 import com.akpedia.server.exception.InvalidPageRequestException;
-import com.akpedia.server.exception.InvalidTermsException;
 import com.akpedia.server.exception.TermsChangedException;
 import com.akpedia.server.exception.TermsVersionExistsException;
 import com.akpedia.server.repository.TermsAcceptanceRepository;
@@ -30,17 +31,18 @@ import com.akpedia.server.repository.UserRepository;
  * Versioned terms of use: admins publish them, every user accepts the current version before
  * using the API. With nothing published yet, nobody is asked anything.
  *
- * <p>The admin names each version ("1.0", "2026.1"). The current one is the newest published,
- * by {@code published_at} and then id; versions are never compared to find it.
+ * <p>Versions are numbered by the server in sequence, {@code 1.0}, {@code 2.0}, {@code 3.0}. The
+ * current one is still the newest published, by {@code published_at} and then id: older versions
+ * may carry free labels from before the numbering, which are skipped when counting.
  */
 @Service
 public class TermsService {
 
-    /** Letters, digits, '.', '-' and '_', 1 to 20 of them; the column is VARCHAR(20). */
-    private static final Pattern VERSION = Pattern.compile("[A-Za-z0-9._-]{1,20}");
-
-    private static final String INVALID_VERSION =
-            "Informe a versão (até 20 caracteres: letras, números, ponto, hífen ou sublinhado).";
+    /**
+     * A numbered version, {@code X.0}, or {@code X.Y} from before the numbering was only by majors;
+     * anything else is a free label and is skipped.
+     */
+    private static final Pattern NUMBERED = Pattern.compile("(\\d{1,9})\\.\\d{1,9}");
 
     static final int DEFAULT_PAGE_SIZE = 20;
     static final int MAX_PAGE_SIZE = 100;
@@ -161,19 +163,17 @@ public class TermsService {
     }
 
     /**
-     * Publishes a new version, named as the admin typed it (trimmed). It becomes the current one:
-     * everyone, the admin included, must accept it on their next request.
+     * Publishes a new version, numbered the next {@code X.0}. It becomes the current one: everyone,
+     * the admin included, must accept it on their next request.
      *
-     * @throws InvalidTermsException       if the version is missing, too long or has other characters
-     * @throws TermsVersionExistsException if a version with that name, in any case, was published before
+     * @throws TermsVersionExistsException if the number is taken anyway (a version added straight to
+     *                                     the database)
      */
     @Transactional
     public TermsVersionResponse publish(Long publisherId, PublishTermsRequest request) {
-        String version = request.version() == null ? "" : request.version().strip();
-        if (!VERSION.matcher(version).matches()) {
-            throw new InvalidTermsException(INVALID_VERSION);
-        }
+        // Taken before counting, so two admins publishing at once get consecutive numbers.
         versions.lockForPublishing();
+        String version = nextVersion(versions.findAllVersions());
         if (versions.existsByVersionIgnoreCase(version)) {
             throw new TermsVersionExistsException(version);
         }
@@ -192,6 +192,21 @@ public class TermsService {
                 AuditService.details("version", version, "title", terms.getTitle()));
         // The publisher is a reference: their name loads here, inside the transaction.
         return TermsVersionResponse.of(terms);
+    }
+
+    /**
+     * The version after {@code published}: one past the highest major, {@code X.0}. Versions that are
+     * not numbered are left out; with none, {@code 1.0}.
+     */
+    static String nextVersion(Collection<String> published) {
+        long major = 0;
+        for (String version : published) {
+            Matcher numbered = NUMBERED.matcher(version.strip());
+            if (numbered.matches()) {
+                major = Math.max(major, Long.parseLong(numbered.group(1)));
+            }
+        }
+        return (major + 1) + ".0";
     }
 
     private Optional<TermsAcceptance> latestAcceptance(String keycloakId) {

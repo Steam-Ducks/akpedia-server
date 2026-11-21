@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -27,6 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.akpedia.server.dto.BreachNoticeDetail;
 import com.akpedia.server.dto.BreachNoticePreview;
+import com.akpedia.server.dto.BreachNoticeRecipientCount;
 import com.akpedia.server.dto.BreachNoticeRequest;
 import com.akpedia.server.dto.BreachNoticeSendResult;
 import com.akpedia.server.dto.BreachNoticeSummary;
@@ -82,6 +85,9 @@ public class BreachNoticeService {
     static final int DEFAULT_PAGE_SIZE = 20;
     static final int MAX_PAGE_SIZE = 100;
 
+    /** The dates of a notice are Brazilian: none may be after today there. */
+    static final ZoneId BRAZIL = ZoneId.of("America/Sao_Paulo");
+
     private static final String TEMPLATE_SUBJECT = "breach-notice/subject.txt";
     private static final String TEMPLATE_BODY = "breach-notice/body.txt";
 
@@ -110,7 +116,8 @@ public class BreachNoticeService {
         this.template = new BreachNoticeTemplate(read(TEMPLATE_SUBJECT).strip(), read(TEMPLATE_BODY).strip(),
                 Arrays.stream(BreachNoticeField.values())
                         .map(field -> new BreachNoticeTemplate.Field(
-                                field.key(), field.required(), field.automatic(), field.description(), field.example()))
+                                field.key(), field.required(), field.automatic(), field.type().name(),
+                                field.description(), field.example()))
                         .toList());
     }
 
@@ -212,7 +219,7 @@ public class BreachNoticeService {
         String subject = present(request.subject(), "subject");
         String body = present(request.body(), "body");
         BreachNoticeText.requireFields(subject, body);
-        Map<BreachNoticeField, String> values = BreachNoticeText.values(request.fields());
+        Map<BreachNoticeField, String> values = BreachNoticeText.values(request.fields(), LocalDate.now(BRAZIL));
         return new Composed(
                 validSubject(BreachNoticeText.fill(subject, values, "subject")),
                 validBody(BreachNoticeText.fill(body, values, "body")));
@@ -239,6 +246,15 @@ public class BreachNoticeService {
         if (alreadySent > 0) {
             throw BreachNoticeConflictException.duplicate(alreadySent, REPEAT_WINDOW_MINUTES);
         }
+    }
+
+    /**
+     * How many users a notice to everyone would reach now: the same ones {@link #send} picks with
+     * {@code all_users}, for the admin to confirm before sending.
+     */
+    @Transactional(readOnly = true)
+    public BreachNoticeRecipientCount countAllRecipients() {
+        return new BreachNoticeRecipientCount(users.countByDeletedAtIsNullAndKeycloakIdIsNotNull());
     }
 
     /**
