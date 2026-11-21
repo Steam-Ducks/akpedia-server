@@ -27,9 +27,7 @@ import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.AuditLog;
 import com.akpedia.server.entity.TermsVersion;
 import com.akpedia.server.exception.InvalidPageRequestException;
-import com.akpedia.server.exception.InvalidTermsException;
 import com.akpedia.server.exception.TermsChangedException;
-import com.akpedia.server.exception.TermsVersionExistsException;
 import com.akpedia.server.repository.AuditLogRepository;
 import com.akpedia.server.repository.TermsAcceptanceRepository;
 import com.akpedia.server.repository.TermsVersionRepository;
@@ -74,12 +72,17 @@ class TermsServiceTest {
         return entityManager.persist(user);
     }
 
-    private TermsVersionResponse publish(String version) {
-        return publish(version, "Texto " + version);
+    private TermsVersionResponse publish() {
+        return publish("Texto");
     }
 
-    private TermsVersionResponse publish(String version, String content) {
-        return terms.publish(admin.getId(), new PublishTermsRequest(version, "Termos de uso", content));
+    private TermsVersionResponse publish(String content) {
+        return terms.publish(admin.getId(), new PublishTermsRequest("Termos de uso", content));
+    }
+
+    /** A version named freely, as published before the numbering. */
+    private TermsVersion legacy(String version) {
+        return versions.saveAndFlush(new TermsVersion(version, "Termos de uso", "Texto " + version, admin));
     }
 
     @Test
@@ -94,56 +97,54 @@ class TermsServiceTest {
     }
 
     @Test
-    @DisplayName("publishing keeps the version the admin typed, trimmed, and records who published")
-    void publishKeepsTypedVersion() {
-        TermsVersionResponse first = publish("  1.0  ", "  Texto 1  ");
-        TermsVersionResponse second = publish("2026.1-rc_2");
+    @DisplayName("each publish is the next X.0, trimmed, with who published")
+    void publishNumbersVersions() {
+        TermsVersionResponse first = publish("  Texto 1  ");
 
         assertThat(first.version()).isEqualTo("1.0");
         assertThat(first.content()).isEqualTo("Texto 1");
-        assertThat(second.version()).isEqualTo("2026.1-rc_2");
-        assertThat(second.publishedBy()).isEqualTo("Admin Akpedia");
-        assertThat(second.publishedAt()).isNotNull();
-        assertThat(terms.history()).extracting(TermsVersionResponse::version).containsExactly("2026.1-rc_2", "1.0");
+        assertThat(first.publishedBy()).isEqualTo("Admin Akpedia");
+        assertThat(first.publishedAt()).isNotNull();
+        assertThat(publish().version()).isEqualTo("2.0");
+        assertThat(publish().version()).isEqualTo("3.0");
+        assertThat(terms.history()).extracting(TermsVersionResponse::version).containsExactly("3.0", "2.0", "1.0");
     }
 
     @Test
-    @DisplayName("the current version is the newest published, not the highest: 9 after 10 is current")
+    @DisplayName("versions are counted as numbers, so 10.0 comes after 9.0, and an old X.Y counts by its X")
+    void versionsCountAsNumbers() {
+        legacy("9.0");
+        assertThat(publish().version()).isEqualTo("10.0");
+
+        assertThat(TermsService.nextVersion(List.of("2.0", "10.0", "9.0"))).isEqualTo("11.0");
+        assertThat(TermsService.nextVersion(List.of("1.0", "1.3"))).isEqualTo("2.0");
+        assertThat(TermsService.nextVersion(List.of())).isEqualTo("1.0");
+    }
+
+    @Test
+    @DisplayName("versions named before the numbering are skipped when counting, but the newest is still current")
+    void legacyLabelsAreSkipped() {
+        legacy("4.0");
+        legacy("2026.1-rc_2");
+        legacy("1.");
+        legacy("OI");
+
+        assertThat(terms.status(ana.getKeycloakId()).current().version()).isEqualTo("OI");
+        assertThat(publish().version()).isEqualTo("5.0");
+        assertThat(terms.status(ana.getKeycloakId()).current().version()).isEqualTo("5.0");
+    }
+
+    @Test
+    @DisplayName("the current version is the newest published, even when a legacy label sorts higher")
     void currentIsNewestPublished() {
-        publish("10");
-        publish("9");
-        publish("1.5");
+        legacy("10");
+        legacy("9");
 
-        assertThat(terms.status(ana.getKeycloakId()).current().version()).isEqualTo("1.5");
-        assertThat(terms.history()).extracting(TermsVersionResponse::version).containsExactly("1.5", "9", "10");
+        assertThat(terms.status(ana.getKeycloakId()).current().version()).isEqualTo("9");
+        assertThat(terms.history()).extracting(TermsVersionResponse::version).containsExactly("9", "10");
         assertThatThrownBy(() -> terms.accept(ana.getId(), "10")).isInstanceOf(TermsChangedException.class);
-        assertThat(terms.accept(ana.getId(), "1.5").version()).isEqualTo("1.5");
+        assertThat(terms.accept(ana.getId(), "9").version()).isEqualTo("9");
         assertThat(terms.mustAccept(ana.getKeycloakId())).isFalse();
-    }
-
-    @Test
-    @DisplayName("a version out of format is refused: blank, too long, or with other characters")
-    void publishRefusesBadVersion() {
-        for (String bad : new String[] {null, "", "   ", "x".repeat(21), "1 0", "1,0", "v1/2", "versão", "1.0!"}) {
-            assertThatThrownBy(() -> publish(bad))
-                    .as("version %s", bad)
-                    .isInstanceOf(InvalidTermsException.class)
-                    .hasMessage("Informe a versão (até 20 caracteres: letras, números, ponto, hífen ou sublinhado).");
-        }
-        assertThat(publish("x".repeat(20)).version()).hasSize(20);
-    }
-
-    @Test
-    @DisplayName("a version published before, in any case and even if not the latest, is refused")
-    void publishRefusesRepeatedVersion() {
-        publish("v1.0");
-        publish("2.0");
-
-        assertThatThrownBy(() -> publish("v1.0")).isInstanceOf(TermsVersionExistsException.class);
-        assertThatThrownBy(() -> publish("  V1.0 "))
-                .isInstanceOf(TermsVersionExistsException.class)
-                .hasMessage("Já existe a versão V1.0. Use um número de versão novo.");
-        assertThat(terms.history()).hasSize(2);
     }
 
     @Test
@@ -158,7 +159,7 @@ class TermsServiceTest {
     @Test
     @DisplayName("once terms are published, everyone must accept them, the publisher included")
     void publishedTermsMustBeAccepted() {
-        publish("1.0");
+        publish();
 
         assertThat(terms.mustAccept(ana.getKeycloakId())).isTrue();
         assertThat(terms.mustAccept(admin.getKeycloakId())).isTrue();
@@ -169,7 +170,7 @@ class TermsServiceTest {
     @Test
     @DisplayName("accepting the current version lets the user through, until a new one is published")
     void acceptingCurrentVersion() {
-        publish("1.0");
+        publish();
 
         var accepted = terms.accept(ana.getId(), "1.0");
 
@@ -178,18 +179,18 @@ class TermsServiceTest {
         assertThat(terms.mustAccept(ana.getKeycloakId())).isFalse();
         assertThat(terms.status(ana.getKeycloakId()).accepted().version()).isEqualTo("1.0");
 
-        publish("1.1");
+        publish();
 
         assertThat(terms.mustAccept(ana.getKeycloakId())).isTrue();
         assertThat(terms.status(ana.getKeycloakId()).accepted().version()).isEqualTo("1.0");
-        assertThat(terms.status(ana.getKeycloakId()).current().version()).isEqualTo("1.1");
+        assertThat(terms.status(ana.getKeycloakId()).current().version()).isEqualTo("2.0");
     }
 
     @Test
     @DisplayName("accepting a version that is no longer current is refused")
     void acceptingOldVersionIsRefused() {
-        publish("1.0");
-        publish("2.0");
+        publish();
+        publish();
 
         assertThatThrownBy(() -> terms.accept(ana.getId(), "1.0"))
                 .isInstanceOf(TermsChangedException.class)
@@ -206,10 +207,10 @@ class TermsServiceTest {
     @Test
     @DisplayName("every version accepted is kept, and accepting one again answers the first acceptance")
     void acceptancesAreAppendOnly() {
-        publish("1.0");
+        publish();
         var first = terms.accept(ana.getId(), "1.0");
         var again = terms.accept(ana.getId(), "1.0");
-        publish("2.0");
+        publish();
         terms.accept(ana.getId(), "2.0");
 
         assertThat(again).isEqualTo(first);
@@ -220,10 +221,10 @@ class TermsServiceTest {
     @Test
     @DisplayName("the admin's acceptances list is newest first, filtered by version and by the user's name or e-mail")
     void acceptancesList() {
-        publish("1.0");
+        publish();
         terms.accept(ana.getId(), "1.0");
         terms.accept(admin.getId(), "1.0");
-        publish("2.0");
+        publish();
         terms.accept(ana.getId(), "2.0");
 
         PageResponse<TermsAcceptanceEntry> all = terms.acceptances(null, null, 0, 20);
@@ -244,10 +245,10 @@ class TermsServiceTest {
     @Test
     @DisplayName("the admin's users screen gets the version each user accepted last, not the highest")
     void lastAcceptedVersionsAreTheLatest() {
-        publish("9");
+        legacy("9");
         terms.accept(ana.getId(), "9");
         terms.accept(admin.getId(), "9");
-        publish("10");
+        legacy("10");
         terms.accept(ana.getId(), "10");
         entityManager.flush();
 
@@ -266,7 +267,7 @@ class TermsServiceTest {
     @Test
     @DisplayName("publishing and accepting are recorded in the audit trail, with the version as text")
     void publishAndAcceptAreAudited() {
-        TermsVersionResponse published = publish("1.0");
+        TermsVersionResponse published = publish();
         terms.accept(ana.getId(), "1.0");
 
         assertThat(eventsOf(admin.getId())).singleElement().satisfies(event -> {
@@ -283,10 +284,9 @@ class TermsServiceTest {
     }
 
     @Test
-    @DisplayName("a refused publish or acceptance leaves no event behind")
+    @DisplayName("a refused acceptance leaves no event behind")
     void refusedActionsAreNotAudited() {
         assertThatThrownBy(() -> terms.accept(ana.getId(), "1.0")).isInstanceOf(TermsChangedException.class);
-        assertThatThrownBy(() -> publish("1 0")).isInstanceOf(InvalidTermsException.class);
 
         assertThat(eventsOf(ana.getId())).isEmpty();
         assertThat(eventsOf(admin.getId())).isEmpty();
@@ -295,7 +295,7 @@ class TermsServiceTest {
     @Test
     @DisplayName("declining is recorded against the version shown, or none if it does not exist")
     void declineIsAudited() {
-        publish("1.0");
+        publish();
         long before = auditLogs.count();
 
         terms.decline("1.0");

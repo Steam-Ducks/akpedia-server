@@ -125,19 +125,18 @@ public class TermsController {
     @Operation(
             summary = "Publish a new version of the terms of use (ADMIN)",
             description = """
-                    `version` is what the admin calls it (`1.0`, `2.1`, `2026.1`): trimmed, 1 to 20 letters,
-                    digits, `.`, `-` or `_`, and different, in any case, from every version published before.
-                    `content` is plain text, paragraphs separated by blank lines; it is never read as HTML.
-                    The new version is the current one, whatever its name: the current terms are always the
-                    newest published. Published versions are never changed, and every user, the admin
-                    included, must accept the new one on their next request.""")
+                    The server numbers the version in sequence, the next `X.0` (`3.0` after `2.0`); versions
+                    published before the numbering under other names are skipped when counting, and with
+                    none numbered it is `1.0`. `content` is plain text, paragraphs separated by blank lines;
+                    it is never read as HTML. The new version is the current one: every user, the admin
+                    included, must accept it on their next request. Published versions never change.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "201", description = "Published."),
+        @ApiResponse(responseCode = "201", description = "Published, with the version it got."),
         @ApiResponse(responseCode = "400",
-                description = "`invalid_request`: `version` is missing or not in the format above, or `title` or "
-                        + "`content` is blank or too long.",
+                description = "`invalid_request`: `title` or `content` is blank or too long.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "409", description = "`terms_version_exists`: that version was published before.",
+        @ApiResponse(responseCode = "409",
+                description = "`terms_version_exists`: the number was taken by a version added straight to the database.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @PostMapping("/admin/terms")

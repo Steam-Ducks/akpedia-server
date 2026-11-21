@@ -30,6 +30,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     List<User> findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById();
 
+    /** How many users {@link #findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById} would answer. */
+    long countByDeletedAtIsNullAndKeycloakIdIsNotNull();
+
     /** Whether the row linked to this Keycloak account was disabled by an admin. */
     boolean existsByKeycloakIdAndActiveFalse(String keycloakId);
 

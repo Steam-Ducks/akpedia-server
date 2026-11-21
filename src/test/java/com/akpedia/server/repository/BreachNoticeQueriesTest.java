@@ -170,5 +170,6 @@ class BreachNoticeQueriesTest {
         List<Long> ids = users.findByDeletedAtIsNullAndKeycloakIdIsNotNullOrderById().stream().map(User::getId).toList();
 
         assertThat(ids).contains(ana.getId()).doesNotContain(bruno.getId(), admin.getId());
+        assertThat(users.countByDeletedAtIsNullAndKeycloakIdIsNotNull()).isEqualTo(ids.size());
     }
 }
