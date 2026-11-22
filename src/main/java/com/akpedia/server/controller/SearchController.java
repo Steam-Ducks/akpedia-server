@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.akpedia.server.dto.SearchResult;
 import com.akpedia.server.service.SearchService;
+import com.akpedia.server.security.CurrentUser;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -21,9 +22,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 public class SearchController {
 
     private final SearchService searchService;
+    private final CurrentUser currentUser;
 
-    public SearchController(SearchService searchService) {
+    public SearchController(SearchService searchService, CurrentUser currentUser) {
         this.searchService = searchService;
+        this.currentUser = currentUser;
     }
 
     @Operation(
@@ -35,6 +38,11 @@ public class SearchController {
                     with an empty list. `categoryIds` narrows results to one or more categories, and can be used
                     on its own: without `q`, results are ordered by when the document last changed, most recent
                     first, and `score` comes back null. At least one of `q` and `categoryIds` is required.
+
+                    Only the categories the caller's sector may see are searched, read from the sector's
+                    permissions on every search. A category in `categoryIds` the sector may not see is dropped,
+                    not refused; when no category is left, the answer is an empty list, without the search text
+                    ever reaching the embedding service.
 
                     Each result identifies the document, names it, gives its format, and carries the chunk that
                     matched together with that chunk's position in the document, counted from 0 -- or, with no
@@ -56,6 +64,6 @@ public class SearchController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<Long> categoryIds,
             @RequestParam(required = false) Integer limit) {
-        return searchService.search(q, categoryIds, limit);
+        return searchService.search(q, categoryIds, limit, currentUser.id());
     }
 }

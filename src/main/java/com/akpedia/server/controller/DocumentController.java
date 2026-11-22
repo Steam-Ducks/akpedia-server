@@ -36,6 +36,7 @@ import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.dto.SubmissionSummary;
 import com.akpedia.server.entity.Document;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -74,18 +75,21 @@ public class DocumentController {
     private final DocumentListService listService;
     private final DocumentAnalysisService analysisService;
     private final DocumentSubmissionService submissionService;
+    private final CurrentUser currentUser;
 
     public DocumentController(
             DocumentUploadService uploadService,
             DocumentFileService fileService,
             DocumentListService listService,
             DocumentAnalysisService analysisService,
-            DocumentSubmissionService submissionService) {
+            DocumentSubmissionService submissionService,
+            CurrentUser currentUser) {
         this.uploadService = uploadService;
         this.fileService = fileService;
         this.listService = listService;
         this.analysisService = analysisService;
         this.submissionService = submissionService;
+        this.currentUser = currentUser;
     }
 
     @Operation(
@@ -97,7 +101,10 @@ public class DocumentController {
                     the document: `category`, the `responsible_name` of the user who uploaded it, and
                     `updated_at`.
 
-                    A document still under review, rejected or archived is never listed, even once indexed.""")
+                    A document still under review, rejected or archived is never listed, even once indexed.
+
+                    Only documents in a category the caller's sector may see are listed, read from the sector's
+                    permissions on every request: a sector with no category answers an empty list.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Documents, most recently changed first; the list may be empty."),
         @ApiResponse(responseCode = "400", description = "The limit is invalid.",
@@ -105,13 +112,13 @@ public class DocumentController {
     })
     @GetMapping("/documents")
     public List<DocumentSummary> recent(@RequestParam(required = false) Integer limit) {
-        return listService.recent(limit);
+        return listService.recent(limit, currentUser.id());
     }
 
     @Operation(
-            summary = "List the author's own submissions and where each one stands",
+            summary = "List the logged-in user's own submissions and where each one stands",
             description = """
-                    Answers the documents uploaded by `creatorId`, most recently submitted first, each with
+                    Answers the documents the logged-in user uploaded, most recently submitted first, each with
                     a status derived for the author rather than the stored one:
 
                     - `UNDER_REVIEW`: waiting on an approver, whatever the indexing is doing;
@@ -129,22 +136,14 @@ public class DocumentController {
                     that is still a draft, or that was archived, is not a submission and is not listed.
 
                     `categoryIds` narrows the listing to one or more categories; with none given, every
-                    category is listed.
-
-                    Without `creatorId` the configured default user is used, since this sprint has no
-                    login (see the README).""")
+                    category is listed.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "One page of submissions; the page may be empty."),
         @ApiResponse(responseCode = "400", description = "page or size is out of bounds.",
-                content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "No user exists with the given creatorId.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     @GetMapping("/documents/submissions")
     public PageResponse<SubmissionSummary> submissions(
-            @RequestParam(required = false)
-            @Parameter(description = "Author whose submissions to list. Defaults to the configured user.")
-            Long creatorId,
             @RequestParam(required = false)
             @Parameter(description = "Zero-based page. Defaults to 0.")
             Integer page,
@@ -155,7 +154,7 @@ public class DocumentController {
             @Parameter(description = "One or more category ids to filter by. Defaults to every category.")
             List<Long> categoryIds) {
 
-        return submissionService.submissions(creatorId, page, size, categoryIds);
+        return submissionService.submissions(currentUser.id(), page, size, categoryIds);
     }
 
     @Operation(
@@ -240,12 +239,14 @@ public class DocumentController {
                     in the meantime, which is how the approver reads it.
 
                     `suggestedCategoryId` and `categoryConfidence` record the category the classifier
-                    suggested and how sure it was, for the approver to confirm or correct.""")
+                    suggested and how sure it was, for the approver to confirm or correct.
+
+                    The document is attributed to the logged-in user.""")
     @ApiResponses({
         @ApiResponse(responseCode = "201", description = "Document converted and stored, awaiting approval."),
         @ApiResponse(responseCode = "400", description = "Invalid request (empty file, missing parameter, or invalid parameter).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "The specified category, suggested category or user does not exist.",
+        @ApiResponse(responseCode = "404", description = "The specified category or suggested category does not exist.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "413", description = "File exceeds the accepted limit.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -262,10 +263,6 @@ public class DocumentController {
             @Schema(type = "string", format = "binary", description = "File to upload in any supported format.")
             MultipartFile file,
             @RequestParam("categoryId") Long categoryId,
-            @RequestParam(value = "creatorId", required = false)
-            @Parameter(description = "Author of the document. Optional while there is no registration "
-                    + "or login: omitting it attributes the document to the configured default user.")
-            Long creatorId,
             @RequestParam(value = "name", required = false) String name,
             @RequestParam(value = "description", required = false) String description,
             @RequestParam(value = "suggestedCategoryId", required = false)
@@ -277,7 +274,7 @@ public class DocumentController {
 
         Document document = uploadService.upload(
                 file.getBytes(), file.getOriginalFilename(), file.getContentType(),
-                categoryId, creatorId, name, description, suggestedCategoryId, categoryConfidence);
+                categoryId, currentUser.id(), name, description, suggestedCategoryId, categoryConfidence);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(DocumentUploadResponse.from(document));
     }
@@ -290,6 +287,10 @@ public class DocumentController {
                     so pointing a browser at this URL renders the document instead of downloading it. The file
                     name carries the `.pdf` extension even when the document was named without one.
 
+                    A document in a category the caller's sector may not see answers 403 `category_forbidden`,
+                    before anything about its state. Two exceptions open it anyway: its author, and an `APPROVER`
+                    or `ADMIN` while it awaits approval, since the review queue lists every pending document.
+
                     Two documents are not openable: an archived one (403), which is out of circulation, and one
                     akpedia-ml is indexing right now (409) -- the same request works once the indexing lands.
                     A document awaiting approval opens, since the approver has to read it, and so does one
@@ -298,7 +299,8 @@ public class DocumentController {
                     The response is private and revalidated on every use, and carries an `ETag` and
                     `Last-Modified`: a browser that already holds the document asks again and gets a 304 with no
                     bytes, while one whose document has since been archived is refused instead of going on
-                    showing its copy. `Accept-Ranges: bytes` is advertised and a `Range` request answers 206, so
+                    showing its copy -- and so is one whose category has since been taken from the sector.
+                    `Accept-Ranges: bytes` is advertised and a `Range` request answers 206, so
                     a PDF viewer can fetch a document by parts instead of waiting for the whole file.
                     `X-Content-Type-Options: nosniff` keeps the browser on the declared type.""")
     @ApiResponses({
@@ -311,7 +313,7 @@ public class DocumentController {
         @ApiResponse(responseCode = "304", description = "The caller's copy is current; no body is sent."),
         @ApiResponse(responseCode = "400", description = "The id in the path is not a number.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
-        @ApiResponse(responseCode = "403", description = "The document is archived.",
+        @ApiResponse(responseCode = "403", description = "Category hidden from the caller's sector (`category_forbidden`), or archived (`document_archived`).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "No such document, or the document has no stored file.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -326,7 +328,7 @@ public class DocumentController {
             Long id,
             WebRequest request) {
 
-        DocumentFileDescriptor file = fileService.describe(id);
+        DocumentFileDescriptor file = fileService.describe(id, currentUser.viewer());
         if (isUnchanged(file, request)) {
             return null;
         }
@@ -357,7 +359,7 @@ public class DocumentController {
             @RequestHeader(HttpHeaders.RANGE) String range,
             WebRequest request) {
 
-        DocumentFileDescriptor file = fileService.describe(id);
+        DocumentFileDescriptor file = fileService.describe(id, currentUser.viewer());
         if (isUnchanged(file, request)) {
             return null;
         }
@@ -379,8 +381,8 @@ public class DocumentController {
     /**
      * Whether the caller's copy is still the current one.
      *
-     * <p>Asked only after the document has been described, so an archived document is refused
-     * instead of having its cached copy confirmed -- which is what makes caching this response
+     * <p>Asked only after the document has been described, so an archived document -- or one the
+     * caller's sector may no longer see -- is refused instead of having its cached copy confirmed -- which is what makes caching this response
      * safe in the first place.
      */
     private static boolean isUnchanged(DocumentFileDescriptor file, WebRequest request) {

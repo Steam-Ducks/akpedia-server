@@ -23,6 +23,12 @@ docker compose up --build
 
 - API disponível em `http://localhost:8080`
 - Postgres exposto em `localhost:5432` (db `akpedia`, user/senha `akpedia`)
+- Keycloak em `http://localhost/auth`, atrás do nginx (ver [Autenticação (Keycloak)](#autenticação-keycloak)).
+- Mailpit em `http://localhost:8025`: a caixa de entrada de teste, com todo e-mail que o server e
+  o Keycloak enviam (ver [E-mail (SMTP)](#e-mail-smtp)).
+- nginx em `http://localhost`: o endereço único do app (ver [Entrada única (nginx)](#entrada-única-nginx)).
+  Para ele mandar a API para o serviço `app` em vez do dev container, defina `SERVER_UPSTREAM=app:8080`.
+  Ele **exige** o `KEYCLOAK_DEV_ADMIN_PASSWORD` no `.env`: sem ele, o container sai com erro.
 
 Para parar: `docker compose down` (ou `docker compose down -v` para apagar os dados do banco).
 
@@ -63,6 +69,7 @@ akpedia-server/
 ├── .dockerignore
 ├── .gitignore
 ├── .env.example
+├── keycloak/                      # imagem do Keycloak + realm akpedia (akpedia-realm.json) + tema de login (themes/akpedia)
 ├── mvnw / mvnw.cmd / .mvn/wrapper/ # Maven Wrapper
 ├── README.md
 └── src/
@@ -75,15 +82,18 @@ akpedia-server/
     │   │   └── repository/ # interfaces Spring Data JPA
     │   │   ├── client/ # clientes HTTP de serviços externos
     │   │   │   ├── EmbeddingClient.java
-    │   │   │   └── GotenbergClient.java # conversão de documentos para PDF
+    │   │   │   ├── GotenbergClient.java # conversão de documentos para PDF
+    │   │   │   └── KeycloakAdminClient.java # Admin API do Keycloak, para a tela de usuários
     │   │   ├── config/ # beans de configuração e @ConfigurationProperties
     │   │   │   ├── EmbeddingClientConfig.java
     │   │   │   ├── EmbeddingProperties.java
     │   │   │   ├── GotenbergClientConfig.java
     │   │   │   ├── GotenbergProperties.java
-    │   │   │   ├── DefaultUserProperties.java # akpedia.default-user-email
-    │   │   │   ├── DefaultUserConfig.java
-    │   │   │   ├── DefaultUserProvider.java # resolve o usuário padrão no startup
+    │   │   │   ├── MailProperties.java # akpedia.mail.*: remetente dos e-mails
+    │   │   │   ├── MailConfig.java
+    │   │   │   ├── KeycloakAdminClientConfig.java
+    │   │   │   ├── KeycloakAdminProperties.java # akpedia.keycloak.admin.*: URL, realm e service account
+    │   │   │   ├── SecurityConfig.java # token do Keycloak nas rotas /api, papéis da revisão
     │   │   │   ├── ProcessingProperties.java # akpedia.processing.*: stream, grupo e reenvio
     │   │   │   ├── ProcessingConfig.java
     │   │   │   ├── InternalApiProperties.java # akpedia.internal.token: segredo das rotas /internal
@@ -93,6 +103,8 @@ akpedia-server/
     │   │   ├── controller/
     │   │   │   ├── DocumentController.java # upload, análise e listagem de documentos
     │   │   │   ├── DocumentReviewController.java # aprovar ou devolver um documento da fila
+    │   │   │   ├── AdminUserController.java # usuários, papéis e ativação (ADMIN)
+    │   │   │   ├── AuditController.java # auditoria (ADMIN)
     │   │   │   ├── InternalDocumentController.java # rotas /internal chamadas pelo worker do akpedia-ml
     │   │   │   ├── EmbeddingController.java # rotas de embedding
     │   │   │   └── HealthController.java # endpoint /health simples
@@ -141,7 +153,10 @@ akpedia-server/
     │   │       ├── DocumentApprovedEvent.java # publicado na aprovação, tratado após o commit
     │   │       ├── ProcessingQueue.java # XADD em documents:processing depois do commit, e o XACK
     │   │       ├── DocumentIndexingService.java # grava o resultado ou a falha do worker e confirma a mensagem
-    │   │       └── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
+    │   │       ├── ProcessingRetry.java # reenvia aprovados que nunca chegaram à fila
+    │   │       ├── MailService.java # envia e-mail um a um e devolve o resultado de cada envio
+    │   │       ├── OutgoingMail.java # destinatário, assunto e corpo em texto
+    │   │       └── MailResult.java # Sent, ou Failed com o motivo
     │   └── resources/
     │       ├── application.yml
     │       └── db/migration/
@@ -149,8 +164,9 @@ akpedia-server/
     │           ├── V2__create_core_schema.sql # schema core (setores, documentos, embeddings…)
     │           ├── V3__fix_embeddings_vector_dimensions.sql # corrige vector(1536) -> vector(384)
     │           ├── V4__document_review_fields.sql # campos de revisão + catálogo de categorias
-    │           ├── V5__seed_default_approver.sql # usuário padrão temporário (ver Configuração)
-    │           └── V6__document_processing_enqueued_at.sql # quando o aprovado entrou na fila (outbox)
+    │           ├── V5__seed_default_approver.sql # usuário de antes do login (ver Configuração)
+    │           ├── V6__document_processing_enqueued_at.sql # quando o aprovado entrou na fila (outbox)
+    │           └── V7__users_from_keycloak.sql # users.keycloak_id; password_hash deixa de ser obrigatório
     └── test/java/com/akpedia/server/ # testes
         ├── AkpediaServerApplicationTests.java
         ├── controller/
@@ -178,56 +194,465 @@ A aplicação lê as configurações de conexão a partir de variáveis de ambie
 | `DB_PASSWORD`  | `akpedia`                                        |
 | `SERVER_PORT`  | `8080`                                           |
 
-### Usuário padrão (temporário)
+### Autenticação (Keycloak)
 
-> **Temporário.** Esta seção existe enquanto não houver CRUD de usuários nem autenticação.
-> Quando o cadastro e o login entrarem, o usuário abaixo e a migration que o cria devem sair,
-> junto com o `akpedia.default-user-email` e o `VITE_DEFAULT_USER_ID` do front.
+O login, as contas e os papéis dos usuários ficam no [Keycloak](https://www.keycloak.org/), que
+sobe no `docker-compose.yml` como serviço `keycloak` (imagem `quay.io/keycloak/keycloak:26.7.4`,
+em modo dev), servido em `/auth` (`KC_HTTP_RELATIVE_PATH`) atrás do nginx: `http://localhost/auth`.
+Ele não publica porta própria; entre containers, responde em `keycloak:8080/auth`.
 
-Todo documento precisa de um autor e toda aprovação precisa registrar quem aprovou. Como ainda
-não existe cadastro nem login, a migration `V5__seed_default_approver.sql` cria direto no banco
-um setor padrão (`Engenharia`) e um único usuário, que é ao mesmo tempo o autor dos uploads e o
-aprovador:
+#### Entrada única (nginx)
 
-| Campo           | Valor                                            |
-|-----------------|--------------------------------------------------|
-| `name`          | `Aprovador Padrao`                               |
-| `email`         | `aprovador@akpedia.local`                        |
-| `sector`        | `Engenharia`                                     |
-| `is_active`     | `true`                                           |
-| `password_hash` | placeholder — **não é uma credencial utilizável** |
+O serviço `nginx` ([`nginx/`](nginx/)) deixa o front, a API e o Keycloak no mesmo endereço,
+`http://localhost` (porta em `AKPEDIA_HTTP_PORT`), como na POC do Keycloak:
 
-A migration é idempotente (`ON CONFLICT DO NOTHING` no nome do setor e no email do usuário),
-então rodar as migrations de novo não duplica nem sobrescreve nada.
+| Caminho              | Vai para                                | Variável            | Default                     |
+|----------------------|-----------------------------------------|---------------------|-----------------------------|
+| `/auth/`             | Keycloak                                | `KEYCLOAK_UPSTREAM` | `keycloak:8080`             |
+| `/api/`, `/health`   | `akpedia-server`                        | `SERVER_UPSTREAM`   | `akpedia-devcontainer:8080` |
+| `/`                  | `akpedia-client` (Vite, com HMR, em dev) | `CLIENT_UPSTREAM`   | `akpedia-devcontainer:5173` |
 
-| Variável              | Default                   | Para que serve                        |
-|-----------------------|---------------------------|---------------------------------------|
-| `DEFAULT_USER_EMAIL`  | `aprovador@akpedia.local` | Email do usuário padrão (`akpedia.default-user-email`) |
-
-O servidor **resolve esse email para o id no startup**, uma vez, e guarda o id. Se nenhum usuário
-tiver o email configurado, a aplicação **não sobe** e o log aponta o problema:
-
-```
-Usuario padrao nao encontrado pelo email 'aprovador@akpedia.local'. A configuracao
-akpedia.default-user-email (variavel DEFAULT_USER_EMAIL) tem que apontar para um usuario que
-exista no banco. Confira se a migration V5__seed_default_approver.sql rodou e se o email
-configurado e o mesmo que ela insere.
-```
-
-Falhar no startup é proposital: é melhor do que descobrir o problema num 404 sem explicação no
-primeiro upload.
-
-É esse id que o `POST /api/v1/documents` usa quando o `creatorId` não vem na requisição (ver
-[Documentos](#documentos)), então o upload tem autor mesmo sem ninguém logado.
-
-**No front**, o id correspondente vai em `VITE_DEFAULT_USER_ID`, no `.env.example` do repositório
-do cliente — aqui não há código de cliente, e o `.env.example` deste repo serve só ao
-`docker-compose`. O id é valor de sequência e muda de banco para banco, então pegue o do seu:
+Os defaults servem para o dev container (`akpedia run`). O nginx resolve os nomes a cada
+requisição, então sobe mesmo com o dev container parado (e responde 502 até ele subir). A
+configuração vai copiada para a imagem, como a do Keycloak: depois de editá-la, rode
+`docker compose up -d --build nginx`.
 
 ```bash
-docker compose exec db psql -U akpedia -d akpedia \
-  -c "SELECT id FROM users WHERE email = 'aprovador@akpedia.local'"
+cp .env.example .env              # e preencha KEYCLOAK_DEV_ADMIN_PASSWORD
+docker compose up -d keycloak     # sobe também o db e cria o banco keycloak
 ```
+
+- **Banco**: o Keycloak guarda os dados no mesmo Postgres, num banco à parte (`keycloak`). Quem
+  cria esse banco é o serviço `keycloak-db-init`, que roda uma vez a cada `up` e sai; ele funciona
+  também num volume do Postgres que já existia.
+- **Realm**: o realm `akpedia` é versionado em [`keycloak/akpedia-realm.json`](keycloak/akpedia-realm.json)
+  e importado com `--import-realm` **só na primeira subida**. Se o realm já existe, o arquivo é
+  ignorado. O arquivo vai copiado para dentro da imagem (`keycloak/Dockerfile`), e não montado
+  como volume, porque o dev container usa o Docker do host, que não enxerga os caminhos de
+  dentro dele. Para aplicar uma mudança no arquivo, apague o realm no console de administração
+  (ou o banco `keycloak`) e suba de novo com `docker compose up -d --build keycloak`.
+- **Console de administração**: `http://localhost/auth/admin`, com o admin do realm `master`
+  (`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`, `admin` / `admin` por padrão).
+
+O que o realm `akpedia` traz:
+
+| Item | Configuração |
+|------|--------------|
+| Cadastro | Só o admin cadastra usuários (tela Usuários do app, `POST /api/v1/admin/users`): o autocadastro fica desligado (`registrationAllowed: false`) e a tela de login não tem link de cadastro; o email é o nome de usuário |
+| Atributos obrigatórios | Nome, sobrenome, email, `cpf` (11 dígitos, só números) e `sector` (lista com os 7 setores) |
+| Papéis | `STANDARD`, `APPROVER` e `ADMIN`. Toda conta nova recebe `STANDARD` (papel padrão do realm) |
+| `akpedia-client` | Cliente público do front: Authorization Code + PKCE (S256), redirect para `AKPEDIA_CLIENT_URL`. O access token leva `akpedia-server` no `aud` e o setor do usuário na claim `sector` |
+| `akpedia-server` | Cliente confidencial do back, com service account (`view-users` e `manage-users` do `realm-management`) para usar a Admin API |
+| Idioma | Telas em português (`pt-BR`), com inglês como opção |
+| Tema | `akpedia` nas telas de login e senha (ver abaixo) |
+
+Os setores e as regras do CPF estão no User Profile do realm (no arquivo, dentro de
+`components` → `kc.user.profile.config`; no console, em *Realm settings* → *User profile*).
+
+| Variável                        | Default                     | Para que serve |
+|---------------------------------|-----------------------------|----------------|
+| `KEYCLOAK_URL`                  | `http://localhost/auth`     | URL pública do Keycloak, que é também o emissor (`iss`) dos tokens. Entre containers ele responde em `keycloak:8080/auth` |
+| `KEYCLOAK_ADMIN`                | `admin`                     | Admin do realm `master` (console de administração) |
+| `KEYCLOAK_ADMIN_PASSWORD`       | `admin`                     | Senha desse admin |
+| `KEYCLOAK_DB`                   | `keycloak`                  | Banco do Keycloak no Postgres |
+| `AKPEDIA_CLIENT_URL`            | `http://localhost`          | URL do front, para onde o login e o logout podem voltar |
+| `KEYCLOAK_SERVER_CLIENT_SECRET` | `akpedia-dev-server-secret` | Secret do cliente `akpedia-server` |
+| `KEYCLOAK_DEV_ADMIN_EMAIL`      | `admin@akpedia.local`       | Email (e login) do usuário `ADMIN` inicial |
+| `KEYCLOAK_DEV_ADMIN_PASSWORD`   | (sem default)               | Senha desse usuário. **Obrigatória**: sem ela o Keycloak não sobe |
+
+As quatro últimas só são lidas quando o realm é importado, ou seja, na primeira subida.
+
+#### Tema das telas de login
+
+As telas do Keycloak (login, erros, troca de senha) usam o tema `akpedia`, em
+[`keycloak/themes/akpedia`](keycloak/themes/akpedia), com as cores, a fonte (Manrope), o logo e os
+campos e botões do akpedia-client. Ele herda o `keycloak.v2` e só troca o CSS
+(`login/resources/css/akpedia.css`), então todos os fluxos do Keycloak continuam funcionando.
+
+- Vai copiado para a imagem (`keycloak/Dockerfile`): depois de mudar o CSS, rode
+  `docker compose up -d --build keycloak`. Em modo dev o Keycloak não guarda cache de tema, então
+  basta recarregar a página.
+- Realm novo já vem com `loginTheme: akpedia`. Num realm que já existia, escolha o tema em
+  **Realm settings → Themes → Login theme** no console de administração.
+
+#### Usuário ADMIN inicial (só para desenvolvimento)
+
+O import cria um usuário com o papel `ADMIN`, para entrar no app antes de existir qualquer outro
+administrador:
+
+| Campo  | Valor |
+|--------|-------|
+| Login  | `KEYCLOAK_DEV_ADMIN_EMAIL` (`admin@akpedia.local` por padrão) |
+| Senha  | `KEYCLOAK_DEV_ADMIN_PASSWORD`, do `.env` |
+| Papéis | `ADMIN` e `STANDARD` |
+| CPF / setor | `52998224725` / `Engenharia` |
+
+Ele existe só para o ambiente local. Fora dele, não importe esse usuário: tire-o do arquivo ou
+apague-o depois do import, e crie os administradores de verdade pelo console.
+
+### Login nas rotas da API
+
+Toda rota em `/api` exige o access token do Keycloak no header `Authorization: Bearer <token>`;
+sem ele, ou com um token vencido, a resposta é **401** `unauthorized`. O token vem do login no front
+(`akpedia-client`). O servidor confere a assinatura, o emissor (`iss`) e se o token foi emitido
+para ele (`akpedia-server` no `aud`).
+
+| Rota | Quem pode |
+|------|-----------|
+| `GET /health`, `/actuator/health`, Swagger (`/swagger-ui.html`, `/v3/api-docs`) | qualquer um, sem token |
+| `/internal/**` | só o worker do akpedia-ml, com o `X-Internal-Token` (ver [Indexação pelo worker](#indexação-pelo-worker-rotas-internas)) |
+| `GET /api/v1/documents/pending` e `/pending/categories`, `POST /api/v1/documents/{id}/approve` e `/reject` | papel `APPROVER` ou `ADMIN`; os outros recebem **403** |
+| `/api/v1/admin/**` (termos de uso, usuários, permissões e auditoria) | papel `ADMIN`; os outros recebem **403** `forbidden` |
+| o resto de `/api` | qualquer usuário logado |
+
+Os **401** e **403** da checagem de login e papel vêm no formato de erro da API
+(`{"code", "message"}`), como os demais erros. O token de uma conta desativada por um admin,
+ainda válido por alguns minutos, recebe **401** `account_disabled`.
+
+Os exemplos de `curl` deste README omitem o header. Para rodá-los, entre no front, copie o token
+de uma requisição à API (aba Rede do navegador) e acrescente `-H "Authorization: Bearer $TOKEN"`.
+
+| Variável               | Default                                                           | Para que serve |
+|------------------------|-------------------------------------------------------------------|----------------|
+| `KEYCLOAK_ISSUER_URI`  | `http://localhost/auth/realms/akpedia`                            | Emissor esperado no `iss` do token: a URL pública do Keycloak |
+| `KEYCLOAK_JWK_SET_URI` | `http://localhost/auth/realms/akpedia/protocol/openid-connect/certs` | De onde o servidor baixa as chaves que assinam os tokens. Dentro de um container, aponte para o Keycloak pela rede Docker (`http://keycloak:8080/auth/...` no compose, `http://akpedia-keycloak:8080/auth/...` no dev container) |
+
+#### Usuário no banco
+
+O usuário de uma requisição é o dono do token. Na primeira requisição que precisa dele (enviar um
+documento, listar as próprias submissões, aprovar), o servidor cria a linha em `users` a partir do
+token: nome, email, setor (claim `sector`) e CPF (claim `cpf`), ligada à conta do Keycloak por
+`keycloak_id` (o `sub` do token). Nas seguintes, copia o que tiver mudado no Keycloak. Um setor que
+o banco ainda não tem é criado. Uma linha que já existia com o mesmo email é reaproveitada, e não
+duplicada.
+
+O CPF é conferido no primeiro acesso e sempre que muda no Keycloak: com dígitos verificadores
+errados toda a API, leituras inclusive, responde **422** `invalid_cpf`, e se outro usuário já tem
+esse CPF em `users.cpf` (único), **422** `cpf_taken` (`CpfGateFilter`, depois do filtro dos
+termos). A linha é criada mesmo assim, sem o CPF (ou com o anterior), para o usuário poder pedir a
+correção: continuam abertos `GET /me` (que traz o motivo em `cpf_problem`),
+aceitar ou recusar os termos, excluir a conta e os pedidos de alteração (`/me/profile/requests`),
+onde ele envia o CPF certo. Aprovado o pedido, o CPF vai para a conta e para a linha, e o acesso
+volta no próximo token. O cadastro pela tela do Keycloak só confere o formato, por isso a
+conferência fica aqui.
+
+Uma conta sem email, setor ou CPF (só acontece com usuário criado à mão no console, sem esses
+campos) recebe **403** `incomplete_account` nessas rotas.
+
+Os claims `sector` e `cpf` vêm de mappers do client `akpedia-client` no realm. Um Keycloak que
+importou o realm antes do mapper `cpf` existir precisa dele criado à mão (Clients › akpedia-client ›
+Client scopes › Dedicated › Add mapper › User Attribute, atributo e claim `cpf`, só no access token).
+
+O usuário `aprovador@akpedia.local`, criado pela migration `V5__seed_default_approver.sql` quando
+ainda não havia login, continua no banco como autor e aprovador dos documentos daquela época.
+Ninguém entra com ele, a não ser que um admin cadastre uma conta com esse email.
+
+#### Termos de uso
+
+Todo usuário aceita a versão atual dos termos de uso antes de usar a API, como na PoC do
+Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativo do Keycloak
+(*Terms and Conditions*) fica desligado.
+
+| Rota | Quem pode | O que faz |
+|------|-----------|-----------|
+| `GET /api/v1/me` | qualquer usuário logado | `{id, name, email, sector, roles, terms_pending}`: quem é o usuário (a linha em `users` é criada aqui, se ainda não existir) e se ele precisa aceitar os termos atuais |
+| `GET /api/v1/terms` | qualquer usuário logado | `{current, accepted}`: os termos atuais (`version`, `title`, `content`, `published_at`, `published_by`) e a última versão que o usuário aceitou (`version`, `accepted_at`). Cada um é `null` se não houver |
+| `POST /api/v1/terms/accept` | qualquer usuário logado | `{"version": n}`, a versão que o usuário viu. **409** `terms_changed` se ela não for mais a atual |
+| `POST /api/v1/terms/decline` | qualquer usuário logado | `{"version": n}`: registra na auditoria que o usuário recusou (**204**). Sem aceitar a versão atual ninguém usa o sistema (um aceite antigo não vale), então o front oferece só aceitar ou recusar e excluir a conta: depois desta rota, chama `DELETE /api/v1/me` e faz o logout |
+| `GET /api/v1/admin/terms` | `ADMIN` | todas as versões publicadas, da mais nova para a mais antiga |
+| `GET /api/v1/admin/terms/acceptances?version=&user=&page=0&size=20` | `ADMIN` | página de aceites, do mais novo para o mais antigo: `version`, `user_id`, `user_name`, `user_email`, `accepted_at`. `version` filtra uma versão; `user` procura no nome ou no e-mail |
+| `POST /api/v1/admin/terms` | `ADMIN` | `{"title", "content"}` publica a próxima versão (**201**), numerada pelo servidor em sequência: `1.0`, `2.0`, `3.0`. `content` é texto puro, parágrafos separados por linha em branco; nunca é lido como HTML |
+
+- **Bloqueio**: enquanto o usuário não aceitar a versão atual, toda rota de `/api`, exceto as
+  quatro primeiras acima e `DELETE /api/v1/me` (excluir a conta), responde **403** `terms_pending`, inclusive as de admin: quem
+  publica também aceita. A conferência vem depois do login e dos papéis, então sem token
+  continua sendo **401**, e sem o papel, **403** `forbidden`. `/health`, Swagger e
+  `/internal` não passam por ela.
+- **Versão 1.0 provisória**: a migration `V16__seed_terms_version_1.sql` publica a versão
+  `1.0` com um texto provisório, para que todos aceitem termos desde o primeiro deploy. O texto
+  definitivo entra como uma versão nova, publicada pelo admin. A migration só insere em um banco
+  sem nenhuma versão: onde o admin já publicou, nada muda.
+- **Numeração**: cada publicação é a próxima `X.0` depois da maior versão, e quem conta é o
+  servidor, travando a tabela para que duas publicações ao mesmo tempo recebam números seguidos.
+  Versões antigas com outros nomes (de antes da numeração) são ignoradas na conta; sem nenhuma
+  numerada, a primeira é `1.0`.
+- **Sem termos publicados, não há bloqueio**: num banco sem versão nenhuma, ninguém é
+  perguntado.
+- **Histórico**: `terms_versions` e `terms_acceptances` (migration `V8__terms_of_use.sql`) só
+  recebem inserções. Uma versão publicada nunca muda (uma mudança é uma versão nova), e cada
+  aceite fica guardado com o usuário, a versão e quando. Cada usuário aceita uma versão uma vez
+  só (migration `V14`): aceitar de novo devolve o primeiro aceite.
+  Aceite, recusa e publicação também vão para a [auditoria](#auditoria).
+
+#### Usuários (admin)
+
+A tela de usuários do admin lê e altera as contas no próprio Keycloak, pela Admin API, com a
+service account do cliente `akpedia-server` (`view-users` e `manage-users`). O token dela fica
+guardado até perto de vencer.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/users?search=&sector=&role=&page=0&size=20` | Página de usuários na ordem do Keycloak (pelo username, que é o email). `search` procura no email e no nome; `sector` filtra um setor; `role` filtra quem tem `APPROVER` ou `ADMIN`, ou, com `STANDARD`, quem não tem nenhum dos dois (com `sector` ou `role`, o servidor lê o realm inteiro e filtra, já que o Keycloak não combina esses filtros). Cada um traz `id` (do Keycloak), `name`, `email`, `sector`, `enabled`, `roles` (entre `STANDARD`, `APPROVER` e `ADMIN`), `terms_accepted_version`, `current_terms_version` e `created_at` |
+| `POST /api/v1/admin/users` | `{"first_name", "last_name", "email", "password", "cpf", "sector", "roles": []}` cria a conta no Keycloak (**201**, o usuário como na lista), com o e-mail já verificado, a senha definitiva e os papéis (`APPROVER`, `ADMIN`). `cpf` tem 11 dígitos com os dígitos verificadores certos (pontos e traço são ignorados) e `sector` é um dos setores do realm (`Engenharia`, `Qualidade`, `Logística`, `Manutenção`, `Recursos Humanos`, `Financeiro`, `Jurídico`). **400** `invalid_user` diz o que falta ou está errado (inclusive o que o Keycloak recusar, como a política de senha); **409** `user_exists` se o e-mail já tem conta, `cpf_taken` se o CPF já é de outra. Se um passo falha depois de a conta ser criada, ela é apagada de novo. A senha nunca vai para log nem auditoria |
+| `GET /api/v1/admin/roles` | Os três papéis, com nome na tela, descrição, se é `assignable` e as permissões de cada um |
+| `PUT /api/v1/admin/users/{id}/roles` | `{"roles": ["APPROVER", "ADMIN"]}`: o usuário fica com exatamente esses papéis atribuíveis. `STANDARD` vem com toda conta e não é mexido. **400** `invalid_role` para outro papel |
+| `PUT /api/v1/admin/users/{id}/status` | `{"enabled": false}` desativa a conta (não entra mais, e as sessões dela são encerradas na hora); `true` reativa. Espelhado em `users.is_active` quando o usuário já tem linha, e o token ainda válido de uma conta desativada recebe **401** `account_disabled` |
+
+- A mudança de papel chega ao usuário no próximo refresh do token (uns 5 minutos) ou no próximo login.
+- O admin não tira o próprio `ADMIN` (**409** `cannot_change_own_admin`) nem desativa a própria
+  conta (**409** `cannot_disable_self`), e ninguém desativa nem tira o `ADMIN` do único admin
+  ativo (**409** `last_admin`), nem um admin que acabou de perder o papel e ainda tem o token antigo.
+- O CPF, ao ser cadastrado ou trocado (pelo admin ou num pedido aprovado), precisa ter os dígitos
+  verificadores certos e não pode ser de outra conta (**409** `cpf_taken`). O novo CPF vai também
+  para `users.cpf`. No cadastro pela tela do Keycloak só o formato (11 dígitos) é conferido; o
+  resto, no primeiro acesso (acima).
+- **404** `user_not_found` para um id que o Keycloak não conhece; **502** `keycloak_unavailable`
+  quando o Keycloak não responde ou recusa a service account.
+
+#### Permissões por setor (admin)
+
+Cada setor vê só as categorias liberadas para ele (tabela `sector_categories`). A migration
+`V13__sectors_and_category_access.sql` cria os 7 setores do realm e a tabela combinada:
+Engenharia, Qualidade, Logística e Manutenção veem `Tecnico`, `Regulatorio` e `Qualidade`;
+Recursos Humanos, Financeiro e Jurídico veem `Regulatorio` e `Juridico`.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/sector-categories` | `{categories, sectors}`: todas as categorias (as colunas, por nome) e os setores do realm (as linhas, na ordem do realm), cada um com os `category_ids` que vê |
+| `PUT /api/v1/admin/sectors/{id}/categories` | `{"category_ids": [1, 3]}`: o setor passa a ver exatamente essas categorias. Vale a partir da próxima busca. Registrado como `SECTOR_CATEGORIES_CHANGED`, com as categorias antes e depois. **404** `sector_not_found` ou `category_not_found` |
+
+**O que o funcionário vê.** Um documento de uma categoria que o setor do usuário não vê nunca
+aparece para ele (`CategoryAccessService`). A regra vale para todos os papéis, inclusive ADMIN, e
+é lida da tabela a cada requisição, sem cache: uma mudança na tela de permissões vale a partir da
+próxima chamada.
+
+| Rota | Com a regra |
+|------|-------------|
+| `GET /api/v1/search` | busca só nas categorias do setor; as de `categoryIds` que o setor não vê são descartadas (não dá erro). Se não sobrar nenhuma, responde `[]` sem gerar embedding |
+| `GET /api/v1/documents` | lista só documentos das categorias do setor |
+| `GET /api/v1/categories` | lista só as categorias do setor (o catálogo inteiro fica em `GET /api/v1/admin/sector-categories`) |
+| `GET /api/v1/documents/{id}/file`, `/preview` e `/preview/pages/{page}` | **403** `category_forbidden`, checado antes do estado do documento (arquivado, indexando). Vale também na revalidação do cache do navegador |
+
+Duas exceções, só para abrir um documento: o **autor** abre o próprio documento, mesmo que um
+aprovador o tenha movido para uma categoria que o setor dele não vê; e **APPROVER/ADMIN** abrem um
+documento **aguardando aprovação** de qualquer categoria, porque a fila de revisão lista todos.
+Depois de aprovado, a regra do setor vale para eles também.
+
+Para corrigir a categoria na revisão, o aprovador usa `GET /api/v1/documents/pending/categories`
+(só `APPROVER` ou `ADMIN`), que lista o catálogo inteiro: a fila tem documentos de todas as
+categorias, e `GET /categories` só mostra as do setor dele.
+
+O envio (`POST /api/v1/documents`) não é restringido pela regra: enviar não é ver, a sugestão de
+categoria do classificador pode ser de qualquer categoria, e o autor continua abrindo o próprio
+documento.
+
+As três queries de busca e listagem (`EmbeddingRepository.search`, `searchRecentByCategory` e
+`DocumentRepository.findRecent`) exigem a lista de categorias: não existe chamada sem o filtro.
+
+A lista de setores fica em três lugares, que andam juntos: o atributo `sector` do realm
+(`keycloak/akpedia-realm.json`), `AdminUserService.SECTORS` e a migration V13. Um Keycloak que
+já tinha o realm importado não relê o arquivo: para pegar os setores novos, troque as opções do
+atributo `sector` no console (*Realm settings > User profile*) ou reimporte o realm (ver
+[Reimportar o realm](#reimportar-o-realm)).
+
+| Variável                        | Default                     | Para que serve |
+|---------------------------------|-----------------------------|----------------|
+| `KEYCLOAK_ADMIN_BASE_URL`       | `http://localhost/auth`     | Onde o servidor chama a Admin API. Dentro de um container, pela rede Docker (`http://keycloak:8080/auth` no compose, `http://akpedia-keycloak:8080/auth` no dev container) |
+| `KEYCLOAK_REALM`                | `akpedia`                   | Realm dos usuários |
+| `KEYCLOAK_SERVER_CLIENT_ID`     | `akpedia-server`            | Cliente confidencial cuja service account é usada |
+| `KEYCLOAK_SERVER_CLIENT_SECRET` | `akpedia-dev-server-secret` | Secret desse cliente; o mesmo do import do realm |
+
+#### Excluir a conta
+
+`DELETE /api/v1/me` (**204**) exclui a conta de quem chama, mesmo sem ter aceitado os termos.
+Nesta ordem:
+
+1. Grava a exclusão no **log de exclusões**, antes de tudo, para ela nunca se perder.
+2. Apaga a conta no Keycloak (se ela já não existe, segue).
+3. Anonimiza a linha em `users` em vez de apagá-la (os documentos e os aceites dos termos
+   apontam para ela): nome `Usuário removido`, e-mail `removido-<id>@removido.invalid`, sem
+   `keycloak_id`, inativa, com `deleted_at`. O `id` da linha fica: é o identificador interno,
+   imutável, do usuário excluído.
+4. Pseudonimiza a auditoria: o que ele fez continua lá (a ação, o que foi afetado, as datas, o id
+   do Keycloak e a linha em `users`), sem dado pessoal. Os registros dele perdem e-mail, IP e user
+   agent; os que outros gravaram sobre ele (`USER_CREATED`, `USER_ROLES_CHANGED`, `USER_ENABLED`,
+   `USER_DISABLED`) perdem o `target_email` e ficam com o `target_keycloak_id`; e as requisições
+   que buscaram o e-mail dele (como `GET /api/v1/admin/users?search=`) perdem a query string. A
+   tela de auditoria mostra `user_pseudonym` (`Usuário removido #<id>`) no lugar do nome.
+5. Registra `ACCOUNT_DELETED`, também sem e-mail nem IP.
+
+A conta some como se nunca tivesse existido: para voltar, um admin cadastra o usuário de novo
+(o mesmo e-mail funciona), e ele ganha outra conta no Keycloak e outra linha em `users`.
+
+**409** `last_admin` se ele é o único `ADMIN` ativo; **502** `keycloak_unavailable` se o Keycloak
+falha (a exclusão já está no log: tentar de novo, ou o próximo replay, termina). O token do
+usuário excluído ainda vale por alguns minutos: até vencer, toda rota responde **401**
+`account_deleted`, e nada pessoal dele é gravado.
+
+O log é um arquivo, uma linha JSON por exclusão, só com ids (é guardado para sempre):
+
+```json
+{"time":"2026-11-08T12:00:00Z","keycloak_id":"0db3d7d8-...","user_id":42,"deleted_by":"self"}
+```
+
+| Variável | Default | Para que serve |
+|----------|---------|----------------|
+| `ACCOUNT_DELETION_LOG_FILE` | `./data/account-deletions.jsonl` | O arquivo. No compose, `/app/data/account-deletions.jsonl`, no volume `account_deletions` |
+| `ACCOUNT_DELETION_REPLAY_ON_STARTUP` | `true` | Refaz as exclusões a cada start |
+| `ACCOUNT_DELETION_REPLAY_RETRY_DELAY` | `15s` | Espera entre tentativas, enquanto o Keycloak sobe (até 10) |
+
+##### Restaurando um backup
+
+O realm do Keycloak e o banco do app estão no mesmo Postgres, então restaurar um backup traz de
+volta as contas excluídas depois dele. Por isso o log fica **fora do banco** (e fora dos backups
+dele): não restaure o volume `account_deletions` junto com o Postgres.
+
+Depois de restaurar, o servidor refaz o log sozinho ao subir, em segundo plano e tentando de novo
+enquanto o Keycloak não responde: apaga no Keycloak cada conta que voltou e anonimiza de novo a
+linha em `users` (a que ainda tem aquele `keycloak_id`, ou a mesma linha ainda não excluída), e
+pseudonimiza de novo a auditoria. Contas que continuam excluídas ficam como estão. No log do
+servidor sai um resumo: `N deletions replayed, M restored accounts deleted again`.
+
+Para rodar na hora, sem reiniciar:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/account-deletions/replay -H "Authorization: Bearer $TOKEN"
+# {"entries": 3, "deleted_again": 1}
+```
+
+`entries` é quantas exclusões o log tem; `deleted_again`, quantas tinham voltado (só `ADMIN`).
+
+#### Auditoria
+
+`audit_logs` guarda dois tipos de registro, com o usuário (id do Keycloak, email e a linha em
+`users`, se houver), IP (o primeiro do `X-Forwarded-For`, se houver), user agent, método e caminho:
+
+- **Requisições** (`action = HTTP_REQUEST`): uma por requisição a `/api`, gravada quando a resposta
+  sai, com o status (inclusive **401** e **403**, sem usuário quando não há token válido), a
+  duração e a query string em `details`. O corpo nunca é gravado. Ficam de fora `/internal`,
+  `/health`, `/actuator`, o Swagger e a leitura da própria auditoria. Uma falha ao gravar só vai
+  para o log, nunca para a resposta.
+- **Eventos**: `TERMS_ACCEPTED`, `TERMS_DECLINED`, `TERMS_PUBLISHED`, `DOCUMENT_UPLOADED`,
+  `DOCUMENT_APPROVED`, `DOCUMENT_REJECTED`, `USER_ROLES_CHANGED`, `USER_ENABLED`, `USER_DISABLED`,
+  `USER_CREATED`, `ACCOUNT_DELETED` e `BREACH_NOTICE_SENT`,
+  com o que foi afetado (`entity_type`, `entity_id`) e os detalhes. São gravados na mesma transação
+  da ação: se ela falha, o evento não fica.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/audit?kind=EVENT&action=&user=&from=&to=&page=0&size=50` | Página da auditoria, da mais nova para a mais antiga. `kind` é `EVENT` (padrão), `REQUEST` ou `ALL`; `user` é parte do email; `from` e `to` são data e hora ISO-8601, inclusivos. `size` até 200. Cada registro traz `user_email` e `user_name`, ou, se a conta foi excluída, os dois `null` e `user_pseudonym` (`Usuário removido #<id>`, o mesmo em todos os registros dela) |
+| `GET /api/v1/admin/audit/actions` | Os eventos já registrados, em ordem alfabética, para o filtro |
+
+#### Aviso de vazamento de dados (admin)
+
+Quando há um incidente de segurança com dados pessoais (LGPD, art. 48), o admin envia por e-mail
+(`MailService`) um aviso aos usuários afetados, dizendo que a ANPD foi comunicada e quais medidas
+estão em andamento. O envio **só sai depois da confirmação de que a ANPD foi comunicada**
+(`anpd_informed: true`); sem ela a rota responde `422` e nada é enviado nem gravado.
+
+| Rota | O que faz |
+|------|-----------|
+| `GET /api/v1/admin/breach-notices/template` | O modelo do documento de aviso: `subject`, `body` com os campos `{{campo}}`, e `fields`, cada campo com `name`, `required`, `automatic`, `type`, `description` e `example` (um valor como é enviado) |
+| `POST /api/v1/admin/breach-notices/preview` | O e-mail como o destinatário vai receber, com o nome do próprio admin no lugar do dele. Valida igual ao envio, mas não envia nem grava nada e não exige `anpd_informed`, para montar o texto enquanto a ANPD é comunicada |
+| `GET /api/v1/admin/breach-notices/recipients/count` | Quantos usuários um aviso para todos (`all_users: true`) atinge agora, `{ "count": 42 }`, para o admin confirmar o número antes de enviar |
+| `POST /api/v1/admin/breach-notices` | Envia o aviso. Responde `201` com quantos saíram e quais falharam |
+| `GET /api/v1/admin/breach-notices?page=0&size=20` | Página dos avisos enviados, do mais novo para o mais antigo, com as contagens. `size` até 100 |
+| `GET /api/v1/admin/breach-notices/{id}` | O aviso como foi enviado, com o status de cada destinatário |
+
+```json
+// POST /api/v1/admin/breach-notices
+{
+  "subject": "Aviso importante: incidente de segurança envolvendo seus dados no Akpedia",
+  "body": "Olá, {{nome_titular}}. ...",   // o body do template, normalmente sem mudança
+  "fields": {
+    "data_descoberta": "2026-11-10",
+    "data_incidente": "2026-11-08/2026-11-09",   // ou só "2026-11-08"
+    "descricao_incidente": "acesso não autorizado a uma cópia da base de usuários",
+    "dados_afetados": "Nome\nE-mail\nCPF",
+    "medidas_protecao": "Servidor com acesso restrito",
+    "data_comunicacao_anpd": "2026-11-11",
+    "medidas_adotadas": "Bloqueio do acesso indevido",
+    "nome_encarregado": "...",
+    "email_encarregado": "..."
+  },
+  "all_users": true,            // ou "user_ids": [10, 11] ou "keycloak_ids": ["..."] -- um dos três
+  "anpd_informed": true
+}
+
+// 201
+{
+  "id": 5, "total": 120, "sent": 119, "failed": 1,
+  "failures": [
+    { "user_id": 11, "email": "bruno@akaer.com.br", "reason": "REJECTED", "error": "REJECTED: 550 no such user" }
+  ]
+}
+```
+
+- **Destinatários**: usuários de `users` ligados a uma conta do Keycloak e não excluídos, inclusive
+  os desativados (os dados deles também estão no sistema). Com `user_ids`, um id que não existe,
+  foi excluído ou não tem conta no Keycloak é recusado (`400`, com os ids na mensagem). Com
+  `keycloak_ids` (os ids de conta, os únicos que a tela de usuários conhece), um id sem usuário no
+  Akpedia (conta que nunca acessou) ou de usuário excluído é recusado do mesmo jeito.
+- **Texto e campos**: o modelo é o do documento de aviso de vazamento, em
+  `src/main/resources/breach-notice/` (texto puro, sem negrito, links nem tabelas). Os campos
+  `{{campo}}` são preenchidos no envio:
+  - `{{nome_titular}}` é automático: cada destinatário recebe um e-mail só dele, com o próprio nome.
+    Mandá-lo em `fields` é recusado.
+  - Os demais vêm em `fields`. Um obrigatório em branco é recusado (`400`, com todos os que faltam);
+    os opcionais (`dados_nao_envolvidos`, `motivo_atraso`) em branco tiram a linha inteira do e-mail.
+  - O admin pode reescrever o texto em volta dos campos, mas **não pode tirar um obrigatório**: cada um
+    corresponde a um item do art. 9º da Resolução CD/ANPD nº 15/2024 (o que aconteceu, quais dados,
+    as medidas de proteção, a data da comunicação à ANPD, as medidas adotadas, o contato do
+    encarregado), e o `{{nome_titular}}` à comunicação individual do § 1º. Um texto sem algum deles é
+    recusado (`400`), mesmo com o valor em `fields`.
+  - Um campo que o modelo não tem, em `fields` ou escrito no texto, é recusado. Nenhum valor pode ter
+    `{{` nem `}}`.
+  - Cada campo tem um `type`, que diz como o valor vem e como é conferido (recusado com `400`, nomeando
+    o campo, quando não confere):
+
+    | `type` | Campos | Valor enviado | No e-mail |
+    |--------|--------|---------------|-----------|
+    | `TEXT` | `descricao_incidente`, `nome_encarregado`, `email_encarregado` | uma linha só | como veio |
+    | `MULTILINE` | `dados_afetados`, `dados_nao_envolvidos`, `medidas_protecao`, `medidas_adotadas`, `motivo_atraso` | pode ter várias linhas | como veio; uma lista no meio de uma frase começa na linha de baixo ("...são:" e, embaixo, um item por linha) |
+    | `DATE` | `data_descoberta`, `data_comunicacao_anpd` | `2026-11-10` | `10/11/2026` |
+    | `DATE_RANGE` | `data_incidente` | `2026-11-08`, ou o período `2026-11-08/2026-11-09` | `em 08/11/2026`, ou `entre 08/11/2026 e 09/11/2026` |
+
+  - Nenhuma data pode ser depois de hoje no horário de Brasília, nem o fim de um período antes do
+    começo. O incidente não pode começar depois de `data_descoberta`, nem a ANPD ser comunicada antes
+    dela (`data_comunicacao_anpd`). O fim do incidente não é comparado: ele pode continuar depois de
+    descoberto. Só as datas enviadas são comparadas, e uma obrigatória em branco já é recusada.
+  - Fica gravado o texto preenchido com `{{nome_titular}}` no lugar do nome: cada linha de
+    destinatário já diz quem ele é.
+
+  Assunto de uma linha só, até 200 caracteres; texto até 50.000, já preenchido.
+- **Registro**: o aviso (`breach_notices`) e uma linha por destinatário (`breach_notice_recipients`)
+  são gravados como `PENDING` antes do envio; cada linha vira `SENT` ou `FAILED` (com o motivo em
+  `error`) depois. Um envio interrompido no meio deixa as linhas restantes `PENDING`, visíveis no
+  aviso. Um e-mail que falha não impede os outros. Na auditoria fica `BREACH_NOTICE_SENT`, com as
+  contagens.
+- **Sem envio duplicado**: enquanto um aviso está sendo enviado, outro envio responde `409
+  breach_notice_in_progress`; o mesmo aviso (assunto e texto iguais) já entregue a algum destes
+  usuários nos últimos 30 minutos responde `409 breach_notice_duplicate`. Isso cobre o segundo
+  clique e a tela tentando de novo. Reenviar o mesmo texto só para quem falhou (`user_ids` ou `keycloak_ids`) é
+  permitido. Um envio interrompido no meio deixa de bloquear depois de 30 minutos.
+- O envio é feito antes da resposta, que já traz o resultado de cada e-mail; por isso o nginx dá
+  600s para `/api/v1/admin/breach-notices` (o resto de `/api/` tem 120s).
+- Os avisos não são alterados nem apagados. Se o usuário excluir a conta, as linhas dele ficam
+  (como registro de que foi avisado), mas com o e-mail anonimizado.
+
+> **Decisões pendentes do documento**, fora deste server por enquanto: quem é o encarregado (DPO) e
+> o canal dele (obrigatórios para o envio); onde publicar o aviso para quem não tem e-mail válido
+> (art. 9º, § 3º, por 3 meses); a declaração à ANPD (art. 9º, § 4º), que pode partir do registro de
+> envio (`GET /api/v1/admin/breach-notices/{id}`); e o prazo em dobro para agente de pequeno porte.
+> O aviso deve chegar ao titular em até 3 dias úteis (Resolução CD/ANPD nº 15/2024, art. 9º).
+
+| Situação                                                         | Status | `code`                    |
+|------------------------------------------------------------------|--------|---------------------------|
+| `anpd_informed` diferente de `true`                              | 422    | `anpd_not_informed`       |
+| assunto ou texto inválido, campo obrigatório em branco ou tirado do texto, campo que o modelo não tem, valor que não confere com o `type` do campo, data futura ou fora de ordem, `nome_titular` em `fields`, nenhum ou mais de um entre `all_users`, `user_ids` e `keycloak_ids`, usuário que não pode ser avisado | 400 | `invalid_breach_notice` |
+| outro aviso sendo enviado agora                                  | 409    | `breach_notice_in_progress` |
+| o mesmo aviso já entregue a algum destes usuários nos últimos 30 min | 409 | `breach_notice_duplicate` |
+| aviso inexistente                                                | 404    | `breach_notice_not_found` |
 
 ### Serviço de embeddings
 
@@ -253,6 +678,21 @@ em outra rede Docker.
 | `SEARCH_MINIMUM_SCORE`    | `0.85`  | Similaridade mínima para um trecho valer um resultado            |
 | `SEARCH_SNIPPET_LENGTH`   | `300`   | Tamanho máximo do trecho devolvido, em caracteres (ver [Busca](#busca)) |
 
+### Chat
+
+O chat usa o mesmo akpedia-ml (`EMBEDDING_BASE_URL`), com timeouts próprios: o modelo de linguagem
+leva bem mais que um vetor (o akpedia-ml espera até 120s por ele, `LLM_TIMEOUT_SECONDS`).
+
+| Variável               | Default | Para que serve                                                         |
+|------------------------|---------|------------------------------------------------------------------------|
+| `CHAT_MINIMUM_SCORE`   | `0.80`  | Similaridade mínima para um trecho ir para o modelo                     |
+| `CHAT_MAX_PASSAGES`    | `3`     | Quantos trechos, no máximo, vão para o modelo (o mais próximo primeiro). Mais trechos deixam o prompt mais longo: o modelo local passa do timeout e responde sem citar o trecho |
+| `CHAT_CONNECT_TIMEOUT` | `2s`    | Tempo máximo para abrir a conexão com o akpedia-ml                      |
+| `CHAT_READ_TIMEOUT`    | `150s`  | Tempo máximo para a resposta; acima do timeout do LLM no akpedia-ml     |
+
+O nginx dá 180s para `/api/v1/chat` (o resto de `/api/` tem 120s), para não cortar uma resposta
+que ainda está vindo.
+
 ### Conversão de documentos (Gotenberg)
 
 | Variável                     | Default                  | Para que serve                       |
@@ -269,6 +709,103 @@ e o default já aponta para `http://gotenberg:3000`. Rodando fora do Docker, sub
 ```bash
 docker run --rm -p 3000:3000 gotenberg/gotenberg:8
 ```
+
+### E-mail (SMTP)
+
+O server envia e-mail pelo `MailService` (o aviso de vazamento de dados é o primeiro uso), e o
+Keycloak usa o mesmo servidor SMTP para verificar e-mails e redefinir senhas.
+
+| Variável                  | Default                       | Para que serve |
+|---------------------------|-------------------------------|----------------|
+| `MAIL_HOST`               | `localhost` (`mailpit` no compose) | Servidor SMTP |
+| `MAIL_PORT`               | `1025`                        | Porta SMTP (num servidor real, em geral `587`) |
+| `MAIL_USERNAME`           | vazio                         | Login no SMTP |
+| `MAIL_PASSWORD`           | vazio                         | Senha no SMTP |
+| `MAIL_SMTP_AUTH`          | `false`                       | `true` para fazer login com o usuário e a senha acima |
+| `MAIL_SMTP_STARTTLS`      | `false`                       | `true` para exigir STARTTLS (servidor real na porta 587) |
+| `MAIL_FROM`               | `nao-responda@akpedia.local`  | Remetente. Checado na subida: um endereço inválido impede o boot |
+| `MAIL_FROM_NAME`          | `Akpedia`                     | Nome mostrado junto do remetente |
+| `MAIL_CONNECT_TIMEOUT_MS` | `5000`                        | Tempo máximo para abrir a conexão |
+| `MAIL_READ_TIMEOUT_MS`    | `10000`                       | Tempo máximo esperando uma resposta do servidor |
+| `MAIL_WRITE_TIMEOUT_MS`   | `10000`                       | Tempo máximo para enviar a mensagem |
+| `MAIL_SMTP_LOCALHOST`     | `akpedia.local`               | Nome com que o server se apresenta ao SMTP (`EHLO`). Em produção, o domínio real do server |
+| `MAIL_BATCH_SIZE`         | `50`                          | Quantos e-mails o `sendAll` manda por conexão SMTP antes de abrir a próxima (1 a 1000) |
+
+Os timeouts existem porque o Jakarta Mail espera para sempre por padrão: um servidor que aceita a
+conexão e para de responder seguraria o envio, e todos os que vêm depois dele.
+
+**Em desenvolvimento** o compose sobe o [Mailpit](https://mailpit.axllent.org/) (serviço `mailpit`,
+SMTP na porta `1025`): ele guarda tudo o que recebe e não entrega nada. Os e-mails aparecem em
+<http://localhost:8025>. Rodando o server fora do Docker, suba só ele:
+
+```bash
+docker compose up -d mailpit
+./mvnw test -Dtest=MailServiceManualIT   # envia um lote de teste e confere que chegou no Mailpit
+```
+
+**Como o `MailService` responde.** `send(OutgoingMail)` envia um e-mail em texto (UTF-8) e
+**nunca lança exceção**: devolve `Sent` (com o `Message-ID` enviado) ou `Failed` com o motivo.
+`sendAll(...)` devolve um resultado por e-mail, na mesma ordem, e uma falha não impede os outros.
+
+Ele manda até `MAIL_BATCH_SIZE` e-mails por conexão SMTP, em vez de abrir uma conexão (e fazer
+login) para cada e-mail. Se o servidor derrubar a conexão no meio, ela é aberta de novo para os que
+faltam, e só o e-mail que estava sendo enviado falha; um destinatário recusado também falha sozinho.
+Os dois casos são testados contra um servidor que se comporta mal (`MailServiceConnectionTest`).
+
+Cada e-mail sai assim (texto puro, UTF-8, com o `Message-ID` no domínio do remetente, para não
+expor o nome da máquina):
+
+```
+From: Akpedia <nao-responda@akpedia.local>
+To: ana@empresa.com
+Message-ID: <0b6f...-...@akpedia.local>
+Subject: =?UTF-8?Q?Aviso_de_incidente_de_seguran=C3=A7a?=
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+```
+
+| Motivo (`Failed.reason`) | Quando | Vale tentar de novo? |
+|--------------------------|--------|----------------------|
+| `INVALID_MESSAGE` | sem destinatário, endereço inválido (ou mais de um), assunto vazio ou com quebra de linha, corpo ausente. Nada chega a ser enviado | não |
+| `REJECTED` | o servidor recusou de vez, com resposta `5xx` (ex.: caixa inexistente) | não |
+| `AUTHENTICATION` | o servidor recusou o usuário ou a senha: problema de configuração | não |
+| `UNAVAILABLE` | servidor fora do ar, inalcançável, mais lento que os timeouts, conexão caiu no meio, ou recusou por enquanto com resposta `4xx` (ex.: caixa cheia) | sim |
+| `FAILED` | qualquer outro erro do servidor ou da biblioteca | sim |
+
+A classificação usa o **código de resposta SMTP**, não o tipo da exceção: o Angus Mail lança a mesma
+`SMTPSendFailedException` para um `550` e para uma conexão que caiu (código `-1`).
+
+Se todos os e-mails de um lote saírem e só o fechamento da conexão falhar, eles continuam `Sent`:
+o servidor já os aceitou.
+
+Nos logs os destinatários aparecem mascarados (`a***@empresa.com`), inclusive quando o servidor
+cita o endereço na resposta: quem recebeu um aviso de vazamento já é dado pessoal.
+
+O health (`/actuator/health`) não checa o SMTP (`management.health.mail.enabled: false`): sem e-mail
+o resto do server funciona, e cada envio que falha já é reportado pelo `MailService`.
+
+**No Keycloak** o realm importa o SMTP das mesmas variáveis (`smtpServer` em
+`keycloak/akpedia-realm.json`). A verificação de e-mail e a redefinição de senha continuam
+**desligadas** (`verifyEmail` e `resetPasswordAllowed`): ligá-las é decisão de produto, em
+*Realm settings > Login*. Como o realm só é importado na primeira subida, um Keycloak que já existia
+não recebe o SMTP: configure em *Realm settings > Email* (host `mailpit`, porta `1025`, remetente
+`nao-responda@akpedia.local`) ou reimporte o realm.
+
+#### Reimportar o realm
+
+O Keycloak não tem volume próprio: guarda tudo no banco `keycloak` do mesmo Postgres do app, no
+volume `postgres_data`. **Não apague esse volume**, que leva junto o banco `akpedia`. Para o realm
+ser importado de novo do `keycloak/akpedia-realm.json`, apague só o banco do Keycloak:
+
+```bash
+docker compose stop keycloak
+docker compose exec db dropdb -U akpedia keycloak
+docker compose up -d --build keycloak
+```
+
+O `keycloak-db-init` recria o banco vazio, e o `--build` copia o arquivo do realm atual para a imagem.
+Isso apaga tudo o que só existe no Keycloak: usuários, senhas e sessões do realm `akpedia`, e o admin
+do realm `master`, recriado com o `KEYCLOAK_ADMIN_PASSWORD` do `.env`.
 
 ### Fila de indexação (Redis)
 
@@ -447,27 +984,17 @@ O documento é salvo **aguardando aprovação**: `status: PENDING_APPROVAL` e
 a indexação para busca só acontece depois que o documento é aprovado, para não gastar
 processamento com o que ainda pode ser rejeitado. Enquanto isso o documento já pode ser aberto e
 visualizado (é assim que o aprovador o lê), mas não aparece na busca nem na lista de recentes.
-Se a conversão para PDF falhar, nada é salvo (ver status de erro abaixo).
+Se a conversão para PDF falhar, nada é salvo (ver status de erro abaixo). O autor é o usuário
+logado.
 
 | Campo (multipart) | Obrigatório | Descrição                                             |
 |--------------------|:-----------:|--------------------------------------------------------|
 | `file`             | sim         | arquivo a enviar                                        |
 | `categoryId`       | sim         | id de uma categoria existente                            |
-| `creatorId`        | não         | id de um usuário existente; omitido, cai no [usuário padrão](#usuário-padrão-temporário) |
 | `name`             | não         | nome do documento; default é o nome do arquivo com `.pdf` |
 | `description`      | não         | descrição livre                                          |
 | `suggestedCategoryId` | não      | id da categoria sugerida pelo classificador; precisa ser uma das categorias do catálogo |
 | `categoryConfidence`  | não      | confiança da sugestão, de 0 a 1; só é aceita junto com `suggestedCategoryId` |
-
-```bash
-curl -X POST localhost:8080/api/v1/documents \
-  -F "file=@relatorio.docx" \
-  -F "categoryId=1" \
-  -F "creatorId=1"
-```
-
-Enquanto não houver cadastro nem login, `creatorId` pode ser omitido: o documento fica atribuído
-ao [usuário padrão](#usuário-padrão-temporário) que o servidor resolveu no startup.
 
 ```bash
 curl -X POST localhost:8080/api/v1/documents \
@@ -512,7 +1039,7 @@ A resposta traz só metadados — o PDF em si não volta no corpo:
 
 ### Minhas submissões
 
-`GET /api/v1/documents/submissions` devolve os documentos que a pessoa enviou, do mais recente
+`GET /api/v1/documents/submissions` devolve os documentos que o usuário logado enviou, do mais recente
 para o mais antigo, cada um com um status **derivado** para o autor em vez do status armazenado:
 
 | `submission_status` | No banco                                          | O que significa para o autor                    |
@@ -537,7 +1064,6 @@ dois é uma submissão, então não aparecem aqui.
 
 | Parâmetro     | Obrigatório | Descrição                                                      |
 |---------------|:-----------:|-----------------------------------------------------------------|
-| `creatorId`   | não         | autor cujos envios listar; sem ele, o [usuário padrão](#usuário-padrão-temporário) |
 | `page`        | não         | página, começando em 0; default 0                               |
 | `size`        | não         | resultados por página, de 1 a 50; default 10                    |
 | `categoryIds` | não         | um ou mais ids de categoria (`categoryIds=1&categoryIds=3`, ou `categoryIds=1,3`); sem nenhum, lista todas as categorias |
@@ -587,10 +1113,6 @@ Um comentário que o aprovador deixou e aprovou o documento assim mesmo não vem
 | Situação                                  | Status | `code`            |
 |--------------------------------------------|--------|-------------------|
 | `page` negativo, ou `size` fora de 1 a 50  | 400    | `invalid_request` |
-| `creatorId` que nenhum usuário tem         | 404    | `user_not_found`  |
-
-> Um `creatorId` inexistente responde 404 em vez de página vazia: página vazia se leria como
-> "você não enviou nada", que é uma resposta diferente — e a que o autor acreditaria.
 
 ### Sugerir título, descrição e categoria (antes de enviar)
 
@@ -707,7 +1229,7 @@ curl 'localhost:8080/api/v1/documents/pending?page=0&size=2'
       "id": 15,
       "name": "politica-ferias.pdf",
       "description": null,
-      "creator_name": "Usuário padrão",
+      "creator_name": "Ana Souza",
       "sector_name": "Administrativo",
       "created_at": "2026-10-14T11:20:02.481Z",
       "category": { "id": 3, "name": "Juridico" },
@@ -730,8 +1252,7 @@ prática, alguém já decidiu. O documento fica travado (`SELECT … FOR UPDATE`
 gravada, então dois aprovadores ao mesmo tempo não aprovam duas vezes nem aprovam e devolvem o
 mesmo documento.
 
-O aprovador registrado é o [usuário padrão](#usuário-padrão-temporário), como o autor do upload,
-enquanto não houver login.
+O aprovador registrado é o usuário logado, que precisa do papel `APPROVER` ou `ADMIN`.
 
 #### Aprovar
 
@@ -1104,6 +1625,50 @@ de folga.
 | nem `q` nem `categoryIds`, ou `limit` fora do teto             | 400    | `invalid_request`          |
 | akpedia-ml respondeu algo que não dá para usar                 | 502    | `embedding_service_error`  |
 | akpedia-ml fora do ar ou além do timeout           | 503    | `embedding_service_unavailable` |
+
+---
+
+## Chat
+
+`POST /api/v1/chat` responde uma pergunta com uma resposta curta e as fontes, escrita só a partir
+dos documentos que o usuário pode ver.
+
+```json
+// POST /api/v1/chat
+{ "question": "Qual o prazo de reembolso de despesas?" }
+
+// 200
+{
+  "answer": "O reembolso é feito em até 7 dias corridos [1].",
+  "found": true,
+  "sources": [ { "document_id": 42, "name": "Manual de Reembolso", "category": "Financeiro" } ]
+}
+```
+
+1. A pergunta vira vetor no akpedia-ml, como na busca.
+2. O server procura os trechos mais próximos (`EmbeddingRepository.findTopChunks`) entre os
+   documentos **aprovados e indexados** nas categorias que o setor do usuário vê, as mesmas da
+   busca. Diferente da busca, vários trechos do mesmo documento podem entrar. Ficam até
+   `CHAT_MAX_PASSAGES`, nenhum abaixo de `CHAT_MINIMUM_SCORE`. A comparação é exata, sem o índice
+   HNSW: ele filtra depois de achar os vizinhos mais próximos, e trechos de documentos em revisão ou
+   de categorias proibidas na frente esconderiam os válidos.
+3. **Sem nenhum trecho acima do limite**, a resposta é `found: false` com `sources` vazio, **sem
+   chamar o modelo**. Um usuário cujo setor não vê nenhuma categoria nem chega ao akpedia-ml.
+4. Com trechos, o akpedia-ml (`POST /api/v1/chat/answer`) escreve a resposta, marcando cada
+   afirmação com o número do trecho (`[1]`). Ele não lê o banco nem checa permissões: só vê o que
+   o server mandou.
+5. `sources` são os documentos citados, na ordem da primeira citação, montados a partir dos trechos
+   enviados: um id que o akpedia-ml devolva e não estava entre eles é descartado.
+
+`found` também volta `false` quando os trechos não respondem a pergunta. A pergunta não é gravada: a
+auditoria guarda a requisição, nunca o corpo.
+
+#### Status de erro
+
+| Situação                                                       | Status | `code`             |
+|----------------------------------------------------------------|--------|--------------------|
+| `question` ausente, em branco ou com mais de 1000 caracteres   | 400    | `invalid_request`  |
+| akpedia-ml fora do ar, além do timeout ou o modelo falhou      | 503    | `chat_unavailable` |
 
 ---
 

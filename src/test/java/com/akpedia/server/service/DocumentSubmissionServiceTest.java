@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -26,7 +25,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import com.akpedia.server.config.DefaultUserProvider;
 import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.SubmissionStatus;
 import com.akpedia.server.dto.SubmissionSummary;
@@ -37,9 +35,7 @@ import com.akpedia.server.entity.User;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
-import com.akpedia.server.exception.UserNotFoundException;
 import com.akpedia.server.repository.DocumentRepository;
-import com.akpedia.server.repository.UserRepository;
 
 /**
  * The rules of the submission listing: which status the author is shown, whose documents are
@@ -52,10 +48,6 @@ class DocumentSubmissionServiceTest {
 
     @Mock
     private DocumentRepository documents;
-    @Mock
-    private UserRepository users;
-    @Mock
-    private DefaultUserProvider defaultUser;
 
     private DocumentSubmissionService service;
     private Category category;
@@ -63,9 +55,9 @@ class DocumentSubmissionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DocumentSubmissionService(documents, users, defaultUser);
+        service = new DocumentSubmissionService(documents);
         category = new Category("Manuais", "manuais tecnicos");
-        author = new User("Ana", "ana@akpedia.test", "hash", new Sector("TI", "setor de TI"));
+        author = new User("Ana", "ana@akpedia.test", new Sector("TI", "setor de TI"));
         ReflectionTestUtils.setField(author, "id", AUTHOR_ID);
     }
 
@@ -87,7 +79,6 @@ class DocumentSubmissionServiceTest {
 
     /** Stubs the repository to answer one page holding exactly these documents. */
     private void givenSubmissions(Document... found) {
-        given(users.existsById(AUTHOR_ID)).willReturn(true);
         given(documents.findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), any()))
                 .willReturn(new PageImpl<>(List.of(found), PageRequest.of(0, 10), found.length));
     }
@@ -184,41 +175,6 @@ class DocumentSubmissionServiceTest {
     }
 
     @Test
-    @DisplayName("without a creatorId the configured default user is listed")
-    void noCreatorIdFallsBackToTheDefaultUser() {
-        given(defaultUser.userId()).willReturn(99L);
-        given(users.existsById(99L)).willReturn(true);
-        given(documents.findSubmissions(eq(99L), any(), anyBoolean(), any(), any()))
-                .willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
-
-        service.submissions(null, null, null, null);
-
-        verify(documents).findSubmissions(eq(99L), any(), anyBoolean(), any(), any());
-    }
-
-    @Test
-    @DisplayName("an explicit creatorId does not consult the default user")
-    void explicitCreatorIdIgnoresTheDefaultUser() {
-        givenSubmissions();
-
-        service.submissions(AUTHOR_ID, null, null, null);
-
-        verifyNoInteractions(defaultUser);
-    }
-
-    @Test
-    @DisplayName("a creatorId no user has answers 404 instead of an empty page")
-    void unknownCreatorIsRejected() {
-        given(users.existsById(404L)).willReturn(false);
-
-        // An empty page would read as "you have submitted nothing", which is a different answer.
-        assertThatThrownBy(() -> service.submissions(404L, null, null, null))
-                .isInstanceOf(UserNotFoundException.class);
-
-        verify(documents, never()).findSubmissions(any(), any(), anyBoolean(), any(), any());
-    }
-
-    @Test
     @DisplayName("page and size default to the first page of ten")
     void pagingDefaults() {
         givenSubmissions();
@@ -234,7 +190,6 @@ class DocumentSubmissionServiceTest {
     @Test
     @DisplayName("the requested page and size reach the query")
     void pagingIsPassedThrough() {
-        given(users.existsById(AUTHOR_ID)).willReturn(true);
         given(documents.findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), any()))
                 .willReturn(new PageImpl<>(List.of(), PageRequest.of(2, 5), 0));
 
@@ -249,7 +204,6 @@ class DocumentSubmissionServiceTest {
     @Test
     @DisplayName("the response carries the totals a screen needs to page through")
     void responseCarriesTheTotals() {
-        given(users.existsById(AUTHOR_ID)).willReturn(true);
         given(documents.findSubmissions(eq(AUTHOR_ID), any(), anyBoolean(), any(), any())).willReturn(
                 new PageImpl<>(List.of(document(1L, DocumentStatus.APPROVED, null)), PageRequest.of(1, 10), 23));
 
@@ -272,7 +226,7 @@ class DocumentSubmissionServiceTest {
         assertThatThrownBy(() -> service.submissions(AUTHOR_ID, null, DocumentSubmissionService.MAX_SIZE + 1, null))
                 .isInstanceOf(InvalidDocumentListRequestException.class);
 
-        verifyNoInteractions(documents, users, defaultUser);
+        verifyNoInteractions(documents);
     }
 
     @Test
@@ -298,7 +252,6 @@ class DocumentSubmissionServiceTest {
     @Test
     @DisplayName("categoryIds reaches the query, with hasCategories set")
     void categoryIdsReachTheQuery() {
-        given(users.existsById(AUTHOR_ID)).willReturn(true);
         given(documents.findSubmissions(eq(AUTHOR_ID), any(), eq(true), any(), any()))
                 .willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
 

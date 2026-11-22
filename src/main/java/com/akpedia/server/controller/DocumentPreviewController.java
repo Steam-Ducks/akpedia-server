@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.akpedia.server.dto.ApiErrorResponse;
 import com.akpedia.server.dto.DocumentPreview;
 import com.akpedia.server.service.DocumentPreviewService;
+import com.akpedia.server.security.CurrentUser;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -37,20 +38,23 @@ public class DocumentPreviewController {
     private static final String NOSNIFF_HEADER = "X-Content-Type-Options";
 
     private final DocumentPreviewService previewService;
+    private final CurrentUser currentUser;
 
-    public DocumentPreviewController(DocumentPreviewService previewService) {
+    public DocumentPreviewController(DocumentPreviewService previewService, CurrentUser currentUser) {
         this.previewService = previewService;
+        this.currentUser = currentUser;
     }
 
     @Operation(
             summary = "Describe a document for the in-app viewer",
             description = """
                     Answers the document's name and `page_count`, which is how many pages the viewer may ask
-                    for from `/preview/pages/{page}`. Refused exactly as the file route is: 403 when archived,
-                    409 while indexing is in flight. A document awaiting approval is served.""")
+                    for from `/preview/pages/{page}`. Refused exactly as the file route is: 403 `category_forbidden`
+                    when the caller's sector may not see the document's category, 403 when archived, 409 while
+                    indexing is in flight. A document awaiting approval is served.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "The document's name and number of pages."),
-        @ApiResponse(responseCode = "403", description = "The document is archived.",
+        @ApiResponse(responseCode = "403", description = "Category hidden from the caller's sector (`category_forbidden`), or archived (`document_archived`).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "No such document, or the document has no stored file.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -61,7 +65,7 @@ public class DocumentPreviewController {
     public ResponseEntity<DocumentPreview> describe(@PathVariable("id") Long id) {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(previewService.describe(id));
+                .body(previewService.describe(id, currentUser.viewer()));
     }
 
     @Operation(
@@ -69,11 +73,11 @@ public class DocumentPreviewController {
             description = """
                     Answers the page, counted from 1, as a PNG rendered on the server, so the viewer can show the
                     document without the PDF ever reaching the browser. `Cache-Control: no-store` keeps the
-                    image out of the browser's cache.""")
+                    image out of the browser's cache. Refused exactly as the file route is.""")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "The page as a PNG.",
                 content = @Content(mediaType = MediaType.IMAGE_PNG_VALUE, schema = @Schema(type = "string", format = "binary"))),
-        @ApiResponse(responseCode = "403", description = "The document is archived.",
+        @ApiResponse(responseCode = "403", description = "Category hidden from the caller's sector (`category_forbidden`), or archived (`document_archived`).",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "No such document, file, or page.",
                 content = @Content(mediaType = ERROR_SCHEMA, schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -82,7 +86,7 @@ public class DocumentPreviewController {
     })
     @GetMapping("/pages/{page}")
     public ResponseEntity<byte[]> page(@PathVariable("id") Long id, @PathVariable("page") int page) {
-        byte[] png = previewService.renderPage(id, page);
+        byte[] png = previewService.renderPage(id, page, currentUser.viewer());
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_PNG)
                 .contentLength(png.length)

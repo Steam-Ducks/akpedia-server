@@ -179,13 +179,14 @@ class SchemaMigrationTest {
     }
 
     @Test
-    @DisplayName("the default user has a password_hash, which the schema requires")
-    void defaultUserHasAPlaceholderPasswordHash() {
-        Object hash = entityManager.createNativeQuery(
-                        "SELECT password_hash FROM users WHERE email = 'aprovador@akpedia.local'")
+    @DisplayName("a user needs no password_hash, since Keycloak keeps the passwords")
+    void userNeedsNoPasswordHash() {
+        Object nullable = entityManager.createNativeQuery(
+                        "SELECT is_nullable FROM information_schema.columns "
+                                + "WHERE table_name = 'users' AND column_name = 'password_hash'")
                 .getSingleResult();
 
-        assertThat(hash.toString()).isNotBlank();
+        assertThat(nullable).hasToString("YES");
     }
 
     @Test

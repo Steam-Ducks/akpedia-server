@@ -14,12 +14,14 @@ import com.akpedia.server.dto.DocumentFileDescriptor;
 import com.akpedia.server.entity.Document;
 import com.akpedia.server.entity.enums.DocumentStatus;
 import com.akpedia.server.entity.enums.ProcessingStatus;
+import com.akpedia.server.exception.CategoryForbiddenException;
 import com.akpedia.server.exception.DocumentArchivedException;
 import com.akpedia.server.exception.DocumentFileNotFoundException;
 import com.akpedia.server.exception.DocumentNotFoundException;
 import com.akpedia.server.exception.DocumentNotProcessedException;
 import com.akpedia.server.repository.DocumentFileRepository;
 import com.akpedia.server.repository.DocumentRepository;
+import com.akpedia.server.security.Viewer;
 
 /**
  * Reads a stored document back out, ready to be opened in a browser.
@@ -32,6 +34,10 @@ import com.akpedia.server.repository.DocumentRepository;
  * <p>Two states are not openable: an archived document, which is out of circulation, and one
  * akpedia-ml is indexing right now. A document still waiting for approval, or whose indexing
  * <em>failed</em>, does open -- see {@link #checkIsOpenable}.
+ *
+ * <p>Before any of that, the document has to be in a category the viewer's sector may see -- see
+ * {@link CategoryAccessService#checkCanOpen}. Every route that hands out a document's content goes
+ * through {@link #describe}: the file, the viewer's page count and each page image.
  */
 @Service
 public class DocumentFileService {
@@ -44,25 +50,35 @@ public class DocumentFileService {
 
     private final DocumentRepository documents;
     private final DocumentFileRepository documentFiles;
+    private final CategoryAccessService categoryAccess;
 
-    public DocumentFileService(DocumentRepository documents, DocumentFileRepository documentFiles) {
+    public DocumentFileService(
+            DocumentRepository documents, DocumentFileRepository documentFiles, CategoryAccessService categoryAccess) {
         this.documents = documents;
         this.documentFiles = documentFiles;
+        this.categoryAccess = categoryAccess;
     }
 
     /**
-     * Describes the file of a document, refusing the states that must not be served.
+     * Describes the file of a document, refusing the viewers and the states that must not be served.
+     *
+     * <p>The category comes first, so a viewer who may not see the document learns nothing about its
+     * state. It is checked on every request, revalidations included, so a category taken away from
+     * a sector also closes the copies its users already hold in their browser cache.
      *
      * @param documentId document whose file is being opened
+     * @param viewer     who is opening it
      * @return the name, media type and validators the response should carry
      * @throws DocumentNotFoundException     if no document exists with {@code documentId}
+     * @throws CategoryForbiddenException    if the viewer's sector may not see the document's category
      * @throws DocumentArchivedException     if the document is archived
      * @throws DocumentNotProcessedException if akpedia-ml is indexing the document right now
      */
     @Transactional(readOnly = true)
-    public DocumentFileDescriptor describe(Long documentId) {
+    public DocumentFileDescriptor describe(Long documentId, Viewer viewer) {
         Document document = documents.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        categoryAccess.checkCanOpen(document, viewer);
         checkIsOpenable(document);
         return descriptorOf(document);
     }

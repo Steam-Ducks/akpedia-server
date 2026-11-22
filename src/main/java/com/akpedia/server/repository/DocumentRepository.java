@@ -34,6 +34,9 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
      * public listing, and a caller able to choose which statuses it shows is exactly how a
      * document still under review reaches someone who should not see it. The same rule, in the
      * same words, guards {@link EmbeddingRepository#search}; the two have to move together.
+     *
+     * <p>{@code categoryIds} is required for the same reason as there: it is the categories the user
+     * may see, so the list cannot be asked for without the sector rule. It must not be empty.
      */
     @Query("""
             SELECT d FROM Document d
@@ -41,10 +44,12 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
             JOIN FETCH d.creator
             WHERE d.processingStatus = :processingStatus
               AND d.status = com.akpedia.server.entity.enums.DocumentStatus.APPROVED
+              AND d.category.id IN :categoryIds
             ORDER BY COALESCE(d.updatedAt, d.createdAt) DESC, d.id DESC
             """)
     List<Document> findRecent(
             @Param("processingStatus") ProcessingStatus processingStatus,
+            @Param("categoryIds") Collection<Long> categoryIds,
             Pageable pageable);
 
     /**

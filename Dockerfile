@@ -10,7 +10,9 @@ RUN mvn -B clean package -DskipTests
 FROM eclipse-temurin:17-jre AS runtime
 WORKDIR /app
 
-RUN groupadd --system spring && useradd --system --gid spring spring
+# /app/data holds the account deletion log; a new named volume mounted there takes its owner.
+RUN groupadd --system spring && useradd --system --gid spring spring \
+    && mkdir -p /app/data && chown spring:spring /app/data
 USER spring:spring
 
 COPY --from=build /app/target/*.jar app.jar

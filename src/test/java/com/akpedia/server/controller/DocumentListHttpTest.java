@@ -13,9 +13,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -27,6 +29,7 @@ import com.akpedia.server.dto.PendingDocument;
 import com.akpedia.server.dto.PendingDocument.CategoryRef;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.InvalidDocumentListRequestException;
+import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.service.DocumentAnalysisService;
 import com.akpedia.server.service.DocumentFileService;
 import com.akpedia.server.service.DocumentListService;
@@ -34,6 +37,8 @@ import com.akpedia.server.service.DocumentSubmissionService;
 import com.akpedia.server.service.DocumentUploadService;
 
 @WebMvcTest(controllers = DocumentController.class)
+// The endpoint is under test, not who may call it: SecurityConfigTest covers that.
+@AutoConfigureMockMvc(addFilters = false)
 @Import(ApiExceptionHandler.class)
 class DocumentListHttpTest {
 
@@ -57,10 +62,20 @@ class DocumentListHttpTest {
     @MockBean
     private DocumentAnalysisService analysisService;
 
+    @MockBean
+    private CurrentUser currentUser;
+
+    private static final long USER_ID = 20L;
+
+    @BeforeEach
+    void logIn() {
+        given(currentUser.id()).willReturn(USER_ID);
+    }
+
     @Test
     @DisplayName("GET /api/v1/documents answers each document with the eight agreed fields")
     void documentCarriesTheAgreedFormat() throws Exception {
-        given(listService.recent(null)).willReturn(List.of(new DocumentSummary(
+        given(listService.recent(null, USER_ID)).willReturn(List.of(new DocumentSummary(
                 7L, "manual.pdf", null, "application/pdf", "Manuais", "Mariana Costa", UPDATED_AT,
                 "Manual de teste do akpedia.")));
 
@@ -80,7 +95,7 @@ class DocumentListHttpTest {
     @Test
     @DisplayName("the limit is handed to the service")
     void limitIsPassedOn() throws Exception {
-        given(listService.recent(3)).willReturn(List.of());
+        given(listService.recent(3, USER_ID)).willReturn(List.of());
 
         mvc.perform(get("/api/v1/documents").param("limit", "3"))
                 .andExpect(status().isOk())
@@ -90,7 +105,7 @@ class DocumentListHttpTest {
     @Test
     @DisplayName("an invalid limit answers 400 with the error body")
     void invalidLimitIsABadRequest() throws Exception {
-        given(listService.recent(0)).willThrow(new InvalidDocumentListRequestException("limit must be between 1 and 50."));
+        given(listService.recent(0, USER_ID)).willThrow(new InvalidDocumentListRequestException("limit must be between 1 and 50."));
 
         mvc.perform(get("/api/v1/documents").param("limit", "0"))
                 .andExpect(status().isBadRequest())

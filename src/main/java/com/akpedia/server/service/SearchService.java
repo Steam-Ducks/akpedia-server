@@ -5,7 +5,10 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -14,21 +17,18 @@ import com.akpedia.server.client.EmbeddingClient;
 import com.akpedia.server.config.SearchProperties;
 import com.akpedia.server.dto.QueryEmbeddingResponse;
 import com.akpedia.server.dto.SearchResult;
-import com.akpedia.server.entity.Embedding;
-import com.akpedia.server.exception.EmbeddingException;
 import com.akpedia.server.exception.InvalidSearchRequestException;
 import com.akpedia.server.repository.EmbeddingRepository;
 
-/** Coordinates query embedding and document similarity search. */
+/**
+ * Coordinates query embedding and document similarity search.
+ *
+ * <p>Only the categories the user's sector may see are searched: the categories asked for are
+ * narrowed to those, and with none asked for, those are the filter. When nothing is left, the
+ * answer is an empty list, without paying for a query embedding.
+ */
 @Service
 public class SearchService {
-
-    /**
-     * Stands in for {@code categoryIds} when there is no category filter, since the native query
-     * still needs a non-empty list to bind -- an empty {@code IN ()} is invalid SQL, and
-     * {@code hasCategories = false} keeps it from ever being reached.
-     */
-    private static final List<Long> NO_CATEGORY_FILTER = List.of(-1L);
 
     /** Column positions of the similarity query, in the order it selects them. */
     private static final int DOCUMENT_ID = 0;
@@ -45,44 +45,75 @@ public class SearchService {
     private final EmbeddingClient embeddingClient;
     private final EmbeddingRepository embeddings;
     private final SearchProperties properties;
+    private final CategoryAccessService categoryAccess;
 
     public SearchService(
             EmbeddingClient embeddingClient,
             EmbeddingRepository embeddings,
-            SearchProperties properties) {
+            SearchProperties properties,
+            CategoryAccessService categoryAccess) {
         this.embeddingClient = embeddingClient;
         this.embeddings = embeddings;
         this.properties = properties;
+        this.categoryAccess = categoryAccess;
     }
 
-    public List<SearchResult> search(String query, Collection<Long> categoryIds, Integer requestedLimit) {
+    /**
+     * Searches by text, by category, or both, among the categories the user may see.
+     *
+     * @param query          search text; may be blank when {@code categoryIds} is given
+     * @param categoryIds    categories to narrow to; a category the user may not see is dropped
+     *                       rather than refused, so the answer is the same as if it held no documents
+     * @param requestedLimit how many results at most; the configured default when null
+     * @param userId         who is searching
+     * @throws InvalidSearchRequestException if neither text nor categories were given, or the limit is out of range
+     */
+    public List<SearchResult> search(String query, Collection<Long> categoryIds, Integer requestedLimit, Long userId) {
         boolean hasQuery = query != null && !query.isBlank();
         boolean hasCategories = categoryIds != null && !categoryIds.isEmpty();
         validateRequest(hasQuery, hasCategories);
         int limit = normalizeLimit(requestedLimit);
-        Collection<Long> safeCategoryIds = hasCategories ? categoryIds : NO_CATEGORY_FILTER;
+
+        Set<Long> searchable = searchableCategories(categoryIds, hasCategories, userId);
+        if (searchable.isEmpty()) {
+            return List.of();
+        }
 
         if (!hasQuery) {
-            return embeddings.searchRecentByCategory(hasCategories, safeCategoryIds, limit)
+            return embeddings.searchRecentByCategory(searchable, limit)
                     .stream()
                     .map(this::toResult)
                     .toList();
         }
 
         QueryEmbeddingResponse embedding = embeddingClient.embedQuery(query.trim());
-        validateEmbedding(embedding);
+        QueryVectors.validate(embedding);
 
         return embeddings.search(
-                        vectorLiteral(embedding.embedding()),
+                        QueryVectors.literal(embedding.embedding()),
                         embedding.model().name(),
                         embedding.model().dimensions(),
                         properties.minimumScore(),
-                        hasCategories,
-                        safeCategoryIds,
+                        searchable,
                         limit)
                 .stream()
                 .map(this::toResult)
                 .toList();
+    }
+
+    /**
+     * The categories the user may see, narrowed to the ones they asked for when they asked for any.
+     * Read on every search, so a change to the sector's categories applies from the next one.
+     */
+    private Set<Long> searchableCategories(Collection<Long> requested, boolean hasCategories, Long userId) {
+        Set<Long> allowed = categoryAccess.allowedCategoryIds(userId);
+        if (!hasCategories) {
+            return allowed;
+        }
+        return requested.stream()
+                .filter(Objects::nonNull)
+                .filter(allowed::contains)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     private int normalizeLimit(Integer requestedLimit) {
@@ -98,26 +129,6 @@ public class SearchService {
         if (!hasQuery && !hasCategories) {
             throw new InvalidSearchRequestException("q or categoryIds must be present.");
         }
-    }
-
-    private static void validateEmbedding(QueryEmbeddingResponse response) {
-        if (response == null || response.model() == null || response.embedding() == null) {
-            throw new EmbeddingException("The embedding service returned an incomplete query vector.");
-        }
-        if (response.model().dimensions() != Embedding.VECTOR_DIMENSIONS
-                || response.embedding().size() != Embedding.VECTOR_DIMENSIONS) {
-            throw new EmbeddingException(
-                    "The query vector dimensions do not match the indexed vectors.");
-        }
-        if (response.model().name() == null || response.model().name().isBlank()) {
-            throw new EmbeddingException("The query vector has no model name.");
-        }
-    }
-
-    private static String vectorLiteral(List<Float> values) {
-        return values.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(",", "[", "]"));
     }
 
     /**

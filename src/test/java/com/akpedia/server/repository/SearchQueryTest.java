@@ -76,7 +76,7 @@ class SearchQueryTest {
      */
     private Object[] rowOfTestDocument() {
         List<Object[]> rows = embeddingRepository.search(
-                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, false, List.of(-1L), 100);
+                queryVector(), MODEL, Embedding.VECTOR_DIMENSIONS, ACCEPT_ANY_SCORE, List.of(category.getId()), 100);
 
         return rows.stream()
                 .filter(row -> ((Number) row[0]).longValue() == document.getId())
@@ -112,7 +112,7 @@ class SearchQueryTest {
     @Test
     @DisplayName("the recent-by-category row carries the same ten columns, with a null score")
     void recentByCategoryRowCarriesEveryColumnInOrderWithNoScore() {
-        List<Object[]> rows = embeddingRepository.searchRecentByCategory(false, List.of(-1L), 100);
+        List<Object[]> rows = embeddingRepository.searchRecentByCategory(List.of(category.getId()), 100);
         Object[] row = rows.stream()
                 .filter(candidate -> ((Number) candidate[0]).longValue() == document.getId())
                 .findFirst()
