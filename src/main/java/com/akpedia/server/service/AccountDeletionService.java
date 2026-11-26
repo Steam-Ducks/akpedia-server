@@ -52,6 +52,7 @@ public class AccountDeletionService {
     private final AuditLogRepository auditLogs;
     private final ProfileChangeRequestRepository changeRequests;
     private final BreachNoticeRecipientRepository breachRecipients;
+    private final OptionalPermissionService optionalPermissions;
     private final AuditService audit;
     private final TransactionTemplate transaction;
     private final Clock clock;
@@ -59,22 +60,24 @@ public class AccountDeletionService {
     @Autowired
     public AccountDeletionService(AccountDeletionLog deletions, KeycloakAdminClient keycloak,
             UserRepository users, AuditLogRepository auditLogs, ProfileChangeRequestRepository changeRequests,
-            BreachNoticeRecipientRepository breachRecipients, AuditService audit,
-            PlatformTransactionManager transactionManager) {
-        this(deletions, keycloak, users, auditLogs, changeRequests, breachRecipients, audit, transactionManager,
+            BreachNoticeRecipientRepository breachRecipients, OptionalPermissionService optionalPermissions,
+            AuditService audit, PlatformTransactionManager transactionManager) {
+        this(deletions, keycloak, users, auditLogs, changeRequests, breachRecipients, optionalPermissions, audit,
+                transactionManager,
                 Clock.systemUTC());
     }
 
     AccountDeletionService(AccountDeletionLog deletions, KeycloakAdminClient keycloak,
             UserRepository users, AuditLogRepository auditLogs, ProfileChangeRequestRepository changeRequests,
-            BreachNoticeRecipientRepository breachRecipients, AuditService audit,
-            PlatformTransactionManager transactionManager, Clock clock) {
+            BreachNoticeRecipientRepository breachRecipients, OptionalPermissionService optionalPermissions,
+            AuditService audit, PlatformTransactionManager transactionManager, Clock clock) {
         this.deletions = deletions;
         this.keycloak = keycloak;
         this.users = users;
         this.auditLogs = auditLogs;
         this.changeRequests = changeRequests;
         this.breachRecipients = breachRecipients;
+        this.optionalPermissions = optionalPermissions;
         this.audit = audit;
         this.transaction = new TransactionTemplate(transactionManager);
         this.clock = clock;
@@ -142,6 +145,8 @@ public class AccountDeletionService {
             changeRequests.clearDecidedBy(anonymized);
             // The breach notices stay as the record that the user was notified, without the address.
             users.findById(anonymized).ifPresent(row -> breachRecipients.replaceEmailOf(row.getId(), row.getEmail()));
+            // Everything the user had opted in to is turned off.
+            optionalPermissions.revokeAll(anonymized);
         }
         auditLogs.stripTargetEmail(keycloakId);
         for (String email : emails) {

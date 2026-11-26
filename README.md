@@ -384,6 +384,34 @@ Keycloak. Quem escreve e publica os termos é o admin, pelo front; o termo nativ
   só (migration `V14`): aceitar de novo devolve o primeiro aceite.
   Aceite, recusa e publicação também vão para a [auditoria](#auditoria).
 
+#### Permissões opcionais
+
+O que o usuário pode permitir sem ser obrigado, como na PoC do Keycloak (por exemplo **E-mails sobre
+novidades**, **Newsletter mensal**, **Análise de uso**). Elas **fazem parte dos termos de uso**: cada
+versão dos termos traz as suas (`terms_versions.optional_permissions`, migration
+`V18__optional_permissions.sql`), então adicionar, alterar ou remover uma é publicar uma nova versão,
+que todos aceitam de novo. Diferente dos termos, recusar nunca limita o que o usuário pode fazer.
+
+| Rota | Quem | O que faz |
+|------|------|-----------|
+| `POST /api/v1/admin/terms` | `ADMIN` | além de `title` e `content`, `optional_permissions: [{id?, label, description}]`. Com `id`, mantém uma permissão da versão atual (as escolhas seguem o id); sem, o servidor cria um id novo a partir do nome, nunca um já usado. **400** `invalid_request` para um `id` que não está na versão atual ou repetido |
+| `GET /api/v1/terms`, `GET /api/v1/admin/terms` | | cada versão vem com `optional_permissions: [{id, label, description}]` |
+| `POST /api/v1/terms/accept` | qualquer usuário logado | além de `version`, `optional_permissions: {"<id>": true\|false}`. As que ficarem de fora valem como não permitidas |
+| `GET /api/v1/optional-permissions` | qualquer usuário logado | `{version, published_at, permissions}`: as permissões da versão atual dos termos, cada uma com `granted`, `decided`, `decided_at` e `change` (`new`, `changed` ou `null`, comparando com a versão anterior) |
+| `PUT /api/v1/optional-permissions/{id}` | qualquer usuário logado | `{"granted": true\|false, "version": "2.0"}`, a versão dos termos que o usuário viu. **409** `optional_permissions_changed` se não for mais a atual; **404** `optional_permission_not_found` se ela não tiver essa permissão |
+| `GET /api/v1/admin/optional-permissions` | `ADMIN` | as permissões da versão atual com `granted_users` (quem permitiu nesta versão, por exemplo para quem mandar os e-mails de novidades) |
+| `GET /api/v1/admin/terms/history` | `ADMIN` | o que cada usuário fez com cada versão, paginado (`version`, `user`, `page`, `size`): `accepted`, `updated` (mudou uma permissão opcional em Minha conta) ou `declined` |
+| `GET /api/v1/admin/terms/history/{action}/{id}` | `ADMIN` | um registro do histórico com as permissões opcionais da sua versão, como estavam logo antes (`granted_before`) e logo depois (`granted_after`); **404** se não existir |
+
+- **Opt-in**: tudo começa desmarcado; o usuário escolhe na tela de aceite dos termos e pode mudar a
+  qualquer momento em Minha conta.
+- **Por versão**: uma escolha só vale na versão dos termos em que foi feita. Cada nova versão
+  começa com tudo desligado até o usuário aceitá-la.
+- **Histórico**: `optional_permission_choices` só recebe inserções, então sempre dá para ver quem
+  permitiu o quê, em qual versão e quando. Cada mudança vai também para a auditoria
+  (`OPTIONAL_PERMISSION_CHOSEN`).
+- **Exclusão de conta**: tudo o que o usuário tinha permitido é desligado.
+
 #### Usuários (admin)
 
 A tela de usuários do admin lê e altera as contas no próprio Keycloak, pela Admin API, com a

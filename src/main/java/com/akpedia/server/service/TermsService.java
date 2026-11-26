@@ -3,6 +3,7 @@ package com.akpedia.server.service;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -12,6 +13,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.akpedia.server.dto.OptionalPermission;
 import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PublishTermsRequest;
 import com.akpedia.server.dto.TermsAcceptanceEntry;
@@ -51,13 +53,15 @@ public class TermsService {
     private final TermsAcceptanceRepository acceptances;
     private final UserRepository users;
     private final AuditService audit;
+    private final OptionalPermissionService optionalPermissions;
 
     public TermsService(TermsVersionRepository versions, TermsAcceptanceRepository acceptances,
-            UserRepository users, AuditService audit) {
+            UserRepository users, AuditService audit, OptionalPermissionService optionalPermissions) {
         this.versions = versions;
         this.acceptances = acceptances;
         this.users = users;
         this.audit = audit;
+        this.optionalPermissions = optionalPermissions;
     }
 
     /** The current terms and what the user with this Keycloak account id accepted last. */
@@ -96,6 +100,17 @@ public class TermsService {
      */
     @Transactional
     public TermsAcceptanceResponse accept(Long userId, String version) {
+        return accept(userId, version, Map.of());
+    }
+
+    /**
+     * Records that the user accepted {@code version}, with their choice for each of its optional
+     * permissions (any left out is not allowed).
+     *
+     * @throws TermsChangedException as {@link #accept(Long, String)}
+     */
+    @Transactional
+    public TermsAcceptanceResponse accept(Long userId, String version, Map<String, Boolean> optional) {
         TermsVersion current = versions.findFirstByOrderByPublishedAtDescIdDesc()
                 .orElseThrow(() -> new TermsChangedException(version, null));
         // Versions are unique in any case, so this cannot match another one.
@@ -109,6 +124,7 @@ public class TermsService {
         }
         TermsAcceptance acceptance = acceptances.saveAndFlush(
                 new TermsAcceptance(users.getReferenceById(userId), current));
+        optionalPermissions.recordAcceptance(userId, current, optional);
         audit.record(userId, AuditService.TERMS_ACCEPTED, AuditService.TERMS_VERSION, current.getId(),
                 AuditService.details("version", current.getVersion()));
         return toResponse(acceptance);
@@ -179,8 +195,9 @@ public class TermsService {
         }
         TermsVersion terms;
         try {
-            terms = versions.saveAndFlush(new TermsVersion(
-                    version, request.title().strip(), request.content().strip(), users.getReferenceById(publisherId)));
+            terms = versions.saveAndFlush(new TermsVersion(version, request.title().strip(), request.content().strip(),
+                    OptionalPermission.toJson(optionalPermissions.forNewVersion(request.optionalPermissionsOrEmpty())),
+                    users.getReferenceById(publisherId)));
         } catch (DataIntegrityViolationException e) {
             // Only without the lock (a version added straight to the database): the unique indexes caught it.
             if (String.valueOf(e.getMostSpecificCause().getMessage()).contains("uq_terms_versions_version")) {

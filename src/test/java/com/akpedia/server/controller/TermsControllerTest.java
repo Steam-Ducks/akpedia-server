@@ -28,15 +28,20 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.akpedia.server.dto.PageResponse;
 import com.akpedia.server.dto.PublishTermsRequest;
 import com.akpedia.server.dto.TermsAcceptanceResponse;
+import com.akpedia.server.dto.TermsHistoryDetail;
+import com.akpedia.server.dto.TermsHistoryEntry;
 import com.akpedia.server.dto.TermsStatusResponse;
 import com.akpedia.server.dto.TermsVersionResponse;
 import com.akpedia.server.exception.ApiExceptionHandler;
 import com.akpedia.server.exception.TermsChangedException;
+import com.akpedia.server.exception.TermsHistoryEntryNotFoundException;
 import com.akpedia.server.exception.TermsVersionExistsException;
 import com.akpedia.server.security.CurrentUser;
 import com.akpedia.server.security.ProvisionedUser;
+import com.akpedia.server.service.TermsHistoryService;
 import com.akpedia.server.service.TermsService;
 
 @WebMvcTest(controllers = TermsController.class)
@@ -54,6 +59,9 @@ class TermsControllerTest {
 
     @MockBean
     private TermsService terms;
+
+    @MockBean
+    private TermsHistoryService termsHistory;
 
     @MockBean
     private CurrentUser currentUser;
@@ -100,7 +108,7 @@ class TermsControllerTest {
     @Test
     @DisplayName("POST /terms/accept records the acceptance for the logged-in user")
     void acceptRecordsForCurrentUser() throws Exception {
-        given(terms.accept(USER_ID, "2.0")).willReturn(new TermsAcceptanceResponse("2.0", PUBLISHED_AT));
+        given(terms.accept(USER_ID, "2.0", java.util.Map.of())).willReturn(new TermsAcceptanceResponse("2.0", PUBLISHED_AT));
 
         mvc.perform(post("/api/v1/terms/accept").contentType(MediaType.APPLICATION_JSON).content("{\"version\": \"2.0\"}"))
                 .andExpect(status().isOk())
@@ -111,7 +119,7 @@ class TermsControllerTest {
     @Test
     @DisplayName("POST /terms/accept answers 409 terms_changed for a version that is not current")
     void acceptOldVersionIsConflict() throws Exception {
-        given(terms.accept(USER_ID, "1.0")).willThrow(new TermsChangedException("1.0", "2.0"));
+        given(terms.accept(USER_ID, "1.0", java.util.Map.of())).willThrow(new TermsChangedException("1.0", "2.0"));
 
         mvc.perform(post("/api/v1/terms/accept").contentType(MediaType.APPLICATION_JSON).content("{\"version\": \"1.0\"}"))
                 .andExpect(status().isConflict())
@@ -124,7 +132,7 @@ class TermsControllerTest {
         mvc.perform(post("/api/v1/terms/accept").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"));
-        verify(terms, never()).accept(anyLong(), anyString());
+        verify(terms, never()).accept(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
@@ -189,5 +197,42 @@ class TermsControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("terms_version_exists"))
                 .andExpect(jsonPath("$.message").value("Já existe a versão 1.0. Recarregue a página e publique de novo."));
+    }
+
+    @Test
+    @DisplayName("GET /admin/terms/history answers the page with each entry's action")
+    void historyAnswersThePage() throws Exception {
+        TermsHistoryEntry entry = new TermsHistoryEntry(TermsHistoryEntry.UPDATED, 9L, "2.0", 3L, "Ana Souza",
+                "ana@akaer.com", PUBLISHED_AT);
+        given(termsHistory.search("2.0", "ana", 1, 10)).willReturn(new PageResponse<>(List.of(entry), 1, 10, 11, 2));
+
+        mvc.perform(get("/api/v1/admin/terms/history?version=2.0&user=ana&page=1&size=10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].action").value("updated"))
+                .andExpect(jsonPath("$.content[0].id").value(9))
+                .andExpect(jsonPath("$.content[0].user_name").value("Ana Souza"))
+                .andExpect(jsonPath("$.content[0].user_email").value("ana@akaer.com"))
+                .andExpect(jsonPath("$.content[0].at").value(startsWith("2026-11-06T12:00:00")))
+                .andExpect(jsonPath("$.total_pages").value(2));
+    }
+
+    @Test
+    @DisplayName("GET /admin/terms/history/{action}/{id} answers the permissions before and after, or 404")
+    void historyEntryAnswersThePermissions() throws Exception {
+        given(termsHistory.detail("accepted", 7L)).willReturn(new TermsHistoryDetail("accepted", 7L, "2.0",
+                "Ana Souza", "ana@akaer.com", PUBLISHED_AT, List.of(
+                        new TermsHistoryDetail.Permission("newsletter", "Newsletter", "E-mails", true, false, false),
+                        new TermsHistoryDetail.Permission("analise", "Análise", "Métricas", false, null, false))));
+        given(termsHistory.detail("declined", 8L)).willThrow(new TermsHistoryEntryNotFoundException("declined", 8L));
+
+        mvc.perform(get("/api/v1/admin/terms/history/accepted/7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.permissions[0].granted_before").value(true))
+                .andExpect(jsonPath("$.permissions[0].granted_after").value(false))
+                .andExpect(jsonPath("$.permissions[1].granted_after").value(nullValue()))
+                .andExpect(jsonPath("$.permissions[1].changed").value(false));
+        mvc.perform(get("/api/v1/admin/terms/history/declined/8"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("terms_history_entry_not_found"));
     }
 }
