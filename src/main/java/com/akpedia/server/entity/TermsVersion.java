@@ -35,6 +35,10 @@ public class TermsVersion {
     @Column(name = "content", nullable = false, columnDefinition = "text", updatable = false)
     private String content;
 
+    /** The optional permissions of this version, as JSON: {@code [{id, label, description}]}. */
+    @Column(name = "optional_permissions", nullable = false, columnDefinition = "text", updatable = false)
+    private String optionalPermissions = "[]";
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "published_by_id", updatable = false)
     private User publishedBy;
@@ -54,6 +58,11 @@ public class TermsVersion {
         this.publishedBy = publishedBy;
     }
 
+    public TermsVersion(String version, String title, String content, String optionalPermissions, User publishedBy) {
+        this(version, title, content, publishedBy);
+        this.optionalPermissions = optionalPermissions;
+    }
+
     public Long getId() {
         return id;
     }
@@ -68,6 +77,10 @@ public class TermsVersion {
 
     public String getContent() {
         return content;
+    }
+
+    public String getOptionalPermissions() {
+        return optionalPermissions;
     }
 
     /** Admin who published it; {@code null} for a version added straight to the database. */

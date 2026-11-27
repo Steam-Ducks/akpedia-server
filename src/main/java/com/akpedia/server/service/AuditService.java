@@ -64,6 +64,7 @@ public class AuditService {
     public static final String PROFILE_CHANGE_REJECTED = "PROFILE_CHANGE_REJECTED";
     public static final String SECTOR_CATEGORIES_CHANGED = "SECTOR_CATEGORIES_CHANGED";
     public static final String BREACH_NOTICE_SENT = "BREACH_NOTICE_SENT";
+    public static final String OPTIONAL_PERMISSION_CHOSEN = "OPTIONAL_PERMISSION_CHOSEN";
 
     public static final String TERMS_VERSION = "TERMS_VERSION";
     public static final String DOCUMENT = "DOCUMENT";

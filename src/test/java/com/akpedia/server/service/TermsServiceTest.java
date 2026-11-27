@@ -29,12 +29,13 @@ import com.akpedia.server.entity.TermsVersion;
 import com.akpedia.server.exception.InvalidPageRequestException;
 import com.akpedia.server.exception.TermsChangedException;
 import com.akpedia.server.repository.AuditLogRepository;
+import com.akpedia.server.repository.OptionalPermissionChoiceRepository;
 import com.akpedia.server.repository.TermsAcceptanceRepository;
 import com.akpedia.server.repository.TermsVersionRepository;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({TermsService.class, AuditService.class, AccountDeletionLog.class})
+@Import({TermsService.class, AuditService.class, AccountDeletionLog.class, OptionalPermissionService.class})
 class TermsServiceTest {
 
     @Autowired
@@ -45,6 +46,9 @@ class TermsServiceTest {
 
     @Autowired
     private TermsAcceptanceRepository acceptances;
+
+    @Autowired
+    private OptionalPermissionChoiceRepository optionalChoices;
 
     @Autowired
     private AuditLogRepository auditLogs;
@@ -58,6 +62,7 @@ class TermsServiceTest {
     @BeforeEach
     void setUp() {
         // Starts from no terms at all, whatever the dev database holds; the test's rollback puts it back.
+        optionalChoices.deleteAllInBatch();
         acceptances.deleteAllInBatch();
         versions.deleteAllInBatch();
 

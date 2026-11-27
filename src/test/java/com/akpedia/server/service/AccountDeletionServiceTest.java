@@ -63,7 +63,7 @@ import com.akpedia.server.security.UserProvisioningService;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({AccountDeletionService.class, AccountDeletionReplay.class, AccountDeletionLog.class,
-    AuditService.class, UserProvisioningService.class})
+    AuditService.class, UserProvisioningService.class, OptionalPermissionService.class})
 @TestPropertySource(properties = {
     "akpedia.account-deletion.log-file=target/test-account-deletions/${random.uuid}.jsonl",
     "akpedia.account-deletion.replay-on-startup=false"})

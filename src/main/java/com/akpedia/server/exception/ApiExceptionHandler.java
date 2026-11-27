@@ -305,6 +305,33 @@ public class ApiExceptionHandler {
                 .body(new ApiErrorResponse("user_not_found", e.getMessage()));
     }
 
+    /** 409: the user chose for a version of the terms that is no longer the current one. */
+    @ExceptionHandler(OptionalPermissionsChangedException.class)
+    public ResponseEntity<ApiErrorResponse> handleOptionalPermissionsChanged(OptionalPermissionsChangedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorResponse("optional_permissions_changed", e.getMessage()));
+    }
+
+    /** 404: the current terms have no optional permission with that id. */
+    @ExceptionHandler(OptionalPermissionNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleOptionalPermissionNotFound(OptionalPermissionNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("optional_permission_not_found", e.getMessage()));
+    }
+
+    /** 404: no entry of the terms history with that action and id. */
+    @ExceptionHandler(TermsHistoryEntryNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleTermsHistoryEntryNotFound(TermsHistoryEntryNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("terms_history_entry_not_found", e.getMessage()));
+    }
+
+    /** 400: the optional permissions of a new version of the terms are invalid. */
+    @ExceptionHandler(InvalidOptionalPermissionException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidOptionalPermission(InvalidOptionalPermissionException e) {
+        return ResponseEntity.badRequest().body(new ApiErrorResponse("invalid_request", e.getMessage()));
+    }
+
     /** 409: the user accepted a version of the terms that is no longer the current one. */
     @ExceptionHandler(TermsChangedException.class)
     public ResponseEntity<ApiErrorResponse> handleTermsChanged(TermsChangedException e) {
